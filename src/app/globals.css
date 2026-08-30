@@ -1,0 +1,91 @@
+/* Google Fonts: Handwriting/Script Styles */
+@import url("https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Indie+Flower&family=Fredoka+One&family=Playwrite+GB+S:ital@0;1&family=Caveat+Brush&family=Comfortaa:wght@400;700&family=Satisfy&family=Pacifico&family=Sacramento&family=Dancing+Script:wght@400;700&family=Quicksand:wght@400;700&family=Varela+Round&family=Nunito:wght@400;700&display=swap");
+@import "tailwindcss";
+
+:root {
+  /* 手寫體字體家族 */
+  --font-caveat: "Caveat", cursive;
+  --font-indie: "Indie Flower", cursive;
+  --font-fredoka: "Fredoka One", cursive;
+  --font-playwrite: "Playwrite GB S", cursive;
+  --font-brush: "Caveat Brush", cursive;
+  --font-comfortaa: "Comfortaa", cursive;
+  --font-satisfy: "Satisfy", cursive;
+  --font-pacifico: "Pacifico", cursive;
+  --font-sacramento: "Sacramento", cursive;
+  --font-dancing: "Dancing Script", cursive;
+  --font-quicksand: "Quicksand", sans-serif;
+  --font-varela: "Varela Round", sans-serif;
+}
+
+/* ===== 響應式 / 各裝置適配 ===== */
+
+/* 全高：優先用動態視窗高，手機瀏覽器工具列展開/收合時不會被裁切 */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  width: 100dvw;
+}
+
+/* 安全區（瀏海、Home indicator） */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Modal 在小螢幕改為全螢幕貼合 + 安全區 */
+.modal-frame {
+  max-height: 100dvh;
+}
+
+/* 觸控裝置：加大可點區、隱藏 hover-only 元素改為常駐 */
+@media (hover: none) and (pointer: coarse) {
+  .touch-target { min-height: 40px; min-width: 40px; }
+  .show-on-hover { opacity: 1 !important; }
+}
+
+/* 隱藏水平捲軸但仍可捲動（工具列/頁籤橫向溢出時） */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* 小螢幕縮小 KaTeX，避免長公式撐爆卡片 */
+@media (max-width: 640px) {
+  .katex { font-size: 0.95em; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; }
+}
+
+/* 背景自訂預設值 */
+.bg-solid { background-attachment: scroll; }
+.bg-gradient-warm {
+  background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+}
+.bg-gradient-cool {
+  background: linear-gradient(135deg, #e0f7ff 0%, #b3e5fc 100%);
+}
+.bg-gradient-forest {
+  background: linear-gradient(135deg, #1b3a42 0%, #265359 100%);
+}
+.bg-gradient-sunset {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ffbe0b 100%);
+}
+.bg-gradient-ocean {
+  background: linear-gradient(135deg, #0066cc 0%, #00ccff 100%);
+}
+.bg-pattern-dots {
+  background-image: radial-gradient(circle, #cbd5e1 1.5px, transparent 1.5px);
+  background-size: 20px 20px;
+}
+.bg-pattern-grid {
+  background-image: 
+    linear-gradient(#e5e7eb 1px, transparent 1px),
+    linear-gradient(90deg, #e5e7eb 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.bg-pattern-lines {
+  background-image: repeating-linear-gradient(
+    45deg,
+    #f3f4f6,
+    #f3f4f6 10px,
+    #ffffff 10px,
+    #ffffff 20px
+  );
+}
