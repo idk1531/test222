@@ -34,7 +34,7 @@ jobs:
         env:
           STATIC_EXPORT: "1"
           NEXT_BASE_PATH: "/${{ github.event.repository.name }}"
-        run: npm run export
+        run: npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
