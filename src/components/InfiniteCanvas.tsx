@@ -155,88 +155,59 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     }
   };
 
-  // ===== 觸控支援：單指平移空白畫布、雙指縮放 =====
-  const touchState = useRef<{
-    mode: "none" | "pan" | "pinch";
-    startX: number;
-    startY: number;
+  // ===== 統一互動系統：Pointer Events（滑鼠 / 觸控 / 手寫筆共用）=====
+  // 互動狀態放在 ref，避免 React 狀態批次更新造成拖曳延遲或中斷
+  type InteractionMode = "none" | "pan" | "marquee" | "drag" | "pinch";
+  const interaction = useRef<{
+    mode: InteractionMode;
+    pointerId: number | null;
+    startClientX: number;
+    startClientY: number;
     startPanX: number;
     startPanY: number;
     startDist: number;
     startZoom: number;
-    isCanvasBg: boolean;
+    startMidX: number;
+    startMidY: number;
+    dragIds: string[];
+    initialPositions: Record<string, { x: number; y: number }>;
+    moved: boolean;
   }>({
     mode: "none",
-    startX: 0, startY: 0, startPanX: 0, startPanY: 0,
-    startDist: 0, startZoom: 1, isCanvasBg: false,
+    pointerId: null,
+    startClientX: 0,
+    startClientY: 0,
+    startPanX: 0,
+    startPanY: 0,
+    startDist: 0,
+    startZoom: 1,
+    startMidX: 0,
+    startMidY: 0,
+    dragIds: [],
+    initialPositions: {},
+    moved: false,
   });
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    const targetEl = e.target as HTMLElement;
-    const onBg = targetEl.id === "canvas-bg" || targetEl === containerRef.current;
+  // 追蹤同時按下的指標（用於雙指縮放）
+  const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map());
 
-    if (e.touches.length === 2) {
-      const [a, b] = [e.touches[0], e.touches[1]];
-      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-      touchState.current = {
-        ...touchState.current,
-        mode: "pinch",
-        startDist: dist,
-        startZoom: zoom,
-        startPanX: pan.x,
-        startPanY: pan.y,
-        startX: (a.clientX + b.clientX) / 2,
-        startY: (a.clientY + b.clientY) / 2,
-      };
-    } else if (e.touches.length === 1 && onBg) {
-      // 只有在空白畫布上單指才平移（避免影響拖曳卡片）
-      const t = e.touches[0];
-      touchState.current = {
-        ...touchState.current,
-        mode: "pan",
-        startX: t.clientX,
-        startY: t.clientY,
-        startPanX: pan.x,
-        startPanY: pan.y,
-        isCanvasBg: true,
-      };
-    }
-  };
+  // 最新值 ref：讓 window 事件處理器讀到即時值，不受閉包快照影響
+  const latest = useRef({ zoom, pan, objects, snapToGrid, snapToObjects, gridSize });
+  useEffect(() => {
+    latest.current = { zoom, pan, objects, snapToGrid, snapToObjects, gridSize };
+  }, [zoom, pan, objects, snapToGrid, snapToObjects, gridSize]);
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    const st = touchState.current;
-    if (st.mode === "pinch" && e.touches.length === 2) {
-      const [a, b] = [e.touches[0], e.touches[1]];
-      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-      const ratio = dist / (st.startDist || 1);
-      const newZoom = Math.min(2.5, Math.max(0.2, st.startZoom * ratio));
-      setZoom(newZoom);
-    } else if (st.mode === "pan" && e.touches.length === 1) {
-      const t = e.touches[0];
-      setPan({
-        x: st.startPanX + (t.clientX - st.startX),
-        y: st.startPanY + (t.clientY - st.startY),
-      });
-    }
-  };
-
-  const handleTouchEnd = () => {
-    touchState.current.mode = "none";
-  };
-
-  // Track spacebar for panning
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (e.code === "Space" && tag !== "INPUT" && tag !== "TEXTAREA") {
         setIsSpacePressed(true);
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        setIsSpacePressed(false);
-      }
+      if (e.code === "Space") setIsSpacePressed(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
@@ -246,190 +217,301 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
     };
   }, []);
 
-  // Start Canvas Pan or Marquee
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.target !== containerRef.current && (e.target as HTMLElement).id !== "canvas-bg") {
-      return;
-    }
+  /** 計算拖曳位移（含 Canva 智慧吸附與網格吸附） */
+  const computeDragUpdates = (clientX: number, clientY: number) => {
+    const st = interaction.current;
+    const { zoom: z, objects: objs, snapToObjects: snapObj, snapToGrid: snapGrid, gridSize: gs } = latest.current;
 
-    if (e.button === 1 || isSpacePressed || e.altKey) {
-      // Middle click or space+click -> Pan
-      setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-    } else if (e.button === 0) {
-      // Left click on empty space -> start selection marquee
-      setSelectedIds([]);
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const mouseCanvasX = (e.clientX - rect.left - pan.x) / zoom;
-      const mouseCanvasY = (e.clientY - rect.top - pan.y) / zoom;
-      setSelectionMarquee({
-        startX: mouseCanvasX,
-        startY: mouseCanvasY,
-        currentX: mouseCanvasX,
-        currentY: mouseCanvasY,
-      });
-    }
-  };
+    const deltaX = (clientX - st.startClientX) / z;
+    const deltaY = (clientY - st.startClientY) / z;
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isPanning) {
-      setPan({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
-      });
-      return;
-    }
+    const activeObj = objs.find((o) => o.id === st.dragIds[0]);
+    let snapDeltaX = deltaX;
+    let snapDeltaY = deltaY;
+    const newGuides: Array<{ type: "vertical" | "horizontal"; pos: number }> = [];
 
-    if (selectionMarquee) {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const curX = (e.clientX - rect.left - pan.x) / zoom;
-      const curY = (e.clientY - rect.top - pan.y) / zoom;
-      setSelectionMarquee((prev) => prev && { ...prev, currentX: curX, currentY: curY });
+    if (activeObj && snapObj) {
+      const initPos = st.initialPositions[activeObj.id];
+      if (initPos) {
+        const targetLeft = initPos.x + deltaX;
+        const targetRight = targetLeft + activeObj.width;
+        const targetCenterX = targetLeft + activeObj.width / 2;
+        const targetTop = initPos.y + deltaY;
+        const targetBottom = targetTop + activeObj.height;
+        const targetCenterY = targetTop + activeObj.height / 2;
+        const SNAP_THRESHOLD = 6;
 
-      // Calculate enclosed objects
-      const left = Math.min(selectionMarquee.startX, curX);
-      const right = Math.max(selectionMarquee.startX, curX);
-      const top = Math.min(selectionMarquee.startY, curY);
-      const bottom = Math.max(selectionMarquee.startY, curY);
+        for (const other of objs) {
+          if (st.dragIds.includes(other.id)) continue;
+          const otherLeft = other.x;
+          const otherRight = other.x + other.width;
+          const otherCenterX = other.x + other.width / 2;
+          const otherTop = other.y;
+          const otherBottom = other.y + other.height;
+          const otherCenterY = other.y + other.height / 2;
 
-      const enclosed = objects.filter((o) => {
-        return o.x >= left && o.x + o.width <= right && o.y >= top && o.y + o.height <= bottom;
-      });
-      setSelectedIds(enclosed.map((o) => o.id));
-      return;
-    }
+          if (Math.abs(targetLeft - otherLeft) < SNAP_THRESHOLD) {
+            snapDeltaX = otherLeft - initPos.x;
+            newGuides.push({ type: "vertical", pos: otherLeft });
+          } else if (Math.abs(targetRight - otherRight) < SNAP_THRESHOLD) {
+            snapDeltaX = otherRight - activeObj.width - initPos.x;
+            newGuides.push({ type: "vertical", pos: otherRight });
+          } else if (Math.abs(targetCenterX - otherCenterX) < SNAP_THRESHOLD) {
+            snapDeltaX = otherCenterX - activeObj.width / 2 - initPos.x;
+            newGuides.push({ type: "vertical", pos: otherCenterX });
+          }
 
-    if (isDraggingObj && selectedIds.length > 0) {
-      const deltaX = (e.clientX - dragStartMouse.x) / zoom;
-      const deltaY = (e.clientY - dragStartMouse.y) / zoom;
-
-      // Canva smart snap calculations
-      const activeObj = objects.find((o) => o.id === selectedIds[0]);
-      let snapDeltaX = deltaX;
-      let snapDeltaY = deltaY;
-      const newGuides: Array<{ type: "vertical" | "horizontal"; pos: number }> = [];
-
-      if (activeObj && snapToObjects) {
-        const initPos = initialObjPositions[activeObj.id];
-        if (initPos) {
-          const targetLeft = initPos.x + deltaX;
-          const targetRight = targetLeft + activeObj.width;
-          const targetCenterX = targetLeft + activeObj.width / 2;
-
-          const targetTop = initPos.y + deltaY;
-          const targetBottom = targetTop + activeObj.height;
-          const targetCenterY = targetTop + activeObj.height / 2;
-
-          const SNAP_THRESHOLD = 6;
-
-          // Compare against all other objects
-          for (const other of objects) {
-            if (selectedIds.includes(other.id)) continue;
-
-            const otherLeft = other.x;
-            const otherRight = other.x + other.width;
-            const otherCenterX = other.x + other.width / 2;
-
-            const otherTop = other.y;
-            const otherBottom = other.y + other.height;
-            const otherCenterY = other.y + other.height / 2;
-
-            // X alignments
-            if (Math.abs(targetLeft - otherLeft) < SNAP_THRESHOLD) {
-              snapDeltaX = otherLeft - initPos.x;
-              newGuides.push({ type: "vertical", pos: otherLeft });
-            } else if (Math.abs(targetRight - otherRight) < SNAP_THRESHOLD) {
-              snapDeltaX = otherRight - activeObj.width - initPos.x;
-              newGuides.push({ type: "vertical", pos: otherRight });
-            } else if (Math.abs(targetCenterX - otherCenterX) < SNAP_THRESHOLD) {
-              snapDeltaX = otherCenterX - activeObj.width / 2 - initPos.x;
-              newGuides.push({ type: "vertical", pos: otherCenterX });
-            }
-
-            // Y alignments
-            if (Math.abs(targetTop - otherTop) < SNAP_THRESHOLD) {
-              snapDeltaY = otherTop - initPos.y;
-              newGuides.push({ type: "horizontal", pos: otherTop });
-            } else if (Math.abs(targetBottom - otherBottom) < SNAP_THRESHOLD) {
-              snapDeltaY = otherBottom - activeObj.height - initPos.y;
-              newGuides.push({ type: "horizontal", pos: otherBottom });
-            } else if (Math.abs(targetCenterY - otherCenterY) < SNAP_THRESHOLD) {
-              snapDeltaY = otherCenterY - activeObj.height / 2 - initPos.y;
-              newGuides.push({ type: "horizontal", pos: otherCenterY });
-            }
+          if (Math.abs(targetTop - otherTop) < SNAP_THRESHOLD) {
+            snapDeltaY = otherTop - initPos.y;
+            newGuides.push({ type: "horizontal", pos: otherTop });
+          } else if (Math.abs(targetBottom - otherBottom) < SNAP_THRESHOLD) {
+            snapDeltaY = otherBottom - activeObj.height - initPos.y;
+            newGuides.push({ type: "horizontal", pos: otherBottom });
+          } else if (Math.abs(targetCenterY - otherCenterY) < SNAP_THRESHOLD) {
+            snapDeltaY = otherCenterY - activeObj.height / 2 - initPos.y;
+            newGuides.push({ type: "horizontal", pos: otherCenterY });
           }
         }
       }
+    }
 
-      setGuideLines(newGuides);
+    setGuideLines(newGuides);
 
-      // Snap to Grid if enabled and no object snap line
-      if (snapToGrid && gridSize > 0 && newGuides.length === 0) {
-        // apply grid snapping
-        snapDeltaX = Math.round(snapDeltaX / gridSize) * gridSize;
-        snapDeltaY = Math.round(snapDeltaY / gridSize) * gridSize;
+    if (snapGrid && gs > 0 && newGuides.length === 0) {
+      snapDeltaX = Math.round(snapDeltaX / gs) * gs;
+      snapDeltaY = Math.round(snapDeltaY / gs) * gs;
+    }
+
+    return st.dragIds
+      .map((id) => {
+        const init = st.initialPositions[id];
+        if (!init) return null;
+        return { id, x: Math.round(init.x + snapDeltaX), y: Math.round(init.y + snapDeltaY) };
+      })
+      .filter(Boolean) as Partial<CanvasObjectData>[];
+  };
+
+  /** 全域 pointermove / pointerup：即使指標移出畫布也不中斷拖曳 */
+  useEffect(() => {
+    const onPointerMove = (e: PointerEvent) => {
+      const st = interaction.current;
+      if (st.mode === "none") return;
+
+      if (activePointers.current.has(e.pointerId)) {
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }
 
-      // Update positions
-      const updates = selectedIds.map((id) => {
-        const init = initialObjPositions[id];
-        return {
-          id,
-          x: Math.round(init.x + snapDeltaX),
-          y: Math.round(init.y + snapDeltaY),
-        };
-      });
+      // 雙指縮放
+      if (st.mode === "pinch" && activePointers.current.size >= 2) {
+        const pts = Array.from(activePointers.current.values());
+        const [a, b] = [pts[0], pts[1]];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        const ratio = dist / (st.startDist || 1);
+        const newZoom = Math.min(2.5, Math.max(0.2, st.startZoom * ratio));
+        // 以雙指中心為錨點縮放，避免畫面亂跳
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const midX = (a.x + b.x) / 2 - rect.left;
+          const midY = (a.y + b.y) / 2 - rect.top;
+          const scaleRatio = newZoom / st.startZoom;
+          setPan({
+            x: midX - (st.startMidX - st.startPanX) * scaleRatio,
+            y: midY - (st.startMidY - st.startPanY) * scaleRatio,
+          });
+        }
+        setZoom(newZoom);
+        st.moved = true;
+        return;
+      }
 
-      onUpdateObjects(updates);
+      if (e.pointerId !== st.pointerId) return;
+
+      const dx = e.clientX - st.startClientX;
+      const dy = e.clientY - st.startClientY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) st.moved = true;
+
+      if (st.mode === "pan") {
+        setPan({ x: st.startPanX + dx, y: st.startPanY + dy });
+        return;
+      }
+
+      if (st.mode === "marquee") {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const { zoom: z, pan: p, objects: objs } = latest.current;
+        const curX = (e.clientX - rect.left - p.x) / z;
+        const curY = (e.clientY - rect.top - p.y) / z;
+        setSelectionMarquee((prev) => {
+          if (!prev) return prev;
+          const left = Math.min(prev.startX, curX);
+          const right = Math.max(prev.startX, curX);
+          const top = Math.min(prev.startY, curY);
+          const bottom = Math.max(prev.startY, curY);
+          const enclosed = objs.filter(
+            (o) => o.x >= left && o.x + o.width <= right && o.y >= top && o.y + o.height <= bottom
+          );
+          setSelectedIds(enclosed.map((o) => o.id));
+          return { ...prev, currentX: curX, currentY: curY };
+        });
+        return;
+      }
+
+      if (st.mode === "drag" && st.dragIds.length > 0) {
+        const updates = computeDragUpdates(e.clientX, e.clientY);
+        if (updates.length > 0) onUpdateObjects(updates);
+      }
+    };
+
+    const endPointer = (e: PointerEvent) => {
+      activePointers.current.delete(e.pointerId);
+      const st = interaction.current;
+
+      // 雙指其中一指放開 → 結束縮放
+      if (st.mode === "pinch" && activePointers.current.size < 2) {
+        st.mode = "none";
+        st.pointerId = null;
+        return;
+      }
+
+      if (e.pointerId !== st.pointerId) return;
+
+      st.mode = "none";
+      st.pointerId = null;
+      st.dragIds = [];
+      st.initialPositions = {};
+      setIsPanning(false);
+      setIsDraggingObj(false);
+      setSelectionMarquee(null);
+      setGuideLines([]);
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", endPointer);
+    window.addEventListener("pointercancel", endPointer);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endPointer);
+      window.removeEventListener("pointercancel", endPointer);
+    };
+  }, [onUpdateObjects]);
+
+  /** 畫布空白處按下：預設拖曳平移；Shift 或右鍵 → 框選 */
+  const handleCanvasPointerDown = (e: React.PointerEvent) => {
+    const targetEl = e.target as Element;
+
+    // 判定是否落在「空白畫布」上。
+    // 除了直接命中背景 div 之外，也接受任何非互動元素——
+    // 這樣即使日後新增覆蓋層，只要不是卡片/按鈕/關係線，平移依然有效，
+    // 不會再出現「某一塊區域拖不動」的死角。
+    const isBackground =
+      targetEl === containerRef.current ||
+      (targetEl as HTMLElement).id === "canvas-bg" ||
+      !targetEl.closest?.(
+        '[data-canvas-object="true"], button, a, input, textarea, select, [data-relation-hit="true"]'
+      );
+
+    if (!isBackground) return;
+
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // 兩指同時按下 → 進入縮放模式
+    if (activePointers.current.size === 2) {
+      const pts = Array.from(activePointers.current.values());
+      const [a, b] = [pts[0], pts[1]];
+      const rect = containerRef.current?.getBoundingClientRect();
+      interaction.current = {
+        ...interaction.current,
+        mode: "pinch",
+        startDist: Math.hypot(a.x - b.x, a.y - b.y),
+        startZoom: zoom,
+        startPanX: pan.x,
+        startPanY: pan.y,
+        startMidX: rect ? (a.x + b.x) / 2 - rect.left : 0,
+        startMidY: rect ? (a.y + b.y) / 2 - rect.top : 0,
+        moved: false,
+      };
+      setIsPanning(false);
+      return;
+    }
+
+    if (e.button === 2) return; // 右鍵交給 contextmenu
+
+    // Shift（或 Ctrl/Cmd）+ 拖曳 → 框選；其餘一律平移（含手機單指、滑鼠左鍵）
+    const wantMarquee = e.shiftKey || e.ctrlKey || e.metaKey;
+
+    if (wantMarquee) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const startX = (e.clientX - rect.left - pan.x) / zoom;
+      const startY = (e.clientY - rect.top - pan.y) / zoom;
+      setSelectedIds([]);
+      setSelectionMarquee({ startX, startY, currentX: startX, currentY: startY });
+      interaction.current = {
+        ...interaction.current,
+        mode: "marquee",
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        moved: false,
+      };
+    } else {
+      setSelectedIds([]);
+      setIsPanning(true);
+      interaction.current = {
+        ...interaction.current,
+        mode: "pan",
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startPanX: pan.x,
+        startPanY: pan.y,
+        moved: false,
+      };
     }
   };
 
-  const handleMouseUp = () => {
-    setIsPanning(false);
-    setSelectionMarquee(null);
-    setIsDraggingObj(false);
-    setGuideLines([]);
-  };
-
-  // Start dragging an object
-  const handleObjectMouseDown = (e: React.MouseEvent, obj: CanvasObjectData) => {
-    e.stopPropagation();
+  /** 物件上按下：開始拖曳（滑鼠 / 觸控 / 手寫筆通用） */
+  const handleObjectPointerDown = (e: React.PointerEvent, obj: CanvasObjectData) => {
     if (obj.isLocked) return;
+    // 讓卡片內部的按鈕 / 輸入框仍可正常點擊
+    const el = e.target as HTMLElement;
+    if (el.closest("button, a, input, textarea, select")) return;
+
+    e.stopPropagation();
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     let newSelected = selectedIds;
     if (e.shiftKey) {
-      if (selectedIds.includes(obj.id)) {
-        newSelected = selectedIds.filter((id) => id !== obj.id);
-      } else {
-        newSelected = [...selectedIds, obj.id];
-      }
-    } else {
-      if (!selectedIds.includes(obj.id)) {
-        newSelected = [obj.id];
-      }
+      newSelected = selectedIds.includes(obj.id)
+        ? selectedIds.filter((id) => id !== obj.id)
+        : [...selectedIds, obj.id];
+    } else if (!selectedIds.includes(obj.id)) {
+      newSelected = [obj.id];
     }
-    setSelectedIds(newSelected);
 
-    // If part of group, include whole group
     if (obj.groupId) {
       const groupMembers = objects.filter((o) => o.groupId === obj.groupId).map((o) => o.id);
       newSelected = Array.from(new Set([...newSelected, ...groupMembers]));
-      setSelectedIds(newSelected);
     }
-
-    setIsDraggingObj(true);
-    setDragStartMouse({ x: e.clientX, y: e.clientY });
+    setSelectedIds(newSelected);
 
     const posMap: Record<string, { x: number; y: number }> = {};
     newSelected.forEach((id) => {
       const target = objects.find((o) => o.id === id);
-      if (target) {
-        posMap[id] = { x: target.x, y: target.y };
-      }
+      if (target) posMap[id] = { x: target.x, y: target.y };
     });
-    setInitialObjPositions(posMap);
+
+    setIsDraggingObj(true);
+    interaction.current = {
+      ...interaction.current,
+      mode: "drag",
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      dragIds: newSelected,
+      initialPositions: posMap,
+      moved: false,
+    };
   };
 
   // Group / Ungroup
@@ -573,13 +655,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
         id="canvas-bg"
         ref={containerRef}
         onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        className="w-full h-full relative cursor-default overflow-hidden touch-none"
+        onPointerDown={handleCanvasPointerDown}
+        onContextMenu={(e) => e.preventDefault()}
+        className={`w-full h-full relative overflow-hidden touch-none select-none ${
+          isPanning ? "cursor-grabbing" : "cursor-grab"
+        }`}
         style={{
           background: "transparent",
           backgroundImage: gridMode === "none"
@@ -598,8 +678,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           }}
         >
-          {/* A. Relations (SVG connection lines between cards) */}
-          <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-auto overflow-visible">
+          {/* A. Relations (SVG connection lines between cards)
+              注意：SVG 本身必須 pointer-events-none，否則這塊 5000×5000 的透明區域
+              會吞掉指標事件，導致該範圍內無法拖曳平移畫布。
+              只有實際的關係線與標籤（各 <g>）才開啟 pointer-events-auto。 */}
+          <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-none overflow-visible">
             <defs>
               <marker
                 id="arrowhead-indigo"
@@ -640,7 +723,22 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
               const strokeColor = isUnverified ? "#f59e0b" : "#6366f1";
 
               return (
-                <g key={rel.id} className="cursor-pointer group" onClick={() => onOpenEditRelation(rel)}>
+                <g key={rel.id} className="cursor-pointer group">
+                  {/* 透明加寬命中區：讓細線在觸控裝置也好點，但不阻擋周圍空白處的平移 */}
+                  <line
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="transparent"
+                    strokeWidth="14"
+                    strokeLinecap="round"
+                    data-relation-hit="true"
+                    className="pointer-events-auto"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => onOpenEditRelation(rel)}
+                  />
+                  {/* 實際可見的關係線（本身不接收事件，交給上面的命中區） */}
                   <line
                     x1={x1}
                     y1={y1}
@@ -650,19 +748,22 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                     strokeWidth="2.5"
                     strokeDasharray={isUnverified ? "6,6" : "none"}
                     markerEnd={isUnverified ? "url(#arrowhead-amber)" : "url(#arrowhead-indigo)"}
-                    className="group-hover:stroke-blue-500 transition-colors"
+                    className="pointer-events-none group-hover:stroke-blue-500 transition-colors"
                   />
-                  {/* Label badge */}
+                  {/* Label badge：foreignObject 容器不可攔截事件，只有標籤本體可點 */}
                   <foreignObject
                     x={midX - 70}
                     y={midY - 14}
                     width={140}
                     height={30}
-                    className="overflow-visible pointer-events-auto"
+                    className="overflow-visible pointer-events-none"
                   >
                     <div className="flex items-center justify-center">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-xs transition-transform group-hover:scale-105 ${
+                        data-relation-hit="true"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => onOpenEditRelation(rel)}
+                        className={`pointer-events-auto cursor-pointer px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-xs transition-transform group-hover:scale-105 ${
                           isUnverified
                             ? "bg-amber-50 text-amber-800 border-amber-300"
                             : "bg-white text-indigo-800 border-indigo-300"
@@ -686,10 +787,11 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             return (
               <div
                 key={obj.id}
-                onMouseDown={(e) => handleObjectMouseDown(e, obj)}
-                className={`absolute pointer-events-auto transition-shadow ${
+                data-canvas-object="true"
+                onPointerDown={(e) => handleObjectPointerDown(e, obj)}
+                className={`absolute pointer-events-auto touch-none ${
                   isSelected ? "ring-2 ring-blue-500 shadow-2xl" : "shadow-md"
-                }`}
+                } ${obj.isLocked ? "cursor-default" : "cursor-move"}`}
                 style={{
                   left: `${obj.x}px`,
                   top: `${obj.y}px`,

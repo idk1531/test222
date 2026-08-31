@@ -6,6 +6,7 @@ import { MathText } from "./MathText";
 import { FONT_OPTIONS, resolveFont } from "@/lib/fonts";
 import { SoloAssessmentPanel } from "./SoloAssessmentPanel";
 import { ShapeClassifier } from "./ShapeClassifier";
+import { checkFourPoints } from "@/lib/inspect";
 import {
   SectionHeader,
   SectionConstructionThinking,
@@ -35,6 +36,63 @@ interface CardDetailModalProps {
 }
 
 const UI = "'Varela Round', sans-serif";
+
+function FourPointInspector({ text, context }: { text: string; context: "construction" | "why" }) {
+  const [open, setOpen] = useState(false);
+  const items = checkFourPoints(text, context);
+  const passCount = items.filter((i) => i.passed).length;
+
+  return (
+    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-slate-100 transition-colors"
+      >
+        <div className="flex items-center gap-1.5 font-bold text-slate-700">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+          <span>四點自我檢查（①人名 ②零基礎 ③路徑 ④精確）</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+              passCount === 4 ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+            }`}
+          >
+            {passCount}/4 通過
+          </span>
+          <span className="text-slate-400 text-[10px]">{open ? "收合 ▲" : "展開自檢 ▼"}</span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="p-3 border-t border-slate-200 space-y-2 bg-white">
+          {items.map((it) => (
+            <div
+              key={it.id}
+              className={`p-2.5 rounded-lg border ${
+                it.passed ? "bg-emerald-50/40 border-emerald-200" : "bg-amber-50/60 border-amber-300"
+              }`}
+            >
+              <div className="flex items-center justify-between font-bold text-xs mb-1">
+                <span className={it.passed ? "text-emerald-900" : "text-amber-900"}>{it.title}</span>
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                    it.passed ? "bg-emerald-200 text-emerald-900" : "bg-amber-200 text-amber-900"
+                  }`}
+                >
+                  {it.passed ? "✓ 通過" : "⚠ 待修正"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-700 mb-1">{it.message}</p>
+              <p className="text-[10px] text-slate-500 italic leading-relaxed">{it.hint}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   card,
@@ -365,6 +423,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 <div className="mt-1.5 p-2 bg-slate-50 rounded border border-slate-200 text-slate-600">
                   <MathText text={formData.constructionThinking || ""} />
                 </div>
+                {/* 四點自檢（構造思路） */}
+                <FourPointInspector text={formData.constructionThinking || ""} context="construction" />
               </div>
 
               {/* v4 新增：追問點（嵌入在用戶判斷的 WHY/HOW 關鍵轉折處） */}
@@ -718,6 +778,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   </span>
                   <MathText text={formData.whyData?.fullReasoning || ""} />
                 </div>
+                {/* 四點自檢（WHY 正文） */}
+                <FourPointInspector text={formData.whyData?.fullReasoning || ""} context="why" />
               </div>
 
               {/* 雙視角 */}
@@ -862,6 +924,96 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* v4 新增：直覺陷阱（可選子結構：推導完全正確，但直覺上容易誤判成別的東西） */}
+              <div className="pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <span className="text-purple-600">⚠</span>
+                    <span>直覺陷阱（推導本身完全正確，但直覺容易誤解——例：負頻率−ω不是數學假象）</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patch({
+                        intuitionTraps: [
+                          ...(formData.intuitionTraps || []),
+                          {
+                            id: `it-${Date.now()}`,
+                            description: "",
+                            whyMisleading: "",
+                            correctUnderstanding: "",
+                          },
+                        ],
+                      })
+                    }
+                    className="text-[11px] px-2 py-1 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 font-semibold"
+                  >
+                    + 新增直覺陷阱
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {(formData.intuitionTraps || []).map((trap, i) => (
+                    <div key={trap.id || i} className="p-3 bg-purple-50/40 rounded-lg border border-purple-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[11px] text-purple-900">直覺陷阱 #{i + 1}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            patch({
+                              intuitionTraps: (formData.intuitionTraps || []).filter((_, x) => x !== i),
+                            })
+                          }
+                          className="text-slate-400 hover:text-rose-600"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-600 block mb-0.5">容易被誤判成什麼：</label>
+                        <input
+                          value={trap.description}
+                          onChange={(e) => {
+                            const list = [...(formData.intuitionTraps || [])];
+                            list[i] = { ...list[i], description: e.target.value };
+                            patch({ intuitionTraps: list });
+                          }}
+                          placeholder="例：看到頻譜圖上的負頻率−ω成分，誤以為是『無意義的數學假象』"
+                          className="w-full p-1.5 rounded border border-purple-300 text-xs bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-600 block mb-0.5">為什麼直覺會錯：</label>
+                        <textarea
+                          rows={2}
+                          value={trap.whyMisleading}
+                          onChange={(e) => {
+                            const list = [...(formData.intuitionTraps || [])];
+                            list[i] = { ...list[i], whyMisleading: e.target.value };
+                            patch({ intuitionTraps: list });
+                          }}
+                          placeholder="例：直覺覺得『震動怎麼可能有負的次數』，把它當成了物理純量而非複平面的反向旋轉向量"
+                          className="w-full p-1.5 rounded border border-purple-300 text-xs bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-purple-900 font-bold block mb-0.5">✓ 正確理解：</label>
+                        <textarea
+                          rows={2}
+                          value={trap.correctUnderstanding}
+                          onChange={(e) => {
+                            const list = [...(formData.intuitionTraps || [])];
+                            list[i] = { ...list[i], correctUnderstanding: e.target.value };
+                            patch({ intuitionTraps: list });
+                          }}
+                          placeholder="例：負頻率是複平面中反向旋轉的向量，正負旋轉疊加才能消去虛部得到實數信號"
+                          className="w-full p-1.5 rounded border border-purple-400 text-xs bg-white"
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>

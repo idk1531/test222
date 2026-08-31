@@ -371,26 +371,148 @@ export const actions = {
 // ================= 匯出 / 匯入 / 重置 =================
 
 /** 匯出全部資料為 JSON 檔案（瀏覽器下載） */
-export function exportFile() {
-  if (typeof window === "undefined") return;
+export type ExportMethod = "download" | "share" | "newtab" | "clipboard" | "failed";
+export interface ExportResult {
+  ok: boolean;
+  method: ExportMethod;
+  message: string;
+  fileName: string;
+  json?: string;
+}
+
+/** 取得目前工作區的完整 JSON 字串（供匯出/複製使用） */
+export function getExportJson(): { json: string; fileName: string } {
   const payload: ExportFilePayload = {
     schemaVersion: SCHEMA_VERSION,
     appName: "SciNotes Workbench",
     exportedAt: new Date().toISOString(),
     state,
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  a.href = url;
-  a.download = `scinotes-workspace-${stamp}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return {
+    json: JSON.stringify(payload, null, 2),
+    fileName: `scinotes-workspace-${stamp}.json`,
+  };
+}
+
+/**
+ * 匯出全部資料為 JSON 檔案。
+ * 多重相容策略（依序嘗試），解決 iOS Safari / LINE、FB 內嵌瀏覽器 / 舊版瀏覽器無法下載的問題：
+ *   1. <a download>（桌機與大多數 Android）
+ *   2. Web Share API 分享檔案（iOS Safari / iPadOS 主要路徑）
+ *   3. 開新分頁顯示 JSON（使用者可長按另存）
+ *   4. 複製到剪貼簿（最後保底）
+ */
+export async function exportFile(): Promise<ExportResult> {
+  if (typeof window === "undefined") {
+    return { ok: false, method: "failed", message: "非瀏覽器環境", fileName: "" };
+  }
+
+  const { json, fileName } = getExportJson();
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+
+  // 策略 1：Web Share API 檔案分享（iOS/iPadOS Safari 最可靠）
+  const isAppleMobile =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+
+  if (isAppleMobile && typeof navigator !== "undefined" && (navigator as any).canShare) {
+    try {
+      const file = new File([blob], fileName, { type: "application/json" });
+      if ((navigator as any).canShare({ files: [file] })) {
+        await (navigator as any).share({
+          files: [file],
+          title: "SciNotes 工作區備份",
+        });
+        return {
+          ok: true,
+          method: "share",
+          message: "已開啟分享面板，可選「儲存到檔案」完成匯出",
+          fileName,
+        };
+      }
+    } catch (e: any) {
+      // 使用者取消分享不算失敗
+      if (e?.name === "AbortError") {
+        return { ok: false, method: "share", message: "已取消匯出", fileName };
+      }
+      // 其他錯誤 → 往下嘗試
+    }
+  }
+
+  // 策略 2：<a download>（桌機 / Android Chrome）
+  try {
+    const supportsDownload = "download" in document.createElement("a");
+    if (supportsDownload) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.rel = "noopener";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      // 延遲釋放，避免部分瀏覽器尚未開始下載就被撤銷
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 4000);
+      return { ok: true, method: "download", message: `已匯出 ${fileName}`, fileName };
+    }
+  } catch {
+    // 往下嘗試
+  }
+
+  // 策略 3：非 Apple 裝置但支援分享（部分 Android 內嵌瀏覽器）
+  if (typeof navigator !== "undefined" && (navigator as any).canShare) {
+    try {
+      const file = new File([blob], fileName, { type: "application/json" });
+      if ((navigator as any).canShare({ files: [file] })) {
+        await (navigator as any).share({ files: [file], title: "SciNotes 工作區備份" });
+        return { ok: true, method: "share", message: "已開啟分享面板完成匯出", fileName };
+      }
+    } catch {
+      // 往下嘗試
+    }
+  }
+
+  // 策略 4：開新分頁顯示 JSON（可長按/右鍵另存）
+  try {
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (win) {
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return {
+        ok: true,
+        method: "newtab",
+        message: "已於新分頁開啟 JSON，請長按或右鍵「另存新檔」",
+        fileName,
+      };
+    }
+    URL.revokeObjectURL(url);
+  } catch {
+    // 往下嘗試
+  }
+
+  // 策略 5：複製到剪貼簿（最後保底）
+  try {
+    await navigator.clipboard.writeText(json);
+    return {
+      ok: true,
+      method: "clipboard",
+      message: "無法直接下載，已將 JSON 複製到剪貼簿，請自行貼上儲存",
+      fileName,
+      json,
+    };
+  } catch {
+    return {
+      ok: false,
+      method: "failed",
+      message: "此瀏覽器不支援自動匯出，請改用下方文字框手動複製",
+      fileName,
+      json,
+    };
+  }
 }
 
 /** 從 JSON 檔案匯入資料回應用 */

@@ -170,17 +170,17 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 show-on-hover transition-opacity">
             <button
               onClick={(e) => { e.stopPropagation(); onOpenPreview?.(card); }}
-              className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+              className="p-1.5 rounded hover:bg-slate-100 active:bg-slate-200 text-slate-400 hover:text-slate-700 touch-target"
               title="預覽模式"
             >
               <Eye className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onOpenDetail?.(card); }}
-              className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+              className="p-1.5 rounded hover:bg-slate-100 active:bg-slate-200 text-slate-400 hover:text-slate-700 touch-target"
               title="編輯模式"
             >
               <Maximize2 className="w-3.5 h-3.5" />
