@@ -1,9 +1,12 @@
 {
-  "name": "nextjs-postgresql-template",
+  "name": "semantic-science-note-workbench",
+  "version": "0.1.0",
   "private": true,
+  "description": "理科知識筆記工作台：自由畫布 + 結構化理科知識卡片 + 知識圖譜 + 理解檢查 + 認知歷史，純前端、資料存於瀏覽器本機。",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "export": "STATIC_EXPORT=1 next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
@@ -13,6 +16,7 @@
     "katex": "^0.18.4",
     "lucide-react": "^1.35.0",
     "next": "16.2.6",
+    "next-themes": "^0.4.6",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
