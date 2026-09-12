@@ -10,6 +10,7 @@ import {
   SEED_BLIND_SPOTS,
   SEED_MOTHER_TOPICS,
 } from "./seedData";
+import { normalizeLogType } from "./inspect";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
 const STORAGE_KEY = "scinotes-workspace-v4";
@@ -32,6 +33,15 @@ function buildSeedState(): WorkspaceState {
   };
 }
 
+/** v4：舊本機資料的過程日誌符號（⟲⚡⇹⋯）轉為文字標籤 */
+function normalizeState(s: WorkspaceState): WorkspaceState {
+  const logs = (s.processLogs || []).map((l: any) => ({
+    ...l,
+    logType: normalizeLogType(String(l.logType || "")),
+  }));
+  return { ...s, processLogs: logs };
+}
+
 function loadInitialState(): WorkspaceState {
   if (typeof window === "undefined") return buildSeedState();
   try {
@@ -39,7 +49,7 @@ function loadInitialState(): WorkspaceState {
     if (raw) {
       const parsed = JSON.parse(raw) as ExportFilePayload;
       if (parsed?.state?.workspace?.id) {
-        return { ...parsed.state, savedAt: new Date().toISOString() };
+        return normalizeState({ ...parsed.state, savedAt: new Date().toISOString() });
       }
     }
   } catch (e) {
@@ -66,10 +76,29 @@ function persist(next: WorkspaceState) {
   }
 }
 
-function setState(recipe: (s: WorkspaceState) => WorkspaceState) {
+let persistTimer: number | null = null;
+
+function schedulePersist() {
+  if (typeof window === "undefined") return;
+  if (persistTimer) window.clearTimeout(persistTimer);
+  // 畫布拖曳可每秒觸發數十次更新：畫面立即更新，磁碟保存稍後合併。
+  persistTimer = window.setTimeout(() => {
+    persist(state);
+    persistTimer = null;
+  }, 250);
+}
+
+function setState(recipe: (s: WorkspaceState) => WorkspaceState, options: { deferPersist?: boolean } = {}) {
   state = recipe(state);
   state = { ...state, savedAt: new Date().toISOString() };
-  persist(state);
+  if (options.deferPersist) schedulePersist();
+  else {
+    if (persistTimer) {
+      window.clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    persist(state);
+  }
   listeners.forEach((l) => l());
 }
 
@@ -96,14 +125,17 @@ function genId(prefix: string) {
 
 export const actions = {
   /** 更新一或多個畫布物件 */
-  updateCanvasObjects(updates: Partial<any>[]) {
-    setState((s) => ({
-      ...s,
-      canvasObjects: s.canvasObjects.map((o) => {
-        const u = updates.find((x) => x.id === o.id);
-        return u ? { ...o, ...u, updatedAt: new Date().toISOString() } : o;
+  updateCanvasObjects(updates: Partial<any>[], options: { final?: boolean } = {}) {
+    setState(
+      (s) => ({
+        ...s,
+        canvasObjects: s.canvasObjects.map((o) => {
+          const u = updates.find((x) => x.id === o.id);
+          return u ? { ...o, ...u, updatedAt: new Date().toISOString() } : o;
+        }),
       }),
-    }));
+      { deferPersist: options.final === false }
+    );
   },
 
   createCanvasObject(data: Partial<any>) {
@@ -262,10 +294,12 @@ export const actions = {
 
   addProcessLog(data: Partial<any>) {
     const id = genId("log");
+    // v4：統一儲存為文字標籤（舊符號 ⟲⚡⇹⋯ → [增量][框架衝突][同session矛盾][未編譯]）
+    const logType = normalizeLogType(String(data.logType || ""));
     setState((s) => ({
       ...s,
       processLogs: [
-        { ...data, id, createdAt: new Date().toISOString() } as any,
+        { ...data, logType, id, createdAt: new Date().toISOString() } as any,
         ...s.processLogs,
       ],
     }));
@@ -370,149 +404,167 @@ export const actions = {
 
 // ================= 匯出 / 匯入 / 重置 =================
 
-/** 匯出全部資料為 JSON 檔案（瀏覽器下載） */
-export type ExportMethod = "download" | "share" | "newtab" | "clipboard" | "failed";
+export type ExportMethod = "share" | "download" | "view" | "clipboard" | "failed";
 export interface ExportResult {
   ok: boolean;
   method: ExportMethod;
+  filename: string;
+  /** 方便 UI 告知使用者實際採用的保存方式 */
   message: string;
-  fileName: string;
-  json?: string;
 }
 
-/** 取得目前工作區的完整 JSON 字串（供匯出/複製使用） */
-export function getExportJson(): { json: string; fileName: string } {
-  const payload: ExportFilePayload = {
+/** 建立標準匯出 payload；所有匯出入口共用相同格式。 */
+export function getExportPayload(): ExportFilePayload {
+  return {
     schemaVersion: SCHEMA_VERSION,
     appName: "SciNotes Workbench",
     exportedAt: new Date().toISOString(),
     state,
   };
+}
+
+export function getExportJson(): string {
+  return JSON.stringify(getExportPayload(), null, 2);
+}
+
+function exportFilename() {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return {
-    json: JSON.stringify(payload, null, 2),
-    fileName: `scinotes-workspace-${stamp}.json`,
-  };
+  return `scinotes-workspace-${stamp}.json`;
 }
 
 /**
- * 匯出全部資料為 JSON 檔案。
- * 多重相容策略（依序嘗試），解決 iOS Safari / LINE、FB 內嵌瀏覽器 / 舊版瀏覽器無法下載的問題：
- *   1. <a download>（桌機與大多數 Android）
- *   2. Web Share API 分享檔案（iOS Safari / iPadOS 主要路徑）
- *   3. 開新分頁顯示 JSON（使用者可長按另存）
- *   4. 複製到剪貼簿（最後保底）
+ * 匯出工作區（跨裝置 fallback）：
+ * 1. Web Share API with File（iOS/iPadOS/Android 最穩：可「儲存到檔案」/傳送）
+ * 2. Blob URL + anchor download（桌機、Chromium）
+ * 3. 新分頁開啟 JSON（嵌入式 WebView/Safari 忽略 download 時，仍可手動分享/另存）
+ *
+ * 不在完成前 revoke Blob URL，避免慢速手機在 click 後找不到資源。
  */
 export async function exportFile(): Promise<ExportResult> {
+  const filename = exportFilename();
   if (typeof window === "undefined") {
-    return { ok: false, method: "failed", message: "非瀏覽器環境", fileName: "" };
+    return { ok: false, method: "failed", filename, message: "目前不在瀏覽器環境，無法匯出。" };
   }
 
-  const { json, fileName } = getExportJson();
+  const json = getExportJson();
   const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  // 舊版 Safari／內嵌 WebView 可能缺少 File constructor；不可因此阻斷後續下載備援。
+  let file: File | null = null;
+  try {
+    file = new File([blob], filename, { type: "application/json;charset=utf-8" });
+  } catch {
+    file = null;
+  }
+  const nav = navigator as Navigator & {
+    canShare?: (data?: ShareData) => boolean;
+    share?: (data?: ShareData) => Promise<void>;
+  };
+  const ua = navigator.userAgent || "";
+  // iOS Safari/舊版 WebView 常忽略 anchor.download；它們應優先走「開啟 JSON → 系統分享」路徑。
+  const likelyNoDirectDownload =
+    /iP(hone|ad|od)/i.test(ua) ||
+    /;\s*wv\)/i.test(ua) ||
+    (/Version\/\d+.*Chrome/i.test(ua) && /Android/i.test(ua));
 
-  // 策略 1：Web Share API 檔案分享（iOS/iPadOS Safari 最可靠）
-  const isAppleMobile =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+  // Mobile first: 原生分享可處理 iOS Safari、Android Chrome、平板 PWA。
+  // 若使用者取消分享，繼續走下載 fallback，不把「取消」當成失敗。
+  try {
+    if (file && typeof nav.share === "function" && (!nav.canShare || nav.canShare({ files: [file] }))) {
+      await nav.share({
+        title: "SciNotes 工作區備份",
+        text: "理科知識筆記工作台 JSON 備份",
+        files: [file],
+      });
+      return { ok: true, method: "share", filename, message: "已開啟系統分享面板；請選擇「儲存到檔案」或分享目的地。" };
+    }
+  } catch (error) {
+    // AbortError = 使用者關掉分享面板；仍給常規下載選項
+    console.info("系統分享未完成，改用下載備援", error);
+  }
 
-  if (isAppleMobile && typeof navigator !== "undefined" && (navigator as any).canShare) {
+  const url = URL.createObjectURL(blob);
+
+  // 不支援原生分享、又可能忽略 download 的裝置：直接顯示原始 JSON。
+  // 這仍保留使用者當下的手勢授權，能在 Safari / WebView 內使用分享或另存。
+  if (likelyNoDirectDownload) {
     try {
-      const file = new File([blob], fileName, { type: "application/json" });
-      if ((navigator as any).canShare({ files: [file] })) {
-        await (navigator as any).share({
-          files: [file],
-          title: "SciNotes 工作區備份",
-        });
+      const opened = window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+      if (opened) {
         return {
           ok: true,
-          method: "share",
-          message: "已開啟分享面板，可選「儲存到檔案」完成匯出",
-          fileName,
+          method: "view",
+          filename,
+          message: "此裝置已開啟 JSON 備份頁面；請使用瀏覽器的分享／儲存功能保存檔案。",
         };
       }
-    } catch (e: any) {
-      // 使用者取消分享不算失敗
-      if (e?.name === "AbortError") {
-        return { ok: false, method: "share", message: "已取消匯出", fileName };
-      }
-      // 其他錯誤 → 往下嘗試
-    }
+    } catch { /* move to standard anchor then copy fallback */ }
   }
 
-  // 策略 2：<a download>（桌機 / Android Chrome）
   try {
-    const supportsDownload = "download" in document.createElement("a");
-    if (supportsDownload) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      a.rel = "noopener";
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      // 延遲釋放，避免部分瀏覽器尚未開始下載就被撤銷
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 4000);
-      return { ok: true, method: "download", message: `已匯出 ${fileName}`, fileName };
-    }
-  } catch {
-    // 往下嘗試
-  }
-
-  // 策略 3：非 Apple 裝置但支援分享（部分 Android 內嵌瀏覽器）
-  if (typeof navigator !== "undefined" && (navigator as any).canShare) {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    // 延後釋放，兼容 Safari／慢裝置的非同步下載。
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return { ok: true, method: "download", filename, message: `已開始下載 ${filename}` };
+  } catch (error) {
+    // WebView 可能禁止 programmatic download；最後把 JSON 開在新頁供使用者長按/分享。
     try {
-      const file = new File([blob], fileName, { type: "application/json" });
-      if ((navigator as any).canShare({ files: [file] })) {
-        await (navigator as any).share({ files: [file], title: "SciNotes 工作區備份" });
-        return { ok: true, method: "share", message: "已開啟分享面板完成匯出", fileName };
+      const opened = window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+      if (opened) {
+        return {
+          ok: true,
+          method: "view",
+          filename,
+          message: "裝置不支援直接下載，已開啟 JSON 備份頁面；請使用瀏覽器的分享／儲存功能。",
+        };
       }
-    } catch {
-      // 往下嘗試
-    }
-  }
-
-  // 策略 4：開新分頁顯示 JSON（可長按/右鍵另存）
-  try {
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    if (win) {
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      return {
-        ok: true,
-        method: "newtab",
-        message: "已於新分頁開啟 JSON，請長按或右鍵「另存新檔」",
-        fileName,
-      };
-    }
+    } catch { /* will use final failure below */ }
     URL.revokeObjectURL(url);
-  } catch {
-    // 往下嘗試
+    return { ok: false, method: "failed", filename, message: "此瀏覽器阻擋了檔案下載。請改用「複製 JSON 備份」。" };
   }
+}
 
-  // 策略 5：複製到剪貼簿（最後保底）
-  try {
-    await navigator.clipboard.writeText(json);
-    return {
-      ok: true,
-      method: "clipboard",
-      message: "無法直接下載，已將 JSON 複製到剪貼簿，請自行貼上儲存",
-      fileName,
-      json,
-    };
-  } catch {
-    return {
-      ok: false,
-      method: "failed",
-      message: "此瀏覽器不支援自動匯出，請改用下方文字框手動複製",
-      fileName,
-      json,
-    };
+/**
+ * 最終純文字備援：Clipboard API 不可用時，採用選取 textarea + execCommand。
+ * 可用於部分 iOS WebView、校園／企業內嵌瀏覽器。
+ */
+export async function copyExportJson(): Promise<ExportResult> {
+  const filename = exportFilename();
+  if (typeof window === "undefined") {
+    return { ok: false, method: "failed", filename, message: "目前不在瀏覽器環境，無法複製。" };
   }
+  const json = getExportJson();
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(json);
+      return { ok: true, method: "clipboard", filename, message: "JSON 已複製到剪貼簿；可貼到文字檔並另存為 .json。" };
+    }
+  } catch { /* use textarea fallback */ }
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = json;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (ok) {
+      return { ok: true, method: "clipboard", filename, message: "JSON 已複製到剪貼簿；可貼到文字檔並另存為 .json。" };
+    }
+  } catch { /* final failure */ }
+  return { ok: false, method: "failed", filename, message: "裝置不允許存檔或剪貼簿。請改在標準瀏覽器開啟此網站。" };
 }
 
 /** 從 JSON 檔案匯入資料回應用 */

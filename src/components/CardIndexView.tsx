@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { CardData } from "./KnowledgeCardNode";
+import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
 import {
   BookOpen,

@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { History, Plus, Layers, ArrowRight, Zap, RefreshCw, AlertCircle, Clock } from "lucide-react";
-import { CardData } from "./KnowledgeCardNode";
+import type { CardData } from "./KnowledgeCardNode";
+import { processLogLabel, normalizeLogType } from "@/lib/inspect";
 
 interface ProcessLogData {
   id: string;
@@ -30,7 +31,7 @@ export const ProcessLogsView: React.FC<ProcessLogsViewProps> = ({
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState(cards[0]?.id || "");
-  const [logType, setLogType] = useState("⚡");
+  const [logType, setLogType] = useState("[框架衝突]");
   const [title, setTitle] = useState("");
   const [oldContent, setOldContent] = useState("");
   const [newContent, setNewContent] = useState("");
@@ -54,30 +55,30 @@ export const ProcessLogsView: React.FC<ProcessLogsViewProps> = ({
   };
 
   const getLogBadge = (type: string) => {
-    switch (type) {
-      case "⚡":
+    switch (normalizeLogType(type)) {
+      case "[框架衝突]":
         return {
-          symbol: "⚡ 框架衝突",
+          symbol: processLogLabel(type),
           color: "bg-purple-100 text-purple-900 border-purple-300",
-          desc: "跨時間維度的重大理解升級，否定過去具體主張，新舊並排",
+          desc: "跨時間理解升級，否定過去具體主張，新舊主張必須並排寫，指出舊主張具體錯在哪一步",
         };
-      case "⟲":
+      case "[增量]":
         return {
-          symbol: "⟲ 增量補充",
+          symbol: processLogLabel(type),
           color: "bg-blue-100 text-blue-900 border-blue-300",
-          desc: "新認知補充舊理解",
+          desc: "新內容補充舊內容，舊的大體沒錯，只是不夠完整",
         };
-      case "⇹":
+      case "[同session矛盾]":
         return {
-          symbol: "⇹ 當場矛盾",
+          symbol: processLogLabel(type),
           color: "bg-rose-100 text-rose-900 border-rose-300",
-          desc: "同一討論 session 內前後說法互相矛盾",
+          desc: "同一次講解裡當場前後說法互相矛盾（與 [框架衝突] 不同：這是當場講漏嘴，不是跨時間理解升級）",
         };
       default:
         return {
-          symbol: "⋯ 未編譯記錄",
+          symbol: processLogLabel(type),
           color: "bg-amber-100 text-amber-900 border-amber-300",
-          desc: "未編譯演繹步驟記錄",
+          desc: "HOW 步驟仍需臨場重推、無法直接調用",
         };
     }
   };
@@ -184,10 +185,10 @@ export const ProcessLogsView: React.FC<ProcessLogsViewProps> = ({
               <label className="font-bold text-slate-700 block mb-1">日志類型：</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
-                  { key: "⚡", label: "⚡ 框架衝突 (跨時段升級，新舊並排)" },
-                  { key: "⟲", label: "⟲ 增量補充 (完善舊理解)" },
-                  { key: "⇹", label: "⇹ 當場矛盾 (同Session前後矛盾)" },
-                  { key: "⋯", label: "⋯ 未編譯演繹記錄" },
+                  { key: "[框架衝突]", label: "[框架衝突] 跨時段升級，新舊並排" },
+                  { key: "[增量]", label: "[增量] 完善舊理解" },
+                  { key: "[同session矛盾]", label: "[同session矛盾] 同Session前後矛盾" },
+                  { key: "[未編譯]", label: "[未編譯] 未編譯演繹記錄" },
                 ].map((item) => (
                   <button
                     key={item.key}

@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { AlertTriangle, CheckCircle2, Plus, ArrowRight, Filter, Search } from "lucide-react";
-import { CardData } from "./KnowledgeCardNode";
+import type { CardData } from "./KnowledgeCardNode";
 
 interface BlindSpotData {
   id: string;

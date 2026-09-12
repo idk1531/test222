@@ -1,5 +1,5 @@
 // 純前端 SOLO 診斷引擎（原 /api/ai/solo 邏輯，完全不依賴伺服器）
-import { CardData } from "@/components/KnowledgeCardNode";
+import type { CardData } from "@/components/KnowledgeCardNode";
 
 export const SOLO_ORDER = ["前結構", "單點結構", "多點結構", "關聯結構", "抽象拓展"];
 

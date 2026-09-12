@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Sparkles, Plus, CheckCircle2, AlertCircle, Layers, ArrowRight } from "lucide-react";
-import { CardData } from "./KnowledgeCardNode";
+import type { CardData } from "./KnowledgeCardNode";
 
 interface MotherTopicData {
   id: string;

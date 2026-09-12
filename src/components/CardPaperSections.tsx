@@ -1,10 +1,18 @@
 "use client";
 
-import React from "react";
-import { CardData } from "./KnowledgeCardNode";
+import React, { useState } from "react";
+import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
-import { Lock, Lightbulb, HelpCircle, CheckCircle, XCircle } from "lucide-react";
+import { Lock, Lightbulb, HelpCircle, CheckCircle, XCircle, CheckCircle2, AlertTriangle, OctagonAlert, ClipboardCheck } from "lucide-react";
+import {
+  epistemicLabel,
+  relationLabelText,
+  STATUS_COMPILED,
+  STATUS_UNCOMPILED,
+  ORIGIN_MARK,
+} from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
+import type { CheckResult, FourPointReport } from "@/lib/inspect";
 import { SOLO_LEVELS } from "./SoloAssessmentPanel";
 
 const UI_FONT = "'Varela Round', sans-serif";
@@ -99,6 +107,109 @@ export function SectionHeader({ card, font }: { card: CardData; font: string }) 
 }
 
 // v4 新增：構造思路（邏輯觸發，與 ORIGIN 歷史觸發分開）
+/**
+ * 追問點統一呈現（v4）：【追問·思維模式名】問題 → 讀者先想 → (答案)。
+ * 構造思路的路徑、WHY 正文、直覺陷阱三處共用同一格式與同一套標籤庫。
+ * 預覽時答案預設收合，強迫「生成」一次再對答案（Slamecka & Graf 1978）。
+ */
+export function ThoughtPointCard({
+  modeName,
+  question,
+  answer,
+  passed,
+  note,
+  tone = "orange",
+  prompt = "先自己想一次，再展開答案",
+}: {
+  modeName: string;
+  question: string;
+  answer: React.ReactNode;
+  passed?: boolean;
+  note?: string;
+  tone?: "orange" | "teal" | "purple";
+  prompt?: string;
+}) {
+  const palette = {
+    orange: { box: "bg-orange-50/50 border-orange-200", head: "text-orange-900", icon: "text-orange-700", bar: "border-orange-300", label: "text-orange-800" },
+    teal: { box: "bg-teal-50/50 border-teal-200", head: "text-teal-900", icon: "text-teal-700", bar: "border-teal-300", label: "text-teal-800" },
+    purple: { box: "bg-purple-50/50 border-purple-200", head: "text-purple-900", icon: "text-purple-700", bar: "border-purple-300", label: "text-purple-800" },
+  }[tone];
+  return (
+    <div className={`${palette.box} border rounded-lg p-3`}>
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <HelpCircle className={`w-4 h-4 ${palette.icon}`} />
+        <span className={`text-xs font-bold ${palette.head}`} style={{ fontFamily: UI_FONT }}>
+          【追問 · {modeName || "思維模式名"}】
+        </span>
+        {passed ? (
+          <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-300">
+            <CheckCircle className="w-3 h-3" /> [已推出]
+          </span>
+        ) : (
+          <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">
+            <XCircle className="w-3 h-3" /> 尚未推出
+          </span>
+        )}
+      </div>
+      <p className="text-[13px] text-slate-800 font-medium mb-2">
+        <MathText text={question} />
+      </p>
+      <details className={`pl-3 border-l-2 ${palette.bar}`}>
+        <summary className={`cursor-pointer select-none text-[10px] font-bold ${palette.label}`} style={{ fontFamily: UI_FONT }}>
+          (答案) — {prompt}
+        </summary>
+        <div className="text-[12px] text-slate-700 leading-relaxed mt-1.5">{answer}</div>
+      </details>
+      {note && (
+        <p className="text-[10px] text-slate-500 italic mt-2">卡在哪一步：{note}</p>
+      )}
+    </div>
+  );
+}
+
+// v4：獨立主幹【背景】——三段式（情境 → 精確對象＋情境語言 → 精確對應的問題）
+export function SectionBackground({ card, font }: { card: CardData; font: string }) {
+  const bg = card.backgroundData;
+  if (!bg) return null;
+  const anyContent = (bg.situation || bg.preciseObject || bg.preciseQuestion || "").trim();
+  if (!anyContent) return null;
+  return (
+    <section className="mb-8">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-sky-600 text-white flex-shrink-0 shadow-md">
+          <Lightbulb className="w-5 h-5" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 leading-tight" style={{ fontFamily: font }}>背景</h2>
+          <p className="text-[10px] text-slate-500" style={{ fontFamily: UI_FONT }}>
+            為什麼需要這個知識點、在什麼情境下面臨什麼問題才被逼出來（三段式）
+          </p>
+        </div>
+      </div>
+      <div className="pl-4 border-l-4 border-sky-200 space-y-2.5">
+        {bg.situation && (
+          <div className="bg-sky-50/60 p-2.5 rounded-lg border border-sky-200">
+            <p className="text-[10px] font-bold text-sky-900 mb-0.5" style={{ fontFamily: UI_FONT }}>第一段 · 情境</p>
+            <p className="text-[13px] text-slate-800 leading-relaxed"><MathText text={bg.situation} /></p>
+          </div>
+        )}
+        {bg.preciseObject && (
+          <div className="bg-sky-50/60 p-2.5 rounded-lg border border-sky-200">
+            <p className="text-[10px] font-bold text-sky-900 mb-0.5" style={{ fontFamily: UI_FONT }}>第二段 · 精確對象＋情境語言（先給形式、再給動機）</p>
+            <p className="text-[13px] text-slate-800 leading-relaxed"><MathText text={bg.preciseObject} /></p>
+          </div>
+        )}
+        {bg.preciseQuestion && (
+          <div className="bg-sky-100/70 p-2.5 rounded-lg border border-sky-300">
+            <p className="text-[10px] font-bold text-sky-900 mb-0.5" style={{ fontFamily: UI_FONT }}>第三段 · 精確對應的問題（對應回第一段對象）</p>
+            <p className="text-[13px] text-slate-800 font-medium leading-relaxed"><MathText text={bg.preciseQuestion} /></p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function SectionConstructionThinking({ card, font }: { card: CardData; font: string }) {
   if (!card.constructionThinking) return null;
   return (
@@ -117,56 +228,117 @@ export function SectionConstructionThinking({ card, font }: { card: CardData; fo
         </div>
       </div>
       <div className="pl-4 border-l-4 border-teal-200 space-y-3">
+        {/* v4：理解問題信心校準（Polya 理解問題階段；與 WHY 的 IOED 獨立） */}
+        {card.constructionCalibration && (() => {
+          const c = card.constructionCalibration!;
+          const delta = c.confidenceAfter - c.confidenceBefore;
+          return (
+            <div
+              className={`inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] ${
+                delta < 0 ? "bg-rose-50 border-rose-300" : "bg-teal-50 border-teal-300"
+              }`}
+              style={{ fontFamily: UI_FONT }}
+            >
+              <span className={`font-bold ${delta < 0 ? "text-rose-800" : "text-teal-800"}`}>理解問題信心</span>
+              <span className="bg-white px-2 py-0.5 rounded border border-current/20">動筆前 {c.confidenceBefore}★</span>
+              <span>→</span>
+              <span className={`px-2 py-0.5 rounded text-white ${delta < 0 ? "bg-rose-600" : "bg-teal-700"}`}>寫完背景 {c.confidenceAfter}★</span>
+              <span className={`font-bold ${delta < 0 ? "text-rose-700" : "text-teal-700"}`}>({delta >= 0 ? "+" : ""}{delta})</span>
+              {delta < 0 && (
+                <span className="text-rose-800">
+                  理解問題階段盲區{c.blindSpotNote ? `：${c.blindSpotNote}` : "（先不進構造思路／WHY，回頭補背景）"}
+                </span>
+              )}
+            </div>
+          );
+        })()}
+
         <p className="text-[15px] text-slate-800 leading-relaxed">
           <MathText text={card.constructionThinking} />
         </p>
+
+        {/* v4：候選登場（決策敘事，不做驗證）——從「要求」逐步摸索到具體候選形式 */}
+        {card.candidate && (card.candidate.requirement || card.candidate.candidateForm || card.candidate.motivation) && (
+          <div className="bg-teal-50/60 p-2.5 rounded-lg border border-teal-200 space-y-1.5">
+            <p className="text-[10px] font-bold text-teal-900" style={{ fontFamily: UI_FONT }}>候選登場（決策敘事，驗證留給 WHY）</p>
+            {card.candidate.requirement && (
+              <p className="text-[12px] text-slate-700"><b className="text-teal-800">要求：</b><MathText text={card.candidate.requirement} /></p>
+            )}
+            {card.candidate.candidateForm && (
+              <p className="text-[12px] text-slate-700"><b className="text-teal-800">候選形式：</b><MathText text={card.candidate.candidateForm} /></p>
+            )}
+            {card.candidate.motivation && (
+              <p className="text-[12px] text-slate-700"><b className="text-teal-800">為什麼偏偏是它：</b><MathText text={card.candidate.motivation} /></p>
+            )}
+          </div>
+        )}
+
+        {/* v4：計畫（構造思路收尾）——只講打算證什麼／用什麼方法／範圍，含順序依賴 */}
+        {card.plan && (card.plan.steps?.length || card.plan.ranges) && (
+          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1.5">
+            <p className="text-[10px] font-bold text-slate-700" style={{ fontFamily: UI_FONT }}>計畫（Polya「擬定計劃」階段的產出）</p>
+            {card.plan.steps && card.plan.steps.length > 0 && (
+              <ol className="space-y-1">
+                {card.plan.steps.map((st, i) => (
+                  <li key={st.id || i} className="text-[12px] text-slate-700">
+                    <b>{i + 1}. </b>{st.label}
+                    {st.rationale && <span className="text-slate-500"> — {st.rationale}</span>}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {card.plan.ranges && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 rounded px-2 py-1 border border-amber-200">
+                <b>範圍：</b><MathText text={card.plan.ranges} />
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* v4：路徑不是被動敘述——摸索當下真的問過自己的問題，用追問點格式標出（Polya 啟發式問句） */}
+        {(card.thoughtPoints || []).filter((t) => t.placement === "construction").length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold text-teal-800" style={{ fontFamily: UI_FONT }}>
+              路徑中的追問點（與 WHY 共用同一套思維模式標籤庫）
+            </p>
+            {(card.thoughtPoints || [])
+              .filter((t) => t.placement === "construction")
+              .map((tp) => (
+                <ThoughtPointCard
+                  key={tp.id}
+                  tone="teal"
+                  modeName={tp.modeName}
+                  question={tp.question}
+                  answer={<MathText text={tp.answer} />}
+                  passed={tp.passed}
+                  note={tp.note}
+                  prompt="當時怎麼想通／怎麼發現走不通換方向"
+                />
+              ))}
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-// v4 新增：追問點（嵌入在 WHY/HOW 關鍵轉折處）
+// v4：WHY 正文中的追問點（構造思路路徑的追問點在上方構造思路區塊內呈現）
 export function SectionThoughtPoints({ card, font }: { card: CardData; font: string }) {
-  if (!card.thoughtPoints || card.thoughtPoints.length === 0) return null;
+  const points = (card.thoughtPoints || []).filter((t) => t.placement !== "construction");
+  if (points.length === 0) return null;
   return (
     <section className="mb-8">
-      <SlotHeading letter="?" title="追問點" subtitle="關鍵轉折處的思維模式提問（v4：原展開測試改名）" color="bg-orange-600" font={font} />
+      <SlotHeading letter="?" title="追問點" subtitle="WHY 正文關鍵轉折處：懂了這一步就懂了整個論證（原展開測試 → 追問測試）" color="bg-orange-600" font={font} />
       <div className="space-y-3">
-        {card.thoughtPoints.map((tp) => (
-          <div key={tp.id} className="bg-orange-50/50 border border-orange-200 rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <HelpCircle className="w-4 h-4 text-orange-700" />
-              <span className="text-xs font-bold text-orange-900" style={{ fontFamily: UI_FONT }}>
-                【追問 · {tp.modeName}】
-              </span>
-              {tp.passed ? (
-                <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-300">
-                  <CheckCircle className="w-3 h-3" /> ✓展
-                </span>
-              ) : (
-                <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">
-                  <XCircle className="w-3 h-3" /> 尚未通過
-                </span>
-              )}
-            </div>
-            <p className="text-[13px] text-slate-800 font-medium mb-2">
-              <span className="text-orange-700 font-bold">問題：</span>
-              <MathText text={tp.question} />
-            </p>
-            <div className="pl-3 border-l-2 border-orange-300">
-              <p className="text-[10px] text-orange-800 font-bold mb-1" style={{ fontFamily: UI_FONT }}>
-                (答案)
-              </p>
-              <p className="text-[12px] text-slate-700 leading-relaxed">
-                <MathText text={tp.answer} />
-              </p>
-            </div>
-            {tp.note && (
-              <p className="text-[10px] text-slate-500 italic mt-2">
-                備註：{tp.note}
-              </p>
-            )}
-          </div>
+        {points.map((tp) => (
+          <ThoughtPointCard
+            key={tp.id}
+            modeName={tp.modeName}
+            question={tp.question}
+            answer={<MathText text={tp.answer} />}
+            passed={tp.passed}
+            note={tp.note}
+          />
         ))}
       </div>
     </section>
@@ -176,7 +348,7 @@ export function SectionThoughtPoints({ card, font }: { card: CardData; font: str
 export function SectionWhat({ card, font }: { card: CardData; font: string }) {
   return (
     <section className="mb-8">
-      <SlotHeading letter="W" title="WHAT · 概念本質" subtitle="知道這個東西是什麼（與 HOW 嚴格分離）" color="bg-blue-600" font={font} />
+      <SlotHeading letter="W" title="WHAT · 概念本質" subtitle="這個知識點本身的描述／說明——不是 WHY 結論的重複陳述（與 HOW 嚴格分離）" color="bg-blue-600" font={font} />
       <div className="pl-4 border-l-4 border-blue-200 space-y-3">
         <p className="text-[15px] text-slate-800 leading-relaxed">
           <MathText text={card.whatData?.summary || "（尚未填寫）"} />
@@ -184,13 +356,21 @@ export function SectionWhat({ card, font }: { card: CardData; font: string }) {
 
         {card.whatData?.perspectives && card.whatData.perspectives.length > 0 && (
           <div className="space-y-2">
-            <p className="text-[10px] font-bold text-slate-500" style={{ fontFamily: UI_FONT }}>
-              多視角理解 G/L/I/C/O/A/P
+            <p className="text-[10px] font-bold text-slate-500 flex items-center gap-2" style={{ fontFamily: UI_FONT }}>
+              <span>多視角理解（自由命名借用哪個學科／框架的工具箱，下限 3 個、不設上限）</span>
+              <span className={`px-1.5 py-0.5 rounded ${card.whatData.perspectives.length >= 3 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                {card.whatData.perspectives.length} 個{card.whatData.perspectives.length < 3 ? "（未達 3）" : ""}
+              </span>
             </p>
             {card.whatData.perspectives.map((p, i) => (
               <div key={i} className="flex gap-2.5 bg-blue-50/60 p-2.5 rounded-lg border border-blue-200/70">
-                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center">
-                  {p.code}
+                <span
+                  className={`flex-shrink-0 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center ${
+                    (p.code || "").length <= 2 ? "w-7 h-7" : "px-2 h-7 max-w-[7rem] truncate"
+                  }`}
+                  title={p.code}
+                >
+                  {p.code || "視角"}
                 </span>
                 <div className="flex-1">
                   <div className="text-[10px] font-bold text-blue-900" style={{ fontFamily: UI_FONT }}>
@@ -204,6 +384,38 @@ export function SectionWhat({ card, font }: { card: CardData; font: string }) {
             ))}
           </div>
         )}
+
+        {/* v4：四個方向延伸（推深／推淺／推廣／推窄）——強烈建議，不強制寫滿 */}
+        {card.whatData?.extensions &&
+          Object.values(card.whatData.extensions).some((v) => v && v.trim()) && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold text-slate-500" style={{ fontFamily: UI_FONT }}>
+                五方向延伸——讓「這是什麼」的說明範圍更完整（視角＝借外面語言講這個點；翻譯＝把外面的東西收進這個點的語言）
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  { key: "deeper", label: "推深", hint: "奠基在什麼更底層的知識上", cls: "bg-indigo-50/70 border-indigo-200 text-indigo-900" },
+                  { key: "shallower", label: "推淺", hint: "能推出什麼／撐起什麼應用", cls: "bg-sky-50/70 border-sky-200 text-sky-900" },
+                  { key: "generalize", label: "推廣", hint: "放寬條件會變成什麼", cls: "bg-violet-50/70 border-violet-200 text-violet-900" },
+                  { key: "specialize", label: "推窄", hint: "收緊條件會變成什麼特例", cls: "bg-fuchsia-50/70 border-fuchsia-200 text-fuchsia-900" },
+                  { key: "translate", label: "翻譯", hint: "把別的知識／現象用這個知識點的語言重講（與視角相反）", cls: "bg-emerald-50/70 border-emerald-200 text-emerald-900" },
+                ].map((d) => {
+                  const val = (card.whatData!.extensions as Record<string, string | undefined>)[d.key];
+                  if (!val || !val.trim()) return null;
+                  return (
+                    <div key={d.key} className={`p-2.5 rounded-lg border ${d.cls} ${d.key === "translate" ? "sm:col-span-2" : ""}`}>
+                      <div className="text-[10px] font-bold mb-0.5" style={{ fontFamily: UI_FONT }}>
+                        {d.label} <span className="font-normal opacity-70">· {d.hint}</span>
+                      </div>
+                      <div className="text-[12px] text-slate-700 leading-relaxed">
+                        <MathText text={val} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
         {card.whatData?.distinctionFromHow && (
           <div className="bg-amber-50 border border-amber-300 p-2.5 rounded-lg text-[12px] text-amber-900">
@@ -346,7 +558,7 @@ export function SectionHow({ card, font }: { card: CardData; font: string }) {
       <SlotHeading
         letter="H"
         title="HOW · 可執行步驟"
-        subtitle={`知道怎麼做 · 狀態：${card.howData?.status === "compiled" ? "✓展 已編譯" : "⋯ 未編譯"}`}
+        subtitle={`知道怎麼做 · 狀態：${card.howData?.status === "compiled" ? STATUS_COMPILED : STATUS_UNCOMPILED}`}
         color="bg-amber-600"
         font={font}
       />
@@ -364,7 +576,7 @@ export function SectionHow({ card, font }: { card: CardData; font: string }) {
                       s.isCompiled ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
                     }`}
                   >
-                    {s.isCompiled ? "✓展" : "⋯ 未編譯"}
+                    {s.isCompiled ? STATUS_COMPILED : STATUS_UNCOMPILED}
                   </span>
                 </div>
                 <p className="text-[13px] text-slate-700 leading-relaxed">
@@ -473,7 +685,7 @@ export function SectionOrigin({ card, font }: { card: CardData; font: string }) 
       <div className="pl-4 border-l-4 border-rose-200">
         <div className="bg-rose-50/60 p-3 rounded-lg border border-rose-200">
           <p className="text-[15px] text-slate-800 leading-relaxed">
-            <span className="text-rose-600 text-xl mr-1">↯</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-300 mr-1 align-middle">{ORIGIN_MARK}</span>
             <MathText text={card.originData?.conflict || "（尚未填寫）"} />
           </p>
           {card.originData?.historicalContext && (
@@ -507,23 +719,36 @@ export function SectionIntuitionTraps({ card, font }: { card: CardData; font: st
         </div>
       </div>
       <div className="pl-4 border-l-4 border-purple-200 space-y-3">
+        <p className="text-[10px] text-slate-500" style={{ fontFamily: UI_FONT }}>
+          v4：直覺陷阱本身就是一個隱性追問點——先自己預測「我大概會怎麼誤會」，再展開看正確理解與錯在哪裡；
+          標籤統一為「直覺陷阱」，與其他追問點共用 ≥3 次的思維動作庫門檻。
+        </p>
         {card.intuitionTraps.map((trap, i) => (
-          <div key={i} className="bg-purple-50/50 border border-purple-200 rounded-lg p-3">
-            <p className="text-[13px] text-slate-800 font-medium mb-1">
-              {trap.description}
-            </p>
-            <p className="text-[11px] text-slate-600 mb-2">
-              <b>為什麼直覺會錯：</b>{trap.whyMisleading}
-            </p>
-            <div className="pl-2 border-l-2 border-purple-300">
-              <p className="text-[10px] font-bold text-purple-800" style={{ fontFamily: UI_FONT }}>
-                ✓正確理解
-              </p>
-              <p className="text-[12px] text-slate-700 mt-0.5">
-                {trap.correctUnderstanding}
-              </p>
-            </div>
-          </div>
+          <ThoughtPointCard
+            key={trap.id || i}
+            tone="purple"
+            modeName="直覺陷阱"
+            question="常見的直覺誤判是什麼？（先想一次：關於這個知識點，我大概會怎麼誤會？）"
+            passed={trap.passed}
+            note={trap.note}
+            prompt="先寫下自己的預測，再展開"
+            answer={
+              <div className="space-y-1.5">
+                <p>
+                  <b className="text-purple-800" style={{ fontFamily: UI_FONT }}>常見誤判：</b>
+                  <MathText text={trap.description} />
+                </p>
+                <p>
+                  <b className="text-purple-800" style={{ fontFamily: UI_FONT }}>錯在哪裡：</b>
+                  <MathText text={trap.whyMisleading} />
+                </p>
+                <p className="pl-2 border-l-2 border-purple-300">
+                  <b className="text-emerald-700" style={{ fontFamily: UI_FONT }}>✓ 正確理解：</b>
+                  <MathText text={trap.correctUnderstanding} />
+                </p>
+              </div>
+            }
+          />
         ))}
       </div>
     </section>
@@ -534,19 +759,30 @@ export function SectionClaims({ card, font }: { card: CardData; font: string }) 
   if (!card.claims?.length) return null;
   return (
     <section className="mb-8">
-      <SlotHeading letter="⊢" title="認識論聲明" subtitle="⊢證 / ⊢歸 / ⊢近 / ⊢約 / ⊢公設" color="bg-slate-700" font={font} />
+      <SlotHeading letter="證" title="認識論聲明" subtitle="[地位:證明] / [地位:歸納] / [地位:近似於框架] / [地位:約定] / [地位:公設(框架)]（每條須附 WHY 段落錨點）" color="bg-slate-700" font={font} />
       <div className="space-y-2">
         {card.claims.map((c, i) => (
           <div key={i} className="flex items-start gap-2 p-2.5 bg-white rounded-lg border border-slate-200">
-            <span
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 ${EPI_COLORS[c.epistemicMark] || ""}`}
-            >
-              {c.epistemicMark}
-            </span>
+            <div className="flex flex-col gap-1 flex-shrink-0">
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${EPI_COLORS[c.epistemicMark] || ""}`}
+              >
+                {epistemicLabel(c.epistemicMark, c.frameworkNote)}
+              </span>
+              {c.anchor ? (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                  {c.anchor}
+                </span>
+              ) : (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                  缺錨點
+                </span>
+              )}
+            </div>
             <div className="flex-1 text-[13px] text-slate-800">
               <MathText text={c.text} />
               {c.frameworkNote && (
-                <div className="text-[10px] text-slate-500 italic mt-0.5">[{c.frameworkNote}]</div>
+                <div className="text-[10px] text-slate-500 italic mt-0.5">框架：{c.frameworkNote}</div>
               )}
             </div>
           </div>
@@ -635,3 +871,261 @@ export function SectionDiagnostics({ card, font }: { card: CardData; font: strin
     </section>
   );
 }
+
+// v4：七主幹之【關係邊】（沒有邊＝孤島，自檢第一個要抓）
+export function SectionRelations({
+  card,
+  font,
+  relations,
+  cardTitles,
+}: {
+  card: CardData;
+  font: string;
+  relations?: Array<any>;
+  cardTitles?: Record<string, string>;
+}) {
+  const rels = (relations || []).filter((r: any) => r.fromCardId === card.id || r.toCardId === card.id);
+  if (rels.length === 0) {
+    return (
+      <section className="mb-8">
+        <SlotHeading letter="邊" title="關係邊" subtitle="沒有邊＝孤島（自檢第一個要抓）" color="bg-indigo-600" font={font} />
+        <p className="text-[13px] text-slate-400 italic">（尚未建立任何關係邊——此卡目前是孤島）</p>
+      </section>
+    );
+  }
+  return (
+    <section className="mb-8">
+      <SlotHeading letter="邊" title="關係邊" subtitle="沒有邊＝孤島（自檢第一個要抓）" color="bg-indigo-600" font={font} />
+      <div className="space-y-2">
+        {rels.map((r: any, i: number) => {
+          const otherId = r.fromCardId === card.id ? r.toCardId : r.fromCardId;
+          const other = (cardTitles && cardTitles[otherId]) || r.label || otherId;
+          const dim = r.dimension ? `: ${r.dimension}` : r.distance ? `: d=${r.distance}` : "";
+          return (
+            <div key={r.id || i} className="p-2.5 bg-white rounded-lg border border-slate-200">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-300">
+                  {r.label || relationLabelText(r.relationType)}
+                </span>
+                <span className="text-[12px] font-bold text-slate-800">{other}</span>
+                {dim && <span className="text-[10px] text-slate-500">d{dim}</span>}
+              </div>
+              {r.relationType === "prerequisite" && r.breakStep && (
+                <p className="text-[11px] text-slate-600 mt-1">缺 A 會斷在：<MathText text={r.breakStep} /></p>
+              )}
+              {r.relationType === "counter_example" && r.counterCondition && (
+                <p className="text-[11px] text-slate-600 mt-1">卡在條件：<MathText text={r.counterCondition} /></p>
+              )}
+              {(r.relationType === "analogy_verified" || r.relationType === "analogy_unverified") && r.candidatePrediction && (
+                <p className="text-[11px] text-slate-600 mt-1">候選推理測試：<MathText text={r.candidatePrediction} /></p>
+              )}
+              {r.notes && <p className="text-[11px] text-slate-500 mt-1"><MathText text={r.notes} /></p>}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// 關係邊文字標籤：統一由 inspect.ts 的 relationLabelText 提供，避免重複定義。
+
+// v4：七主幹之【過程日誌】（只增不改，帶時間戳；[框架衝突] 新舊並排）
+export function SectionProcessLogs({
+  card,
+  font,
+  processLogs,
+}: {
+  card: CardData;
+  font: string;
+  processLogs?: Array<any>;
+}) {
+  const logs = (processLogs || []).filter((l: any) => !l.cardId || l.cardId === card.id);
+  if (logs.length === 0) return null;
+  const badge = (t: string) => {
+    switch (t) {
+      case "[增量]": case "⟲": return "bg-blue-100 text-blue-800 border-blue-300";
+      case "[框架衝突]": case "⚡": return "bg-purple-100 text-purple-800 border-purple-300";
+      case "[同session矛盾]": case "⇹": return "bg-rose-100 text-rose-800 border-rose-300";
+      default: return "bg-slate-100 text-slate-700 border-slate-300";
+    }
+  };
+  const label = (t: string) =>
+    t === "⟲" ? "[增量]" : t === "⚡" ? "[框架衝突]" : t === "⇹" ? "[同session矛盾]" : t;
+  return (
+    <section className="mb-8">
+      <SlotHeading letter="誌" title="過程日誌" subtitle="只增不改，帶時間戳（理解如何演進的痕跡）" color="bg-slate-700" font={font} />
+      <div className="space-y-2">
+        {logs.map((l: any, i: number) => (
+          <div key={l.id || i} className="p-2.5 bg-white rounded-lg border border-slate-200">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${badge(l.logType)}`}>{label(l.logType)}</span>
+              <span className="text-[12px] font-bold text-slate-800">{l.title}</span>
+              <span className="text-[10px] text-slate-400 font-mono ml-auto">{l.createdAt ? new Date(l.createdAt).toLocaleString() : ""}</span>
+            </div>
+            {(l.oldContent || l.newContent) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                <div className="bg-rose-50/50 p-2 rounded border border-rose-200">
+                  <div className="text-[9px] font-bold text-rose-700 mb-0.5">舊主張</div>
+                  <div className="text-[11px] text-slate-700"><MathText text={l.oldContent || "（無）"} /></div>
+                </div>
+                <div className="bg-emerald-50/50 p-2 rounded border border-emerald-200">
+                  <div className="text-[9px] font-bold text-emerald-700 mb-0.5">新主張</div>
+                  <div className="text-[11px] text-slate-700"><MathText text={l.newContent || "（無）"} /></div>
+                </div>
+              </div>
+            )}
+            {l.explanation && <p className="text-[11px] text-slate-600 mt-1.5"><MathText text={l.explanation} /></p>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ============================================================
+// v4 八點自我檢查 ＋ 符號綁定（compact chip / full 展開兩种形態）
+// ============================================================
+
+const STATUS_STYLE = {
+  pass: { chip: "bg-emerald-50 border-emerald-200 text-emerald-800", dot: "bg-emerald-500", label: "通過", Icon: CheckCircle2 },
+  warn: { chip: "bg-amber-50 border-amber-200 text-amber-900", dot: "bg-amber-500", label: "待確認", Icon: AlertTriangle },
+  fail: { chip: "bg-rose-50 border-rose-200 text-rose-900", dot: "bg-rose-500", label: "違規", Icon: OctagonAlert },
+} as const;
+
+function CheckRow({ check, defaultOpen }: { check: CheckResult; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const st = STATUS_STYLE[check.status];
+  const hasFindings = check.findings.length > 0;
+
+  return (
+    <div className={`rounded-lg border ${st.chip} overflow-hidden`}>
+      <button
+        onClick={() => hasFindings && setOpen(!open)}
+        className={`w-full flex items-start gap-2 p-2.5 text-left ${hasFindings ? "cursor-pointer" : "cursor-default"}`}
+      >
+        <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${st.dot}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold">{check.index} {check.label}</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/70 border border-current/20 font-bold" style={{ fontFamily: UI_FONT }}>
+              {st.label}
+            </span>
+            {hasFindings && (
+              <span className="text-[9px] opacity-60" style={{ fontFamily: UI_FONT }}>
+                {check.findings.length} 處 · {open ? "收起" : "展開"}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] leading-snug mt-0.5 opacity-90">{check.summary}</p>
+        </div>
+      </button>
+
+      {open && hasFindings && (
+        <div className="px-2.5 pb-2.5 space-y-1.5">
+          <p className="text-[10px] opacity-70 border-t border-current/15 pt-2 leading-relaxed" style={{ fontFamily: UI_FONT }}>
+            手冊要求：{check.manualRule}
+          </p>
+          {check.findings.map((f, i) => (
+            <div key={i} className="bg-white/70 rounded p-2 space-y-1 border border-current/15">
+              <p className="text-[11px] font-medium leading-snug">
+                「{f.quote}」
+              </p>
+              <p className="text-[10px] opacity-80">{f.issue}</p>
+              <p className="text-[10px] text-slate-700 leading-relaxed">
+                <b style={{ fontFamily: UI_FONT }}>建議：</b>
+                {f.fix}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface FourPointCheckPanelProps {
+  report: FourPointReport;
+  /** compact：只顯示四顆狀態 chip，用於表單下方 */
+  variant?: "full" | "compact";
+}
+
+export const FourPointCheckPanel: React.FC<FourPointCheckPanelProps> = ({ report, variant = "full" }) => {
+  if (variant === "compact") {
+    const allPass = report.clean;
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span
+          className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+            allPass ? "bg-emerald-100 text-emerald-800" : report.failCount ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"
+          }`}
+          style={{ fontFamily: UI_FONT }}
+        >
+          八點自我檢查 {allPass ? "全過" : `${report.failCount} 違規 / ${report.warnCount} 待確認`}
+        </span>
+        {report.checks.map((c) => (
+          <span
+            key={c.id}
+            title={`${c.label}：${c.summary}`}
+            className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${STATUS_STYLE[c.status].chip}`}
+          >
+            {c.index}
+            {c.status === "pass" ? "✓" : c.status === "fail" ? "✕" : "!"}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <ClipboardCheck className="w-4 h-4 text-slate-600" />
+        <h4 className="text-sm font-bold text-slate-800" style={{ fontFamily: UI_FONT }}>
+          八點自我檢查 · {report.fieldLabel}
+        </h4>
+        <span
+          className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+            report.clean ? "bg-emerald-100 text-emerald-800" : report.failCount ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"
+          }`}
+          style={{ fontFamily: UI_FONT }}
+        >
+          {report.clean ? "八點全過" : `${report.failCount} 違規 · ${report.warnCount} 待確認`}
+        </span>
+      </div>
+      <p className="text-[10px] text-slate-500 leading-relaxed" style={{ fontFamily: UI_FONT }}>
+        這八點＋符號綁定，是從真實寫壞的例子逼出來的，每一點都回報具體原文，不是抽象評語。背景、構造思路與 WHY 正文共用<b>同一套</b>規則，不是三套。
+      </p>
+      <div className="space-y-1.5">
+        {report.checks.map((c) => (
+          <CheckRow key={c.id} check={c} defaultOpen={c.status === "fail"} />
+        ))}
+      </div>
+
+      {"symbolBinding" in report && report.symbolBinding && (
+        <div className={`p-2.5 rounded-lg border text-xs ${
+          report.symbolBinding.status === "pass"
+            ? "bg-slate-50 border-slate-200 text-slate-600"
+            : "bg-amber-50 border-amber-200 text-amber-900"
+        }`}>
+          <div className="flex items-center gap-1.5 font-bold mb-1">
+            <span>⌘ 符號綁定檢查</span>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded ${report.symbolBinding.status === "pass" ? "bg-slate-200 text-slate-700" : "bg-amber-200 text-amber-800"}`}>
+              {report.symbolBinding.status === "pass" ? "通過" : "待核對"}
+            </span>
+          </div>
+          <p className="text-[11px] opacity-90">{report.symbolBinding.summary}</p>
+          {report.symbolBinding.findings.length > 0 && (
+            <ul className="mt-1.5 space-y-1">
+              {report.symbolBinding.findings.map((f, i) => (
+                <li key={i} className="text-[10px] leading-relaxed">
+                  <b>「{f.quote}」</b> — {f.issue}。{f.fix}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};

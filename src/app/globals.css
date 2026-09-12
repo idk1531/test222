@@ -53,6 +53,80 @@
   .katex-display { overflow-x: auto; overflow-y: hidden; }
 }
 
+/* ===== 使用教學動畫（transform/opacity only，跨裝置低成本播放） ===== */
+.tutorial-grid-stage {
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.tutorial-mini-card {
+  animation: tutorialCanvasFloat 3.6s ease-in-out infinite;
+}
+.tutorial-mini-card:nth-child(2) { animation-delay: -1.1s; }
+.tutorial-hand-pan { animation: tutorialHandPan 3.6s ease-in-out infinite; }
+.tutorial-card-drag { animation: tutorialCardDrag 3.2s ease-in-out infinite; }
+.tutorial-pointer-drag { animation: tutorialPointerDrag 3.2s ease-in-out infinite; }
+.tutorial-pinch-card { animation: tutorialPinchCard 3s ease-in-out infinite; }
+.tutorial-finger-left { animation: tutorialFingerLeft 3s ease-in-out infinite; }
+.tutorial-finger-right { animation: tutorialFingerRight 3s ease-in-out infinite; }
+.tutorial-json-file { animation: tutorialFilePulse 2.5s ease-in-out infinite; }
+.tutorial-file-out { animation: tutorialExportArrow 2.5s ease-in-out infinite; }
+.tutorial-file-in { animation: tutorialImportArrow 2.5s ease-in-out infinite; }
+
+@keyframes tutorialCanvasFloat {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-22px, -10px); }
+}
+@keyframes tutorialHandPan {
+  0%, 100% { transform: translate(20px, 10px) scale(1); opacity: .65; }
+  50% { transform: translate(-25px, -12px) scale(1.08); opacity: 1; }
+}
+@keyframes tutorialCardDrag {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  50% { transform: translateX(145px) rotate(1deg); }
+}
+@keyframes tutorialPointerDrag {
+  0%, 100% { transform: translate(0, 0); opacity: 1; }
+  50% { transform: translate(145px, -2px); opacity: .75; }
+}
+@keyframes tutorialPinchCard {
+  0%, 100% { transform: scale(.78); }
+  50% { transform: scale(1.16); }
+}
+@keyframes tutorialFingerLeft {
+  0%, 100% { transform: translateX(22px); }
+  50% { transform: translateX(-18px); }
+}
+@keyframes tutorialFingerRight {
+  0%, 100% { transform: translateX(-22px); }
+  50% { transform: translateX(18px); }
+}
+@keyframes tutorialFilePulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 2px 6px rgba(15,23,42,.12); }
+  50% { transform: scale(1.1); box-shadow: 0 8px 18px rgba(37,99,235,.22); }
+}
+@keyframes tutorialExportArrow {
+  0%, 100% { transform: translateY(0); opacity: .55; }
+  50% { transform: translateY(8px); opacity: 1; }
+}
+@keyframes tutorialImportArrow {
+  0%, 100% { transform: translateY(8px); opacity: .55; }
+  50% { transform: translateY(0); opacity: 1; }
+}
+
+/* 尊重使用者的減少動態效果偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-mini-card,
+  .tutorial-hand-pan,
+  .tutorial-card-drag,
+  .tutorial-pointer-drag,
+  .tutorial-pinch-card,
+  .tutorial-finger-left,
+  .tutorial-finger-right,
+  .tutorial-json-file,
+  .tutorial-file-out,
+  .tutorial-file-in { animation: none !important; }
+}
+
 /* 背景自訂預設值 */
 .bg-solid { background-attachment: scroll; }
 .bg-gradient-warm {

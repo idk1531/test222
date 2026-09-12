@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { Search, X, Layers, ArrowRight, Tag, BookOpen, AlertTriangle } from "lucide-react";
-import { CardData } from "./KnowledgeCardNode";
+import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
 
 interface OmniSearchModalProps {
@@ -23,10 +23,10 @@ export const OmniSearchModal: React.FC<OmniSearchModalProps> = ({
     { key: "all", label: "全部" },
     { key: "uncompiled", label: "⋯ 未編譯 HOW" },
     { key: "blindspot", label: "▲ 盲區" },
-    { key: "prove", label: "⊢證 演繹證明" },
-    { key: "inductive", label: "⊢歸 經驗歸納" },
-    { key: "approx", label: "⊢近[框架] 近似" },
-    { key: "axiom", label: "⊢公設[框架]" },
+    { key: "prove", label: "[地位:證明] 演繹證明" },
+    { key: "inductive", label: "[地位:歸納] 經驗歸納" },
+    { key: "approx", label: "[地位:近似於框架] 近似" },
+    { key: "axiom", label: "[地位:公設(框架)]" },
     { key: "conflict", label: "⚡ 框架衝突" },
   ];
 

@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { CardData } from "./KnowledgeCardNode";
-import { fullCardAudit } from "@/lib/inspect";
+import type { CardData } from "./KnowledgeCardNode";
+import { fullCardAudit, runFourPointCheckOnCard } from "@/lib/inspect";
+import { useWorkspaceState } from "@/lib/store";
+import { FourPointCheckPanel } from "./CardPaperSections";
 import {
   Sparkles,
   AlertTriangle,
@@ -31,14 +33,15 @@ export const AIAuditDrawer: React.FC<AIAuditDrawerProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [auditResult, setAuditResult] = useState<any>(null);
+  const wsRelations = (useWorkspaceState().relations as any[]) || [];
 
-  // 改為純前端審查（不呼叫後端）
+  // 改為純前端審查（不呼叫後端）；傳入關係邊供⑦證明鏈的 [前提] 歸類
   const runAudit = () => {
     if (!card) return;
     setLoading(true);
     // 讓 UI 有短暫「審查中」狀態，之後顯示本地計算結果
     setTimeout(() => {
-      setAuditResult(fullCardAudit(card));
+      setAuditResult(fullCardAudit(card, wsRelations));
       setLoading(false);
     }, 400);
   };
@@ -167,6 +170,13 @@ export const AIAuditDrawer: React.FC<AIAuditDrawerProps> = ({
                   );
                 })
               )}
+            </div>
+
+            {/* v4：四點自我檢查（構造思路 + WHY正文，同一套規則） */}
+            <div className="space-y-3 pt-3 border-t border-slate-200">
+              {runFourPointCheckOnCard(card, wsRelations).map((rep) => (
+                <FourPointCheckPanel key={rep.field} report={rep} />
+              ))}
             </div>
 
             {/* Quick Diagnostic Actions */}

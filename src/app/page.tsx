@@ -2,13 +2,12 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { InfiniteCanvas, CanvasObjectData, RelationData } from "@/components/InfiniteCanvas";
-import { CardData } from "@/components/KnowledgeCardNode";
-import { useWorkspaceState, actions, exportFile, importFile, resetToSeed, getState, getExportJson } from "@/lib/store";
-import { TutorialOverlay, shouldShowTutorial } from "@/components/TutorialOverlay";
+import type { CardData } from "@/components/KnowledgeCardNode";
+import { useWorkspaceState, actions, exportFile, copyExportJson, importFile, resetToSeed, getState } from "@/lib/store";
 import { CardDetailModal } from "@/components/CardDetailModal";
 import { AIAuditDrawer } from "@/components/AIAuditDrawer";
 import { ExpansionTestModal } from "@/components/ExpansionTestModal";
-import { BlockageGuideModal } from "@/components/BlockageGuideModal";
+import { BlockageGuideModal, OnboardingTutorial } from "@/components/BlockageGuideModal";
 import { AnalogyWorkbenchModal } from "@/components/AnalogyWorkbenchModal";
 import { OmniSearchModal } from "@/components/OmniSearchModal";
 import { ImageTextCheckModal } from "@/components/ImageTextCheckModal";
@@ -44,8 +43,8 @@ import {
   Download,
   Upload,
   RotateCcw,
-  Copy,
-  CheckCircle,
+  ClipboardCopy,
+  GraduationCap,
 } from "lucide-react";
 
 interface BackgroundConfig {
@@ -81,6 +80,7 @@ export default function WorkbenchPage() {
   const isLoading = false;
 
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [showCopyBackupAction, setShowCopyBackupAction] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // 避免伺服器預渲染與瀏覽器本機快取的水合差異：
@@ -88,6 +88,11 @@ export default function WorkbenchPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
+    // 首次使用自動播放；關閉後不再打擾，可隨時由學士帽圖示重播。
+    if (!window.localStorage.getItem("scinotes-tutorial-seen")) {
+      const timer = window.setTimeout(() => setShowTutorial(true), 450);
+      return () => window.clearTimeout(timer);
+    }
   }, []);
 
   // UI Customization
@@ -114,32 +119,25 @@ export default function WorkbenchPage() {
   const [showFieldCustomizer, setShowFieldCustomizer] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
-  const [manualExportJson, setManualExportJson] = useState<string | null>(null);
 
-  // 首次造訪自動顯示使用教學
-  useEffect(() => {
-    if (mounted && shouldShowTutorial()) {
-      const t = setTimeout(() => setShowTutorial(true), 600);
-      return () => clearTimeout(t);
-    }
-  }, [mounted]);
-
-  // 匯出資料為 JSON 檔案（多重相容策略：下載 / 分享 / 新分頁 / 剪貼簿 / 手動複製）
+  // 匯出資料為 JSON 檔案：Share → Download → 新頁另存 三層備援
   const handleExport = async () => {
-    setImportMessage("匯出中…");
     const result = await exportFile();
     setImportMessage(result.message);
-    // 全部自動策略皆失敗時，開啟手動複製視窗保底
-    if (!result.ok && result.json) {
-      setManualExportJson(result.json);
-    }
-    setTimeout(() => setImportMessage(null), 5000);
+    // 任何匯出方式都提供文字備援，使用者不用猜裝置是否真的已儲存。
+    setShowCopyBackupAction(true);
+    setTimeout(() => {
+      setImportMessage(null);
+      setShowCopyBackupAction(false);
+    }, 6500);
   };
 
-  // 手動複製匯出（保底方案）
-  const handleManualExport = () => {
-    const { json } = getExportJson();
-    setManualExportJson(json);
+  // 在不支援下載的 WebView / Safari 上，可直接複製完整 JSON 備份
+  const handleCopyExport = async () => {
+    const result = await copyExportJson();
+    setImportMessage(result.message);
+    setShowCopyBackupAction(false);
+    setTimeout(() => setImportMessage(null), 4500);
   };
 
   // 從 JSON 檔案匯入
@@ -182,8 +180,11 @@ export default function WorkbenchPage() {
   }, []);
 
   // Canvas objects CRUD（純前端）
-  const handleUpdateCanvasObjects = async (updated: Partial<CanvasObjectData>[]) => {
-    actions.updateCanvasObjects(updated);
+  const handleUpdateCanvasObjects = async (
+    updated: Partial<CanvasObjectData>[],
+    options?: { final?: boolean }
+  ) => {
+    actions.updateCanvasObjects(updated, options);
   };
 
   const handleDeleteCanvasObject = async (id: string) => {
@@ -445,6 +446,13 @@ export default function WorkbenchPage() {
           >
             <Search className="w-4 h-4" />
           </button>
+          <button
+            onClick={() => setShowTutorial(true)}
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            title="使用教學（重播）"
+          >
+            <GraduationCap className="w-4 h-4" />
+          </button>
           {/* 這些次要設定手機收進漢堡選單 */}
           <button
             onClick={() => setShowBackgroundCustomizer(true)}
@@ -459,15 +467,6 @@ export default function WorkbenchPage() {
             title="欄位設定"
           >
             <Settings className="w-4 h-4" />
-          </button>
-
-          {/* 使用教學（動畫） */}
-          <button
-            onClick={() => setShowTutorial(true)}
-            className="touch-target flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-            title="使用教學"
-          >
-            <HelpCircle className="w-4 h-4" />
           </button>
 
           <div className="hidden sm:block">
@@ -492,11 +491,11 @@ export default function WorkbenchPage() {
             <Upload className="w-4 h-4" />
           </button>
           <button
-            onClick={handleManualExport}
+            onClick={handleCopyExport}
             className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            title="手動複製 JSON（下載失敗時使用）"
+            title="下載／分享無效時：複製 JSON 備份到剪貼簿"
           >
-            <Copy className="w-4 h-4" />
+            <ClipboardCopy className="w-4 h-4" />
           </button>
           <button
             onClick={handleReset}
@@ -525,11 +524,18 @@ export default function WorkbenchPage() {
         </div>
       </header>
 
-      {/* 匯入/匯出訊息條 */}
+      {/* 匯入/匯出訊息條：包含跨裝置複製備援 */}
       {importMessage && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 rounded-lg bg-slate-900 text-white text-xs shadow-lg flex items-center gap-2 max-w-[92vw]">
-          <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-          <span className="truncate">{importMessage}</span>
+        <div className="fixed top-[max(3.5rem,calc(env(safe-area-inset-top)+3.5rem))] left-1/2 -translate-x-1/2 z-[90] max-w-[calc(100vw-24px)] px-3 py-2 rounded-lg bg-slate-900 text-white text-xs shadow-lg flex items-center gap-3">
+          <span className="leading-relaxed">{importMessage}</span>
+          {showCopyBackupAction && (
+            <button
+              onClick={handleCopyExport}
+              className="flex-shrink-0 px-2 py-1 rounded bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+            >
+              複製 JSON
+            </button>
+          )}
         </div>
       )}
 
@@ -576,6 +582,13 @@ export default function WorkbenchPage() {
 
               <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1 mt-3">設定</div>
               <button
+                onClick={() => { setShowTutorial(true); setShowMobileMenu(false); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-blue-50 hover:text-blue-700 mb-0.5"
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>使用教學</span>
+              </button>
+              <button
                 onClick={() => { setShowBackgroundCustomizer(true); setShowMobileMenu(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
               >
@@ -606,27 +619,21 @@ export default function WorkbenchPage() {
                 <span>匯入 JSON 檔案</span>
               </button>
               <button
+                onClick={() => { handleCopyExport(); setShowMobileMenu(false); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
+              >
+                <ClipboardCopy className="w-4 h-4" />
+                <span>複製 JSON 備份</span>
+              </button>
+              <p className="px-3 pt-1 text-[10px] leading-relaxed text-slate-400">
+                手機匯出會優先開啟系統分享；請選擇「儲存到檔案」。若遭瀏覽器阻擋，可用上方複製備份。
+              </p>
+              <button
                 onClick={() => { handleReset(); setShowMobileMenu(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>重置為初始範例</span>
-              </button>
-              <button
-                onClick={() => { handleManualExport(); setShowMobileMenu(false); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
-              >
-                <Copy className="w-4 h-4" />
-                <span>手動複製 JSON（下載失敗時用）</span>
-              </button>
-
-              <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1 mt-3">說明</div>
-              <button
-                onClick={() => { setShowTutorial(true); setShowMobileMenu(false); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 mb-0.5"
-              >
-                <HelpCircle className="w-4 h-4" />
-                <span>使用教學（動畫）</span>
               </button>
 
               <div className="px-3 py-2">
@@ -822,6 +829,11 @@ export default function WorkbenchPage() {
           card={expansionCard}
           onClose={() => setExpansionCard(null)}
           onSuccess={handleExpansionTestSuccess}
+          onSaveCard={(patchData) => {
+            handleSaveCard(patchData);
+            // 讓測試視窗立即看到寫回的 [已推出]／卡點，不必關閉重開
+            setExpansionCard((prev) => (prev && prev.id === patchData.id ? ({ ...prev, ...patchData } as CardData) : prev));
+          }}
         />
       )}
 
@@ -877,6 +889,15 @@ export default function WorkbenchPage() {
         />
       )}
 
+      {/* 首次引導／可重播的操作教學動畫 */}
+      <OnboardingTutorial
+        open={showTutorial}
+        onClose={() => {
+          setShowTutorial(false);
+          window.localStorage.setItem("scinotes-tutorial-seen", "1");
+        }}
+      />
+
       {/* Background Customizer Modal */}
       {showBackgroundCustomizer && (
         <BackgroundCustomizer
@@ -903,72 +924,6 @@ export default function WorkbenchPage() {
           }}
           onClose={() => setShowFieldCustomizer(false)}
         />
-      )}
-
-      {/* 使用教學動畫 */}
-      <TutorialOverlay open={showTutorial} onClose={() => setShowTutorial(false)} />
-
-      {/* 手動複製 JSON（所有自動匯出策略失敗時的保底方案） */}
-      {manualExportJson && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-3 sm:p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92dvh] flex flex-col overflow-hidden safe-bottom">
-            <div className="px-4 py-3 bg-slate-900 text-white flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <Copy className="w-4 h-4 text-blue-400" />
-                <div>
-                  <h3 className="text-sm font-bold">手動複製 JSON 備份</h3>
-                  <p className="text-[10px] text-slate-400">
-                    若裝置無法直接下載檔案，可在此全選複製後自行貼到記事本儲存
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setManualExportJson(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-hidden p-4">
-              <textarea
-                readOnly
-                value={manualExportJson}
-                onFocus={(e) => e.currentTarget.select()}
-                className="w-full h-full min-h-[45vh] p-3 rounded-lg border border-slate-300 bg-slate-50 font-mono text-[10px] leading-relaxed resize-none"
-              />
-            </div>
-
-            <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 flex-shrink-0">
-              <span className="text-[10px] text-slate-500">
-                提示：iPhone 可長按文字框 →「全選」→「拷貝」
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(manualExportJson);
-                      setImportMessage("已複製到剪貼簿");
-                      setTimeout(() => setImportMessage(null), 3000);
-                    } catch {
-                      setImportMessage("複製失敗，請手動全選文字框內容");
-                      setTimeout(() => setImportMessage(null), 4000);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
-                >
-                  <Copy className="w-3.5 h-3.5" /> 複製全部
-                </button>
-                <button
-                  onClick={() => setManualExportJson(null)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 text-xs hover:bg-slate-100"
-                >
-                  關閉
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

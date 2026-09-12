@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { CardData } from "./KnowledgeCardNode";
+import type { CardData } from "./KnowledgeCardNode";
 import {
   Share2,
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Filter,
 } from "lucide-react";
+import { relationLabelText, normalizeLogType, STATUS_UNCOMPILED } from "@/lib/inspect";
 
 interface RelationData {
   id: string;
@@ -68,7 +69,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
   const unverifiedAnalogiesCount = relations.filter(
     (r) => r.relationType === "analogy_unverified"
   ).length;
-  const frameworkConflictsCount = processLogs.filter((l) => l.logType === "⚡").length;
+  const frameworkConflictsCount = processLogs.filter((l) => normalizeLogType(l.logType) === "[框架衝突]").length;
   const motherTopicsCount = motherTopics.length;
   const relationDensity = cards.length > 0 ? (relations.length / cards.length).toFixed(2) : "0.00";
 
@@ -268,7 +269,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
           </div>
 
           <div className="bg-amber-50/60 p-2 rounded-lg border border-amber-200 text-center">
-            <span className="text-[10px] text-amber-800 block">⋯ 未編譯 HOW</span>
+            <span className="text-[10px] text-amber-800 block">{STATUS_UNCOMPILED} HOW</span>
             <span className="text-base font-bold text-amber-700 font-mono">{uncompiledCount}</span>
           </div>
 
@@ -285,7 +286,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
           </div>
 
           <div className="bg-purple-50/60 p-2 rounded-lg border border-purple-200 text-center">
-            <span className="text-[10px] text-purple-800 block">⚡ 框架衝突</span>
+            <span className="text-[10px] text-purple-800 block">[框架衝突]</span>
             <span className="text-base font-bold text-purple-700 font-mono">
               {frameworkConflictsCount}
             </span>
@@ -321,7 +322,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
               <span className="w-2 h-0.5 bg-indigo-600"></span> 實線：已驗證前提/類比 (≈/→)
             </div>
             <div className="flex items-center gap-1.5 text-amber-700">
-              <span className="w-2 h-0.5 border-t border-dashed border-amber-600"></span> 虛線：未驗證類比 (~[d]，不計分)
+              <span className="w-2 h-0.5 border-t border-dashed border-amber-600"></span> 虛線：{relationLabelText("analogy_unverified")}（不計分）
             </div>
           </div>
         </div>
