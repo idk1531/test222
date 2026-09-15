@@ -899,7 +899,13 @@ export function SectionRelations({
       <div className="space-y-2">
         {rels.map((r: any, i: number) => {
           const otherId = r.fromCardId === card.id ? r.toCardId : r.fromCardId;
-          const other = (cardTitles && cardTitles[otherId]) || r.label || otherId;
+          // v4：關係邊允許指向外部知識節點（非工作區卡片，如「質量作用定律」「溫控器」），
+          // 此時以 toTitle／fromTitle 顯示名稱，圖譜上則不畫線。
+          const other =
+            (cardTitles && cardTitles[otherId]) ||
+            (otherId === r.toCardId ? r.toTitle : r.fromTitle) ||
+            r.label ||
+            otherId;
           const dim = r.dimension ? `: ${r.dimension}` : r.distance ? `: d=${r.distance}` : "";
           return (
             <div key={r.id || i} className="p-2.5 bg-white rounded-lg border border-slate-200">
