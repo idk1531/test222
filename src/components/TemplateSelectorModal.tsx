@@ -36,7 +36,7 @@ export const TemplateSelectorModal: React.FC<TemplateSelectorModalProps> = ({
       name: "判別程序卡 (決策型)",
       shape: "C",
       domain: "化學/算法/工程",
-      desc: "針對擾動響應判定（如勒夏特列、正負極判斷），包含分支條件防呆。",
+      desc: "針對擾動響應判定（如勒沙特列、正負極判斷），包含分支條件防呆。",
       icon: Cpu,
       color: "border-amber-200 hover:border-amber-500 hover:bg-amber-50/40",
     },

@@ -16,17 +16,25 @@
 ```bash
 npm install
 npm run dev      # 開發
-npm run build    # 一般建置（含 /api/health 靜態端點）
+npm run build    # 一般伺服器模式建置（含 /api/health 靜態端點）
+npm run export   # 一次性靜態匯出（= STATIC_EXPORT=1 next build），產出 out/
 ```
 
 ### 部署到 GitHub Pages（純靜態，不需要伺服器）
 
 ```bash
-GITHUB_PAGES=1 GH_REPO=<你的倉庫名> npm run build   # 產出 out/
-npx serve out                                        # 本機驗證
+# 不帶 NEXT_BASE_PATH：basePath 為空字串（部署在網域根目錄時用）
+npm run export
+
+# 帶入 repo 名稱（含前導斜線，直接作為 basePath 使用，與 deploy.yml 帶入
+# 的 "/<repo名稱>" 同格式）：對應 GitHub Pages 專案頁網址
+NEXT_BASE_PATH=/<你的倉庫名> npm run export   # 產出 out/
+npx serve out                                  # 本機驗證
 ```
 
-推到 `main` 後，`.github/workflows/deploy.yml` 會自動建置並發佈。
+推到 `main` 後，`.github/workflows/deploy.yml` 會自動執行 `npm run export`
+（並以 `NEXT_BASE_PATH` 動態帶入實際 repo 名稱），
+建置並發佈到 GitHub Pages，也支援手動觸發（workflow_dispatch）。
 需在倉庫 Settings → Pages 將 Source 設為 **GitHub Actions**。
 
 ---

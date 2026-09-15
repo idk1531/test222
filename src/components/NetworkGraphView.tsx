@@ -23,11 +23,15 @@ interface RelationData {
   toCardId: string;
   relationType: string;
   distance?: number;
+  dimension?: string;
   label?: string;
   status: string;
   candidatePrediction?: string;
   verificationResult?: string;
   notes?: string;
+  /** v4：邊的另一端是外部知識節點（非工作區卡片）時的顯示名稱，如「質量作用定律」「溫控器」 */
+  toTitle?: string;
+  fromTitle?: string;
 }
 
 interface NetworkGraphViewProps {
@@ -365,6 +369,10 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
                   selectedRelations.map((rel) => {
                     const isOther = rel.fromCardId === selectedCard.id ? rel.toCardId : rel.fromCardId;
                     const otherCard = cards.find((c) => c.id === isOther);
+                    const otherTitle =
+                      otherCard?.title ||
+                      (isOther === rel.toCardId ? rel.toTitle : rel.fromTitle) ||
+                      "未知（外部知識節點）";
                     return (
                       <div
                         key={rel.id}
@@ -376,7 +384,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
                           <span className="text-[9px] text-slate-400">點擊編輯</span>
                         </div>
                         <div className="text-slate-600 mt-0.5 truncate">
-                          對應節點: {otherCard?.title || "未知"}
+                          對應節點: {otherTitle}
                         </div>
                       </div>
                     );
