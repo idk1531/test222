@@ -333,18 +333,23 @@ export default function WorkbenchPage() {
     actions.updateMotherTopic(id, updates);
   };
 
-  // Expansion test passed -> compile HOW step
+  // Expansion test passed -> compile HOW branches (v5: 分支可巢狀，逐一標記)
   const handleExpansionTestSuccess = (cardId: string) => {
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
 
-    const updatedSteps = (card.howData?.steps || []).map((s) => ({ ...s, isCompiled: true }));
+    const markAllCompiled = (bs: any[]): any[] =>
+      (bs || []).map((b) => ({
+        ...b,
+        isCompiled: true,
+        ...(b.branches ? { branches: markAllCompiled(b.branches) } : {}),
+      }));
     handleSaveCard({
       id: cardId,
       howData: {
         ...card.howData!,
         status: "compiled",
-        steps: updatedSteps,
+        branches: markAllCompiled(card.howData?.branches || []),
         testNotes: "✓ 閉卷展開測試已成功通過，推理節點完備。",
       },
     });

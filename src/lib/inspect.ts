@@ -69,9 +69,41 @@ export const STATUS_WARNING = "[警示]";
 export const ORIGIN_MARK = "[歷史起源]";
 export const ORIGIN_MARK_KEY = "[歷史起源:關鍵]";
 
+/**
+ * v5：收集 HOW 的全部 CHECK——橫跨性前置關卡（howData.checks）＋各分支的區域性 CHECK。
+ * WHEN 併入 HOW 後，「看到___→檢查___」只存在於 HOW 這兩個層級。
+ */
+export function collectHowChecks(card: any): any[] {
+  const out: any[] = [];
+  const how = card?.howData;
+  if (!how) return out;
+  for (const c of how.checks || []) out.push(c);
+  const walk = (bs: any[]) => {
+    for (const b of bs || []) {
+      for (const c of b.checks || []) out.push(c);
+      walk(b.branches || []);
+    }
+  };
+  walk(how.branches || []);
+  return out;
+}
+
+/** v5：攤平 HOW 全部分支（含巢狀子分支） */
+export function collectHowBranches(card: any): any[] {
+  const out: any[] = [];
+  const walk = (bs: any[]) => {
+    for (const b of bs || []) {
+      out.push(b);
+      walk(b.branches || []);
+    }
+  };
+  walk(card?.howData?.branches || []);
+  return out;
+}
+
 // ========== 1. 判型(A~E) ==========
 export function classifyShape(card: Partial<CardData>) {
-  const content = `${card?.title || ""} ${card?.whatData?.summary || ""} ${card?.whyData?.fullReasoning || ""} ${card?.howData?.steps?.map((s: any) => s.action).join(" ") || ""}`;
+  const content = `${card?.title || ""} ${card?.whatData?.summary || ""} ${card?.whyData?.fullReasoning || ""} ${collectHowBranches(card).map((s: any) => s.action || "").join(" ") || ""}`;
 
   let predictedShape: "A" | "B" | "C" | "D" | "E" = "A";
   let confidence = 85;
@@ -118,8 +150,9 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
   const whyReasoning = card?.whyData?.fullReasoning || "";
   const lockedAssumptions = (card?.assumptions || []).map((a: any) => (a.name || "").toLowerCase());
   const claims = card?.claims || [];
-  const steps = card?.howData?.steps || [];
-  const triggers = card?.whenData?.triggers || [];
+  // v5：WHEN 併入 HOW——steps → branches（含巢狀）、triggers → HOW 的 CHECK（橫跨性＋區域性）
+  const branches = collectHowBranches(card);
+  const checks = collectHowChecks(card);
   const originConflict = card?.originData?.conflict || "";
 
   if (!whyReasoning || whyReasoning.length < 30) {
@@ -269,29 +302,29 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
     }
   }
 
-  const uncompiledSteps = steps.filter((s: any) => !s.isCompiled);
+  const uncompiledSteps = branches.filter((s: any) => !s.isCompiled);
   if (uncompiledSteps.length > 0 || card?.howData?.status === "uncompiled") {
     issues.push({
       severity: "suggestion",
       category: "HOW 編譯檢查",
-      title: `存在 ${uncompiledSteps.length} 個 [未編譯] 步驟`,
+      title: `存在 ${uncompiledSteps.length} 個 [未編譯] 分支`,
       description: "若這類題每次仍需先臨場重推 WHY 才能往下走，標 [未編譯]；直到能不經重新推導直接執行，才去掉這個標記。",
       targetSlot: "HOW",
     });
   }
   // HOW 空殼檢查：把 WHY 蓋住，只看 HOW——若只是抄 WHY 結論＋「解方程」三字，就是沒寫夠格
   {
-    const howText = steps.map((s: any) => `${s.title || ""} ${s.action || ""}`).join("\n");
+    const howText = branches.map((s: any) => `${s.title || ""} ${s.action || ""}`).join("\n");
     const hasOpChoice =
       /查表|留數|二階判定|判別|分支|若.+則|如果.+就|選擇|技巧|先.+再|注意|陷阱|邊界|特例/.test(howText);
     const looksShell =
       howText.trim().length > 0 &&
       /解方程|求解|計算|算出/.test(howText) &&
       !hasOpChoice;
-    // 與 WHY 的文字重疊度：任一步驟動作（去空白後取前 40 字）若逐字出現在 WHY 全文，即疑似重抄
+    // 與 WHY 的文字重疊度：任一分支動作（去空白後取前 40 字）若逐字出現在 WHY 全文，即疑似重抄
     const norm = (x: string) => x.replace(/\s+/g, "");
     const whyNorm = norm(whyReasoning);
-    const copied = steps.some((s: any) => {
+    const copied = branches.some((s: any) => {
       const a = norm(s.action || "");
       return a.length >= 40 && whyNorm.includes(a.slice(0, 40));
     });
@@ -307,19 +340,20 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
     }
   }
 
-  if (triggers.length === 0) {
+  // v5：WHEN 併入 HOW——「看到___→檢查___」的具體化要求移到 HOW 的 CHECK（橫跨性／區域性）
+  if (checks.length === 0) {
     issues.push({
       severity: "warning",
-      category: "WHEN 具體化審查",
-      title: "WHEN 缺少具體觸發線索",
-      description: "不要寫抽象套話（如『在高維時注意』），必須寫成：『看到 [具體線索] → 檢查 [明確條件]』。",
-      targetSlot: "WHEN",
+      category: "HOW·CHECK 具體化審查",
+      title: "HOW 缺少 CHECK（橫跨性前置關卡／區域性檢查項）",
+      description: "不要寫抽象套話（如『在高維時注意』），必須寫成：『看到 [具體線索] → 檢查 [明確條件]』。橫跨整個程序的把關寫進 CHECK·橫跨性前置關卡；只在某個分支內需要查的，寫進該分支的區域性 CHECK。",
+      targetSlot: "HOW",
     });
   }
 
   for (const [idx, p] of [p1, p2].entries()) {
     if (!p?.failureMode?.trim()) continue;
-    const linked = triggers.some(
+    const linked = checks.some(
       (t: any) =>
         (t.check || "").includes("失效") ||
         (p.name && ((t.cue || "").includes(p.name) || (t.check || "").includes(p.name))) ||
@@ -329,9 +363,9 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
       issues.push({
         severity: "warning",
         category: "視角警告斷鏈",
-        title: `視角 ${idx + 1}「${p.name || "未命名"}」的失效模式在 WHEN·警示找不到對應檢查項`,
-        description: `WHY 討論了「這個視角在什麼情況下失效」，但 WHEN 沒有對應的「看到___→檢查___」，等於這個警告寫了但實戰中沒人會記得查。請現在去 WHEN 補上，不要留到複習時才發現斷鏈。`,
-        targetSlot: "WHEN",
+        title: `視角 ${idx + 1}「${p.name || "未命名"}」的失效模式在 HOW 的 CHECK 找不到對應檢查項`,
+        description: `WHY 討論了「這個視角在什麼情況下失效」，但 HOW 的 CHECK（橫跨性或區域性）沒有對應的「看到___→檢查___」，等於這個警告寫了但實戰中沒人會記得查。請現在去 HOW 補上，不要留到複習時才發現斷鏈。`,
+        targetSlot: "HOW",
       });
     }
   }
@@ -703,7 +737,7 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
         category: "假設鎖定",
         title: `假設「${(a.name || "").slice(0, 18)}」疑似適用範圍前提`,
         description:
-          "假設鎖定清單針對的是「這個具體情境／思想實驗設定了什麼條件」（一次性設定）；「這個技巧通常在什麼範圍成立」屬於適用範圍，該寫在 WHEN 或 WHY 的前提說明裡，不要塞進假設鎖定清單。",
+          "假設鎖定清單針對的是「這個具體情境／思想實驗設定了什麼條件」（一次性設定）；「這個技巧通常在什麼範圍成立」屬於適用範圍，該寫在 HOW 的 CHECK（橫跨性前置關卡）或 WHY 的前提說明裡，不要塞進假設鎖定清單。",
         targetSlot: "ASSUMPTIONS",
       });
     }

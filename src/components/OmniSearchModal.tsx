@@ -4,6 +4,7 @@ import React, { useState, useMemo } from "react";
 import { Search, X, Layers, ArrowRight, Tag, BookOpen, AlertTriangle } from "lucide-react";
 import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
+import { collectHowChecks, collectHowBranches } from "@/lib/inspect";
 
 interface OmniSearchModalProps {
   cards: CardData[];
@@ -38,7 +39,7 @@ export const OmniSearchModal: React.FC<OmniSearchModalProps> = ({
       if (activeFilter === "uncompiled") {
         const hasUncompiled =
           card.howData?.status === "uncompiled" ||
-          card.howData?.steps?.some((s) => !s.isCompiled);
+          collectHowBranches(card).some((s) => !s.isCompiled);
         if (!hasUncompiled) return false;
       }
       if (activeFilter === "prove") {
@@ -56,19 +57,24 @@ export const OmniSearchModal: React.FC<OmniSearchModalProps> = ({
 
       if (!query.trim()) return true;
 
-      // Text matches across WHAT, WHY, HOW, WHEN, ORIGIN, Claims, Assumptions
+      // Text matches across WHAT, WHY, HOW (v5: CHECK/分支/CAN), ORIGIN, Claims, Assumptions
       const matchTitle = card.title.toLowerCase().includes(q);
       const matchDomain = card.domain.toLowerCase().includes(q);
       const matchWhat = card.whatData?.summary.toLowerCase().includes(q);
       const matchWhy =
         card.whyData?.fullReasoning.toLowerCase().includes(q) ||
         card.whyData?.closedBookDraft.toLowerCase().includes(q);
-      const matchHow = card.howData?.steps?.some(
-        (s) => s.title.toLowerCase().includes(q) || s.action.toLowerCase().includes(q)
-      );
-      const matchWhen = card.whenData?.triggers?.some(
-        (t) => t.cue.toLowerCase().includes(q) || t.check.toLowerCase().includes(q)
-      );
+      // v5：WHEN 併入 HOW——搜尋涵蓋 CHECK（橫跨性＋區域性）、分支（含巢狀）、CAN
+      const matchHow =
+        collectHowChecks(card).some(
+          (t) => (t.cue || "").toLowerCase().includes(q) || (t.check || "").toLowerCase().includes(q)
+        ) ||
+        collectHowBranches(card).some(
+          (s) => (s.title || "").toLowerCase().includes(q) || (s.action || "").toLowerCase().includes(q)
+        ) ||
+        (card.howData?.can || []).some(
+          (c) => (c.trigger || "").toLowerCase().includes(q) || (c.capability || "").toLowerCase().includes(q)
+        );
       const matchOrigin = card.originData?.conflict.toLowerCase().includes(q);
       const matchClaims = card.claims?.some((c) => c.text.toLowerCase().includes(q));
 
@@ -78,7 +84,6 @@ export const OmniSearchModal: React.FC<OmniSearchModalProps> = ({
         matchWhat ||
         matchWhy ||
         matchHow ||
-        matchWhen ||
         matchOrigin ||
         matchClaims
       );

@@ -43,14 +43,14 @@ const STEPS: TutorialStep[] = [
     id: "open",
     title: "打開卡片",
     desc: "眼睛圖示 = 預覽；放大圖示 = 編輯",
-    detail: "預覽模式把 ORIGIN → WHY → WHAT → HOW → WHEN 五格連續排在同一張紙上，可切換「一頁式」或「分頁 A4」。編輯模式則可逐格修改內容。",
+    detail: "預覽模式把 ORIGIN → WHY → WHAT → HOW 四格連續排在同一張紙上（HOW 含 CHECK 前置關卡、可巢狀分支與 CAN 解鎖），可切換「一頁式」或「分頁 A4」。編輯模式則可逐格修改內容。",
     animation: "open",
   },
   {
     id: "audit",
     title: "AI 假懂審查",
     desc: "自動抓出推理跳步與認識論越級",
-    detail: "系統會檢查：WHY 是否只有結論、是否偷渡未聲明前提、[地位:近似] 是否被當成 [地位:證明]、視角失效模式有沒有接到 WHEN 檢查項，並執行四點自我檢查。",
+    detail: "系統會檢查：WHY 是否只有結論、是否偷渡未聲明前提、[地位:近似] 是否被當成 [地位:證明]、視角失效模式有沒有接到 HOW 的 CHECK 檢查項，並執行四點自我檢查。",
     animation: "audit",
   },
   {

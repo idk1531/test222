@@ -18,7 +18,7 @@ export const TemplateSelectorModal: React.FC<TemplateSelectorModalProps> = ({
       name: "理科知識卡 (標準)",
       shape: "A",
       domain: "物理/化學/數學",
-      desc: "完備包含 WHAT/WHY/HOW/WHEN/ORIGIN 五格，雙重視角與認識論標記。",
+      desc: "完備包含 WHAT/WHY/HOW/ORIGIN 四格（v5：HOW 含 CHECK／分支／CAN），雙重視角與認識論標記。",
       icon: Atom,
       color: "border-blue-200 hover:border-blue-500 hover:bg-blue-50/40",
     },

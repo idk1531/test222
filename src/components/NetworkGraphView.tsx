@@ -14,7 +14,7 @@ import {
   ArrowRight,
   Filter,
 } from "lucide-react";
-import { relationLabelText, normalizeLogType, STATUS_UNCOMPILED } from "@/lib/inspect";
+import { relationLabelText, normalizeLogType, STATUS_UNCOMPILED, collectHowBranches } from "@/lib/inspect";
 
 interface RelationData {
   id: string;
@@ -67,7 +67,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
   });
   const islandCount = cards.filter((c) => !connectedCardIds.has(c.id)).length;
   const uncompiledCount = cards.filter(
-    (c) => c.howData?.status === "uncompiled" || c.howData?.steps?.some((s) => !s.isCompiled)
+    (c) => c.howData?.status === "uncompiled" || collectHowBranches(c).some((s) => !s.isCompiled)
   ).length;
   const openBlindSpotsCount = blindSpots.filter((b) => b.status === "open").length;
   const unverifiedAnalogiesCount = relations.filter(

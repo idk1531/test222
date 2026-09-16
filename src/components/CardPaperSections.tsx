@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
-import { Lock, Lightbulb, HelpCircle, CheckCircle, XCircle, CheckCircle2, AlertTriangle, OctagonAlert, ClipboardCheck } from "lucide-react";
+import { Lock, Lightbulb, HelpCircle, CheckCircle, XCircle, CheckCircle2, AlertTriangle, OctagonAlert, ClipboardCheck, ShieldCheck, KeyRound } from "lucide-react";
 import {
   epistemicLabel,
   relationLabelText,
@@ -552,99 +552,154 @@ export function SectionWhy({ card, font }: { card: CardData; font: string }) {
   );
 }
 
+// ============================================================
+// v5：HOW = CHECK 橫跨性前置關卡 ＋ 分支（可巢狀，含區域性 CHECK）＋ CAN 下游解鎖
+// WHEN 整格併入 HOW：原 WHEN·警示（triggers）→ checks、原 HOW 步驟 → branches、
+// 原 WHEN·可用（enables）→ can、原 WHEN·boundaryNotes → howData.boundaryNotes。
+// ============================================================
+
+/** v5：檢查項（看到___→檢查___）——橫跨性前置關卡與分支內區域性 CHECK 共用呈現格式 */
+function HowCheckItemBox({ item }: { item: { cue?: string; check?: string; keywords?: string[] } }) {
+  return (
+    <div className="bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-200 space-y-1">
+      <div className="text-[13px]">
+        <b className="text-blue-700 text-[10px]" style={{ fontFamily: UI_FONT }}>
+          看到：
+        </b>
+        <span className="bg-white px-1.5 py-0.5 rounded border border-blue-200 text-slate-800 ml-1">
+          <MathText text={item.cue || ""} />
+        </span>
+      </div>
+      <div className="text-[13px] text-slate-800">
+        <b className="text-emerald-700 text-[10px]" style={{ fontFamily: UI_FONT }}>
+          → 檢查：
+        </b>
+        <span className="ml-1">
+          <MathText text={item.check || ""} />
+        </span>
+      </div>
+      {(item.keywords || []).length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {(item.keywords || []).map((k, ki) => (
+            <span
+              key={ki}
+              className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200"
+              style={{ fontFamily: UI_FONT }}
+            >
+              #{k}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type HowBranchItem = NonNullable<NonNullable<CardData["howData"]>["branches"]>[number];
+
+/** v5：分支節點（可巢狀）——分支編號 1、1a、1ab…；每個分支可帶區域性 CHECK */
+function HowBranchNode({ branch, path }: { branch: HowBranchItem; path: string }) {
+  const localChecks = branch.checks || [];
+  const children = branch.branches || [];
+  return (
+    <li className="bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
+      <div className="flex items-center justify-between mb-1 gap-2">
+        <span className="text-[12px] font-bold text-slate-800">
+          分支 {path}：<MathText text={branch.title} />
+        </span>
+        <span
+          className={`text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ${
+            branch.isCompiled ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+          }`}
+          style={{ fontFamily: UI_FONT }}
+        >
+          {branch.isCompiled ? STATUS_COMPILED : STATUS_UNCOMPILED}
+        </span>
+      </div>
+      <p className="text-[13px] text-slate-700 leading-relaxed">
+        <MathText text={branch.action} />
+      </p>
+      {localChecks.length > 0 && (
+        <div className="mt-2 pl-3 border-l-2 border-indigo-300 space-y-1.5">
+          <p className="text-[9px] font-bold text-indigo-700 flex items-center gap-1" style={{ fontFamily: UI_FONT }}>
+            <ShieldCheck className="w-3 h-3" /> 區域性 CHECK（只在分支 {path} 內要過的關卡）
+          </p>
+          {localChecks.map((c, ci) => (
+            <HowCheckItemBox key={c.id || ci} item={c} />
+          ))}
+        </div>
+      )}
+      {children.length > 0 && (
+        <ul className="mt-2 ml-2 space-y-2 border-l-2 border-amber-300 pl-3">
+          {children.map((b, i) => (
+            <HowBranchNode key={b.id || i} branch={b} path={`${path}${String.fromCharCode(97 + i)}`} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
 export function SectionHow({ card, font }: { card: CardData; font: string }) {
+  const how = card.howData;
+  const checks = how?.checks || [];
+  const branches = how?.branches || [];
+  const can = how?.can || [];
   return (
     <section className="mb-8">
       <SlotHeading
         letter="H"
-        title="HOW · 可執行步驟"
-        subtitle={`知道怎麼做 · 狀態：${card.howData?.status === "compiled" ? STATUS_COMPILED : STATUS_UNCOMPILED}`}
+        title="HOW · 可執行程序"
+        subtitle={`CHECK 橫跨性前置關卡 → 分支（可巢狀，含區域性 CHECK）→ CAN 下游解鎖 · 狀態：${how?.status === "compiled" ? STATUS_COMPILED : STATUS_UNCOMPILED}`}
         color="bg-amber-600"
         font={font}
       />
-      <div className="pl-4 border-l-4 border-amber-200">
-        {card.howData?.steps?.length ? (
-          <ol className="space-y-2">
-            {card.howData.steps.map((s, i) => (
-              <li key={i} className="bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[12px] font-bold text-slate-800">
-                    步驟 {i + 1}：<MathText text={s.title} />
-                  </span>
-                  <span
-                    className={`text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ${
-                      s.isCompiled ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                    }`}
-                  >
-                    {s.isCompiled ? STATUS_COMPILED : STATUS_UNCOMPILED}
-                  </span>
-                </div>
-                <p className="text-[13px] text-slate-700 leading-relaxed">
-                  <MathText text={s.action} />
-                </p>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="text-[13px] text-slate-400 italic">（尚未填寫步驟）</p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-export function SectionWhen({ card, font }: { card: CardData; font: string }) {
-  return (
-    <section className="mb-8">
-      <SlotHeading letter="W" title="WHEN · 觸發線索" subtitle="看到 ___ → 檢查 ___（禁止抽象套話）" color="bg-indigo-600" font={font} />
-      <div className="pl-4 border-l-4 border-indigo-200 space-y-2">
-        {card.whenData?.triggers?.length ? (
-          card.whenData.triggers.map((t, i) => (
-            <div key={i} className="bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-200 space-y-1">
-              <div className="text-[13px]">
-                <b className="text-blue-700 text-[10px]" style={{ fontFamily: UI_FONT }}>
-                  看到：
-                </b>
-                <span className="bg-white px-1.5 py-0.5 rounded border border-blue-200 text-slate-800 ml-1">
-                  <MathText text={t.cue} />
-                </span>
-              </div>
-              <div className="text-[13px] text-slate-800">
-                <b className="text-emerald-700 text-[10px]" style={{ fontFamily: UI_FONT }}>
-                  → 檢查：
-                </b>
-                <span className="ml-1">
-                  <MathText text={t.check} />
-                </span>
-              </div>
-              {t.keywords?.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {t.keywords.map((k, ki) => (
-                    <span
-                      key={ki}
-                      className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200"
-                      style={{ fontFamily: UI_FONT }}
-                    >
-                      #{k}
-                    </span>
-                  ))}
-                </div>
-              )}
+      <div className="pl-4 border-l-4 border-amber-200 space-y-4">
+        {/* v5：CHECK · 橫跨性前置關卡（原 WHEN·警示併入） */}
+        <div>
+          <p className="text-[10px] font-bold text-indigo-800 flex items-center gap-1.5 mb-1.5" style={{ fontFamily: UI_FONT }}>
+            <ShieldCheck className="w-3.5 h-3.5" />
+            CHECK · 橫跨性前置關卡（看到___ → 檢查___；橫跨整個程序，不限單一分支）
+          </p>
+          {checks.length > 0 ? (
+            <div className="space-y-2">
+              {checks.map((c, i) => (
+                <HowCheckItemBox key={c.id || i} item={c} />
+              ))}
             </div>
-          ))
-        ) : (
-          <p className="text-[13px] text-slate-400 italic">（尚未填寫觸發線索）</p>
-        )}
+          ) : (
+            <p className="text-[12px] text-slate-400 italic">
+              （無橫跨性檢查項——尚未寫「看到___→檢查___」的全程把關；若此程序確實無需橫跨把關，請在卡頭省略聲明交代理由）
+            </p>
+          )}
+        </div>
 
-        {/* v4 新增：WHEN·可用（能力辨識，通用技巧型才寫） */}
-        {card.whenData?.enables && card.whenData.enables.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-indigo-200">
-            <p className="text-[10px] font-bold text-indigo-800 mb-2" style={{ fontFamily: UI_FONT }}>
-              WHEN · 可用（能力辨識：看到___ → 就能做___）
+        {/* v5：分支（可巢狀，含區域性 CHECK） */}
+        <div>
+          <p className="text-[10px] font-bold text-amber-800 mb-1.5" style={{ fontFamily: UI_FONT }}>
+            分支（可巢狀；先過上面的 CHECK 關卡再進來執行）
+          </p>
+          {branches.length > 0 ? (
+            <ol className="space-y-2">
+              {branches.map((b, i) => (
+                <HowBranchNode key={b.id || i} branch={b} path={`${i + 1}`} />
+              ))}
+            </ol>
+          ) : (
+            <p className="text-[13px] text-slate-400 italic">（尚未填寫分支）</p>
+          )}
+        </div>
+
+        {/* v5：CAN · 下游解鎖（原 WHEN·可用併入；僅通用技巧型才寫） */}
+        {can.length > 0 && (
+          <div className="pt-3 border-t border-amber-200">
+            <p className="text-[10px] font-bold text-emerald-800 flex items-center gap-1.5 mb-2" style={{ fontFamily: UI_FONT }}>
+              <KeyRound className="w-3.5 h-3.5" />
+              CAN · 下游解鎖（看到___ → 就能做___；HOW 編譯後才真正解鎖）
             </p>
             <div className="space-y-2">
-              {card.whenData.enables.map((en, i) => (
-                <div key={i} className="bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-200">
+              {can.map((en, i) => (
+                <div key={en.id || i} className="bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-200">
                   <div className="text-[13px] text-slate-800">
                     <b className="text-indigo-700 text-[10px]" style={{ fontFamily: UI_FONT }}>
                       看到：
@@ -667,10 +722,10 @@ export function SectionWhen({ card, font }: { card: CardData; font: string }) {
           </div>
         )}
 
-        {card.whenData?.boundaryNotes && (
-          <div className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded border border-slate-200 mt-3">
+        {how?.boundaryNotes && (
+          <div className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded border border-slate-200">
             <b style={{ fontFamily: UI_FONT }}>邊界約束：</b>
-            <MathText text={card.whenData.boundaryNotes} />
+            <MathText text={how.boundaryNotes} />
           </div>
         )}
       </div>
@@ -714,7 +769,7 @@ export function SectionIntuitionTraps({ card, font }: { card: CardData; font: st
             直覺陷阱
           </h2>
           <p className="text-[10px] text-slate-500" style={{ fontFamily: UI_FONT }}>
-            推導正確但直覺容易誤判成別的東西（跟 WHEN、警示、堵塞感協議都不同）
+            推導正確但直覺容易誤判成別的東西（跟 HOW·CHECK、警示、堵塞感協議都不同）
           </p>
         </div>
       </div>

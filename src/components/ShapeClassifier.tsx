@@ -53,7 +53,7 @@ export const ShapeClassifier: React.FC<ShapeClassifierProps> = ({
       <div className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5">
         <Sparkles className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 mt-0.5" />
         <div className="text-[10px] text-slate-600 leading-relaxed">
-          <b>A~E 只描述「這張卡內部的推理形狀」，不取代 WHAT/WHY/HOW/WHEN/ORIGIN 五格。</b>
+          <b>A~E 只描述「這張卡內部的推理形狀」，不取代 WHAT/WHY/HOW/ORIGIN 四格。</b>
           真實知識點常常不是單一形狀，此時請選 <b>複合型</b> 並標明哪一段屬於哪一型。
         </div>
       </div>
