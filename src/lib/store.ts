@@ -42,6 +42,50 @@ function normalizeState(s: WorkspaceState): WorkspaceState {
   return { ...s, processLogs: logs };
 }
 
+/**
+ * v5：單張卡片 WHEN → HOW 遷移。
+ * WHEN 併入 HOW：triggers → checks（橫跨性前置關卡）、steps → branches（可巢狀）、
+ * enables → can（下游解鎖）、boundaryNotes → howData.boundaryNotes。
+ * 已是 v5 結構（howData.branches 為陣列且無 whenData）則只做相容補全。
+ */
+function migrateCardToV5(card: any): any {
+  let c = { ...card };
+  const how: any = { ...(c.howData || {}) };
+  const when: any = c.whenData;
+  if (when || !Array.isArray(how.branches)) {
+    const toBranch = (s: any) => ({
+      id: s?.id,
+      title: s?.title || "",
+      action: s?.action || "",
+      isCompiled: !!s?.isCompiled,
+      ...(s?.checks?.length ? { checks: s.checks } : {}),
+      ...(s?.branches?.length ? { branches: s.branches } : {}),
+    });
+    if (!Array.isArray(how.checks)) how.checks = when?.triggers || [];
+    how.branches = Array.isArray(how.branches) ? how.branches : (how.steps || []).map(toBranch);
+    if (!Array.isArray(how.can)) how.can = when?.enables || [];
+    if (how.boundaryNotes === undefined && when?.boundaryNotes !== undefined) {
+      how.boundaryNotes = when.boundaryNotes;
+    }
+    if (!how.status) how.status = "uncompiled";
+    delete how.steps;
+    const { whenData: _dropped, ...rest } = c;
+    c = { ...rest, howData: how };
+  }
+  // v5 起沒有 WHEN 格：省略聲明裡的「WHEN」一併移除（併入後不再是可省略的獨立格）
+  if (Array.isArray(c.omittedSlots) && c.omittedSlots.length > 0) {
+    const kept = c.omittedSlots.filter((o: any) => o?.slot !== "WHEN");
+    if (kept.length !== c.omittedSlots.length) c = { ...c, omittedSlots: kept };
+  }
+  return c;
+}
+
+/** v5：整套 state 的結構遷移（本機載入與 JSON 匯入共用；export 供測試與外部工具使用） */
+export function applySchemaMigrations(s: WorkspaceState): WorkspaceState {
+  const next = normalizeState(s);
+  return { ...next, cards: (next.cards || []).map(migrateCardToV5) };
+}
+
 function loadInitialState(): WorkspaceState {
   if (typeof window === "undefined") return buildSeedState();
   try {
@@ -49,7 +93,8 @@ function loadInitialState(): WorkspaceState {
     if (raw) {
       const parsed = JSON.parse(raw) as ExportFilePayload;
       if (parsed?.state?.workspace?.id) {
-        return normalizeState({ ...parsed.state, savedAt: new Date().toISOString() });
+        // v5：WHEN 併入 HOW——載入時自動遷移舊（v4 以下）結構
+        return applySchemaMigrations({ ...parsed.state, savedAt: new Date().toISOString() });
       }
     }
   } catch (e) {
@@ -578,7 +623,7 @@ export function importFile(file: File): Promise<{ ok: boolean; error?: string }>
           resolve({ ok: false, error: "檔案格式不符：缺少 state.workspace" });
           return;
         }
-        setState(() => ({
+        setState(() => applySchemaMigrations({
           workspace: parsed.state!.workspace,
           cards: parsed.state!.cards || [],
           canvasObjects: parsed.state!.canvasObjects || [],

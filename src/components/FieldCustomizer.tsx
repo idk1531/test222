@@ -86,7 +86,7 @@ export const FieldCustomizer: React.FC<FieldCustomizerProps> = ({
         {/* Rules Banner */}
         <div className="p-3 bg-blue-50 border-b border-blue-200 text-blue-900 text-[11px] flex items-start gap-2">
           <span className="font-bold">欄位自訂規則：</span>
-          可自行新增、隱藏、刪除、重排序任意欄位。系統將記憶每個卡片的欄位配置，支援混合 WHAT/WHY/HOW/WHEN/ORIGIN 與自訂欄位。
+          可自行新增、隱藏、刪除、重排序任意欄位。系統將記憶每個卡片的欄位配置，支援混合 WHAT/WHY/HOW/ORIGIN 與自訂欄位（v5：WHEN 已併入 HOW）。
         </div>
 
         {/* Body */}

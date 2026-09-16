@@ -124,15 +124,29 @@ export interface CardData {
     /** v4：假設鎖定 vs 適用範圍。一次性情境設定 → situation；「通常在什麼範圍成立」→ scope（該寫 WHEN/WHY 前提說明） */
     kind?: "situation" | "scope";
   }>;
+  /**
+   * v5：HOW = CHECK 橫跨性前置關卡 ＋ 分支（可巢狀，含區域性 CHECK）＋ CAN 下游解鎖。
+   * WHEN 整格併入 HOW：原 WHEN·警示（triggers）→ checks（橫跨性）、
+   * 原 HOW steps → branches（可巢狀）、原 WHEN·可用（enables）→ can。
+   */
   howData?: {
-    steps: Array<{ id: string; title: string; action: string; isCompiled: boolean }>;
+    /** CHECK · 橫跨性前置關卡——進程序前全程把關的「看到___→檢查___」（橫跨全部分支） */
+    checks?: Array<{ id: string; cue: string; check: string; keywords?: string[] }>;
+    /** 分支（可巢狀）；每個分支可帶自己的區域性 CHECK（只在該分支內要過的關卡） */
+    branches?: Array<{
+      id: string;
+      title: string;
+      action: string;
+      isCompiled: boolean;
+      checks?: Array<{ id: string; cue: string; check: string; keywords?: string[] }>;
+      /** 子分支（可巢狀，結構同上） */
+      branches?: Array<any>;
+    }>;
+    /** CAN · 下游解鎖——編譯後「看到___→就能做___」（僅通用技巧型才寫） */
+    can?: Array<{ id: string; trigger: string; capability: string }>;
     status: "compiled" | "uncompiled";
     testNotes?: string;
-  };
-  whenData?: {
-    triggers: Array<{ id: string; cue: string; check: string; keywords: string[] }>;
-    // WHEN·可用（v4 新增）：通用技巧型才寫
-    enables?: Array<{ id: string; trigger: string; capability: string }>;
+    /** 邊界約束（原 WHEN·boundaryNotes 併入） */
     boundaryNotes?: string;
   };
   originData?: { conflict: string; historicalContext?: string };

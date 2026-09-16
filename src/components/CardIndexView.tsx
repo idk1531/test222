@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
+import { collectHowChecks } from "@/lib/inspect";
 import {
   BookOpen,
   Plus,
@@ -57,7 +58,7 @@ export const CardIndexView: React.FC<CardIndexViewProps> = ({
             <h3 className="font-bold text-slate-900 text-sm truncate">理科知識卡片總庫 ({cards.length} 張)</h3>
           </div>
           <span className="hidden sm:inline text-[11px] text-slate-500">
-            每張卡片嚴格保持 WHAT / WHY / HOW / WHEN / ORIGIN 五格與認知診斷
+            每張卡片嚴格保持 WHAT / WHY / HOW / ORIGIN 四格與認知診斷（v5：WHEN 併入 HOW）
           </span>
         </div>
         <button
@@ -159,7 +160,7 @@ export const CardIndexView: React.FC<CardIndexViewProps> = ({
                   HOW: {card.howData?.status === "compiled" ? "✓展" : "⋯"}
                 </div>
                 <div className="bg-slate-50 p-1.5 rounded text-slate-700 border">
-                  WHEN: {card.whenData?.triggers?.length || 0} 條
+                  HOW·CHECK: {collectHowChecks(card).length} 項
                 </div>
                 <div className="bg-amber-50 p-1.5 rounded text-amber-900 border border-amber-200">
                   ORIGIN: ↯

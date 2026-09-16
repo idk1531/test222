@@ -68,7 +68,8 @@ export interface WorkspaceState {
   savedAt?: string;
 }
 
-export const SCHEMA_VERSION = 4;
+// v5：WHEN 併入 HOW（HOW = CHECK 橫跨性前置關卡＋分支（可巢狀，含區域性 CHECK）＋CAN 下游解鎖）
+export const SCHEMA_VERSION = 5;
 
 export interface ExportFilePayload {
   schemaVersion: number;

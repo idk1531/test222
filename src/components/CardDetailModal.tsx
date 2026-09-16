@@ -6,7 +6,7 @@ import { MathText } from "./MathText";
 import { FONT_OPTIONS, resolveFont } from "@/lib/fonts";
 import { SoloAssessmentPanel } from "./SoloAssessmentPanel";
 import { ShapeClassifier } from "./ShapeClassifier";
-import { runFourPointCheck } from "@/lib/inspect";
+import { runFourPointCheck, collectHowChecks } from "@/lib/inspect";
 import { useWorkspaceState } from "@/lib/store";
 import {
   SectionHeader,
@@ -16,7 +16,6 @@ import {
   SectionWhat,
   SectionWhy,
   SectionHow,
-  SectionWhen,
   SectionOrigin,
   SectionIntuitionTraps,
   SectionClaims,
@@ -27,7 +26,7 @@ import {
 } from "./CardPaperSections";
 import {
   X, Sparkles, Save, Trash2, Lock, Eye, Edit3, FileText, Files, Type,
-  ChevronLeft, ChevronRight, Sigma, AlertCircle, CheckCircle, AlertTriangle,
+  ChevronLeft, ChevronRight, Sigma, AlertCircle, CheckCircle, AlertTriangle, ShieldCheck, KeyRound,
 } from "lucide-react";
 
 interface CardDetailModalProps {
@@ -57,7 +56,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [activePage, setActivePage] = useState(0);
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "basic" | "what" | "why" | "how" | "when" | "origin" | "epistemology" | "diagnostics"
+    "basic" | "what" | "why" | "how" | "origin" | "epistemology" | "diagnostics"
   >("basic");
 
   const cardFont = formData.cardFont || fontFamily;
@@ -93,8 +92,144 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const handleSave = () => { onSave(formData); onClose(); };
   const handleSaveAndClose = () => { onSave(formData); onClose(); onExpansionTest(formData); };
 
+  // ============ v5：HOW 分支樹編輯輔助（不可變更新，支援巢狀） ============
+  type HowBranchForm = NonNullable<NonNullable<CardData["howData"]>["branches"]>[number];
+  const patchHow = (howPatch: Partial<NonNullable<CardData["howData"]>>) =>
+    patch({ howData: { status: "uncompiled", ...formData.howData, ...howPatch } as CardData["howData"] });
+
+  const updateBranchDeep = (
+    list: HowBranchForm[] | undefined,
+    id: string,
+    fn: (b: HowBranchForm) => HowBranchForm
+  ): HowBranchForm[] =>
+    (list || []).map((b) =>
+      b.id === id ? fn(b) : { ...b, ...(b.branches ? { branches: updateBranchDeep(b.branches, id, fn) } : {}) }
+    );
+
+  const removeBranchDeep = (list: HowBranchForm[] | undefined, id: string): HowBranchForm[] =>
+    (list || []).filter((b) => b.id !== id).map((b) => (b.branches ? { ...b, branches: removeBranchDeep(b.branches, id) } : b));
+
+  const addBranchDeep = (list: HowBranchForm[] | undefined, node: HowBranchForm, parentId?: string): HowBranchForm[] => {
+    if (!parentId) return [...(list || []), node];
+    return (list || []).map((b) =>
+      b.id === parentId
+        ? { ...b, branches: [...(b.branches || []), node] }
+        : { ...b, ...(b.branches ? { branches: addBranchDeep(b.branches, node, parentId) } : {}) }
+    );
+  };
+
+  /**
+   * 分支編輯器（遞迴渲染）。刻意用「函式呼叫」而非子元件：每次輸入都會重建 formData，
+   * 若做成子元件會因型別識別變動而卸載重掛、失去輸入焦點。
+   */
+  const renderBranchEditor = (b: HowBranchForm, path: string, depth: number): React.ReactNode => (
+    <div
+      key={b.id}
+      className={
+        depth === 0
+          ? "p-2.5 bg-slate-50 rounded-lg border border-slate-200 space-y-1.5"
+          : "p-2.5 bg-white rounded-lg border border-amber-200 space-y-1.5"
+      }
+    >
+      <div className="flex gap-2 items-center">
+        <span className="font-bold text-amber-700 text-[10px] w-10 flex-shrink-0" style={{ fontFamily: UI }}>分支 {path}</span>
+        <input
+          value={b.title}
+          placeholder={`分支 ${path} 標題（例：加壓至 $f$ 倍）`}
+          onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, title: e.target.value })) })}
+          className="flex-1 p-1.5 rounded border border-slate-300 text-xs font-semibold bg-white"
+        />
+        <label className="flex items-center gap-1 text-xs cursor-pointer" title="能否不經重新推導直接執行">
+          <input
+            type="checkbox"
+            checked={b.isCompiled}
+            onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, isCompiled: e.target.checked })) })}
+          />
+          <span className={b.isCompiled ? "text-emerald-700 font-bold" : "text-amber-700"}>{b.isCompiled ? "✓展" : "⋯"}</span>
+        </label>
+        <button
+          onClick={() => patchHow({ branches: removeBranchDeep(formData.howData?.branches, b.id) })}
+          className="text-slate-400 hover:text-rose-600"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+      <textarea
+        rows={2}
+        value={b.action}
+        placeholder="可執行動作（支援 LaTeX）"
+        onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, action: e.target.value })) })}
+        className="w-full p-2 rounded border border-slate-300 text-xs bg-white"
+      />
+      {/* 區域性 CHECK：只在這個分支內要過的「看到___→檢查___」 */}
+      {(b.checks || []).length > 0 && (
+        <div className="pl-2 border-l-2 border-indigo-300 space-y-1.5">
+          <p className="text-[9px] font-bold text-indigo-700" style={{ fontFamily: UI }}>
+            區域性 CHECK（只在分支 {path} 內要過的「看到___→檢查___」）
+          </p>
+          {(b.checks || []).map((c, ci) => (
+            <div key={c.id || ci} className="p-2 bg-indigo-50/50 rounded border border-indigo-200 space-y-1">
+              <div className="flex gap-2 items-center">
+                <span className="font-bold text-blue-700 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>看到</span>
+                <input
+                  value={c.cue || ""}
+                  onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, cue: e.target.value } : cc)) })) })}
+                  className="flex-1 p-1 rounded border border-slate-300 text-[11px] bg-white"
+                  placeholder="例：加壓場合看到「充入惰性氣體」"
+                />
+                <button
+                  onClick={() => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).filter((_, j) => j !== ci) })) })}
+                  className="text-slate-400 hover:text-rose-600"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex gap-2 items-center">
+                <span className="font-bold text-emerald-700 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>→檢查</span>
+                <input
+                  value={c.check || ""}
+                  onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, check: e.target.value } : cc)) })) })}
+                  className="flex-1 p-1 rounded border border-slate-300 text-[11px] bg-white"
+                  placeholder="例：先分恆容還是恆壓"
+                />
+              </div>
+              <div className="flex gap-2 items-center">
+                <span className="font-bold text-slate-500 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>關鍵詞</span>
+                <input
+                  value={(c.keywords || []).join(", ")}
+                  onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : cc)) })) })}
+                  className="flex-1 p-1 rounded border border-slate-300 text-[11px] bg-white"
+                  placeholder="逗號分隔"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: [...(x.checks || []), { id: `bc-${Date.now()}`, cue: "", check: "", keywords: [] }] })) })}
+          className="text-[10px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold"
+        >
+          + 區域性 CHECK
+        </button>
+        <button
+          onClick={() => patchHow({ branches: addBranchDeep(formData.howData?.branches, { id: `b-${Date.now()}`, title: "", action: "", isCompiled: false }, b.id) })}
+          className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 font-semibold"
+        >
+          + 子分支（可巢狀）
+        </button>
+      </div>
+      {(b.branches || []).length > 0 && (
+        <div className="space-y-1.5 border-l-2 border-amber-300 pl-2">
+          {(b.branches || []).map((sb, si) => renderBranchEditor(sb, `${path}${String.fromCharCode(97 + si)}`, depth + 1))}
+        </div>
+      )}
+    </div>
+  );
+
   /** 分頁模式：把八個區塊分配到多張 A4 紙 */
-  // v4 順序：構造思路 → ORIGIN（兩個「觸發」放一起對照）→ WHY（含追問點）→ WHAT → HOW → WHEN（含 WHEN·可用）→ 認識論 → 診斷
+  // v5 順序：構造思路 → ORIGIN（兩個「觸發」放一起對照）→ WHY（含追問點）→ WHAT → HOW（CHECK＋分支＋CAN，WHEN 已併入）→ 認識論 → 診斷
   const PAGES: Array<{ title: string; render: () => React.ReactNode }> = [
     {
       title: "卡頭 · 背景 · 構造思路 · ORIGIN",
@@ -117,8 +252,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
       ),
     },
     { title: "WHAT · 概念本質", render: () => <SectionWhat card={formData} font={ff} /> },
-    { title: "HOW · 可執行步驟", render: () => <SectionHow card={formData} font={ff} /> },
-    { title: "WHEN · 觸發（含可用）", render: () => <SectionWhen card={formData} font={ff} /> },
+    { title: "HOW · 程序（CHECK＋分支＋CAN）", render: () => <SectionHow card={formData} font={ff} /> },
     {
       title: "關係邊 · 過程日誌",
       render: () => (<><SectionRelations card={formData} font={ff} relations={wsRelations} cardTitles={wsTitles} /><SectionProcessLogs card={formData} font={ff} processLogs={wsLogs} /></>),
@@ -305,7 +439,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                  <SectionThoughtPoints card={formData} font={ff} />
                  <SectionWhat card={formData} font={ff} />
                  <SectionHow card={formData} font={ff} />
-                 <SectionWhen card={formData} font={ff} />
                  <SectionIntuitionTraps card={formData} font={ff} />
                  <SectionRelations card={formData} font={ff} relations={wsRelations} cardTitles={wsTitles} />
                  <SectionProcessLogs card={formData} font={ff} processLogs={wsLogs} />
@@ -358,8 +491,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     { key: "basic", label: "基本 · 背景 · 判型" },
     { key: "what", label: "WHAT" },
     { key: "why", label: "WHY" },
-    { key: "how", label: "HOW" },
-    { key: "when", label: "WHEN" },
+    { key: "how", label: "HOW（CHECK/分支/CAN）" },
     { key: "origin", label: "ORIGIN" },
     { key: "epistemology", label: "認識論 ⊢" },
     { key: "diagnostics", label: "診斷 Bloom×SOLO" },
@@ -390,10 +522,10 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
           {/* ===== 基本 / 背景 / 判型 ===== */}
           {activeTab === "basic" && (
             <div className="space-y-4">
-              {/* v4：五格省略聲明——省略本身是需要交代的判斷，不能悄悄跳過 */}
+              {/* v5：四格省略聲明——省略本身是需要交代的判斷，不能悄悄跳過（WHEN 已併入 HOW，不再是獨立格） */}
               <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-slate-700">五格省略聲明</span>
+                  <span className="font-bold text-slate-700">四格省略聲明</span>
                   <select
                     value=""
                     onChange={(e) => {
@@ -406,7 +538,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     className="text-[11px] px-1.5 py-0.5 rounded border border-slate-300 bg-white"
                   >
                     <option value="">+ 宣告省略某格…</option>
-                    {["WHAT", "WHY", "HOW", "WHEN", "ORIGIN"].map((sl) => (
+                    {["WHAT", "WHY", "HOW", "ORIGIN"].map((sl) => (
                       <option key={sl} value={sl}>省略 {sl}</option>
                     ))}
                   </select>
@@ -1237,7 +1369,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 mb-1.5">
-                  只收「這個具體情境／思想實驗設定了什麼條件」（一次性設定）。「這個技巧通常在什麼範圍成立」（如訊號需絕對可積）屬於適用範圍，請標為「適用範圍」並移到 WHEN／WHY 前提說明。
+                  只收「這個具體情境／思想實驗設定了什麼條件」（一次性設定）。「這個技巧通常在什麼範圍成立」（如訊號需絕對可積）屬於適用範圍，請標為「適用範圍」並移到 HOW 的 CHECK／WHY 前提說明。
                 </p>
                 <div className="space-y-1.5">
                   {formData.assumptions?.map((a, i) => (
@@ -1285,7 +1417,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                       </div>
                       {(a as any).kind === "scope" && (
                         <p className="text-[10px] text-amber-800 bg-amber-100/60 rounded px-2 py-1">
-                          此條屬於適用範圍前提：請搬到 WHEN（看到___→檢查___）或 WHY 的前提說明，不要留在假設鎖定清單。
+                          此條屬於適用範圍前提：請搬到 HOW 的 CHECK（看到___→檢查___）或 WHY 的前提說明，不要留在假設鎖定清單。
                         </p>
                       )}
                     </div>
@@ -1293,8 +1425,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* v4：直覺陷阱——以【追問·直覺陷阱】格式呈現；讀者先預測「我大概會怎麼誤會」再看正確理解。
-                  不是 WHEN（何時失效／可用）、不是 [警示]、不是堵塞感協議（標註遺漏）。標籤共用 ≥3 次門檻。 */}
+              {/* v5：直覺陷阱——以【追問·直覺陷阱】格式呈現；讀者先預測「我大概會怎麼誤會」再看正確理解。
+                  不是 HOW·CHECK（何時失效／可用）、不是 [警示]、不是堵塞感協議（標註遺漏）。標籤共用 ≥3 次門檻。 */}
               <div className="pt-2 border-t border-slate-200 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-700 flex items-center gap-1">
@@ -1313,7 +1445,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  跟 WHEN 不同：WHEN 問「這技巧什麼時候失效／能用」；直覺陷阱問「這技巧本身哪裡違反直覺、容易被腦補成錯的東西」。例：負頻率 −ω 不是數學假象，是複平面反向旋轉的向量。
+                  跟 HOW·CHECK 不同：CHECK 問「這技巧什麼時候失效／能用」；直覺陷阱問「這技巧本身哪裡違反直覺、容易被腦補成錯的東西」。例：負頻率 −ω 不是數學假象，是複平面反向旋轉的向量。
                 </p>
                 {formData.intuitionTraps?.map((it, i) => (
                   <div key={it.id || i} className="p-2.5 bg-purple-50/50 rounded-lg border border-purple-200 space-y-1.5">
@@ -1365,7 +1497,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             </div>
           )}
 
-          {/* ===== HOW ===== */}
+          {/* ===== HOW（v5：CHECK 橫跨性前置關卡＋分支（可巢狀）＋CAN 下游解鎖；WHEN 已併入） ===== */}
           {activeTab === "how" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200">
@@ -1380,7 +1512,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     HOW 閉卷重推／追問測試
                   </button>
                   <button
-                    onClick={() => patch({ howData: { ...formData.howData!, status: formData.howData?.status === "compiled" ? "uncompiled" : "compiled" } })}
+                    onClick={() => patchHow({ status: formData.howData?.status === "compiled" ? "uncompiled" : "compiled" })}
                     className="px-2.5 py-1 rounded border border-slate-300 bg-white text-xs"
                   >
                     切換
@@ -1388,87 +1520,19 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700">步驟清單</span>
-                <button
-                  onClick={() => patch({
-                    howData: {
-                      ...formData.howData!,
-                      steps: [...(formData.howData?.steps || []), { id: `s-${Date.now()}`, title: "", action: "", isCompiled: false }],
-                    },
-                  })}
-                  className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold"
-                >
-                  + 新增步驟
-                </button>
-              </div>
-
-              {formData.howData?.steps?.map((s, i) => (
-                <div key={i} className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 space-y-1.5">
-                  <div className="flex gap-2 items-center">
-                    <input
-                      value={s.title}
-                      placeholder={`步驟 ${i + 1} 標題`}
-                      onChange={(e) => {
-                        const list = [...formData.howData!.steps];
-                        list[i] = { ...list[i], title: e.target.value };
-                        patch({ howData: { ...formData.howData!, steps: list } });
-                      }}
-                      className="flex-1 p-1.5 rounded border border-slate-300 text-xs font-semibold bg-white"
-                    />
-                    <label className="flex items-center gap-1 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={s.isCompiled}
-                        onChange={(e) => {
-                          const list = [...formData.howData!.steps];
-                          list[i] = { ...list[i], isCompiled: e.target.checked };
-                          patch({ howData: { ...formData.howData!, steps: list } });
-                        }}
-                      />
-                      <span className={s.isCompiled ? "text-emerald-700 font-bold" : "text-amber-700"}>
-                        {s.isCompiled ? "✓展" : "⋯"}
-                      </span>
-                    </label>
-                    <button
-                      onClick={() => patch({ howData: { ...formData.howData!, steps: formData.howData!.steps.filter((_, x) => x !== i) } })}
-                      className="text-slate-400 hover:text-rose-600"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <textarea
-                    rows={2}
-                    value={s.action}
-                    placeholder="可執行動作（支援 LaTeX）"
-                    onChange={(e) => {
-                      const list = [...formData.howData!.steps];
-                      list[i] = { ...list[i], action: e.target.value };
-                      patch({ howData: { ...formData.howData!, steps: list } });
-                    }}
-                    className="w-full p-2 rounded border border-slate-300 text-xs bg-white"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ===== WHEN ===== */}
-          {activeTab === "when" && (
-            <div className="space-y-3">
-              {/* v4: WHY 視角失效模式 → WHEN 檢查映射 */}
+              {/* v5: WHY 視角失效模式 → HOW CHECK 映射（原 WHEN 檢查映射） */}
               {(formData.whyData?.perspective1 || formData.whyData?.perspective2) && (
                 <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-200 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-indigo-900 flex items-center gap-1">
                       <AlertCircle className="w-4 h-4" /> WHY 視角失效模式映射
                     </span>
-                    <span className="text-[10px] text-indigo-700">每個失效模式必須有對應的 WHEN 檢查</span>
+                    <span className="text-[10px] text-indigo-700">每個失效模式必須有對應的 HOW CHECK（橫跨性或區域性）</span>
                   </div>
                   {[formData.whyData?.perspective1, formData.whyData?.perspective2].map((p, i) => {
                     if (!p?.failureMode) return null;
-                    const mappedCheck = formData.whenData?.triggers?.find(t => 
-                      t.cue.includes(p.name) || t.check.includes(p.failureMode)
+                    const mappedCheck = collectHowChecks(formData).find(t =>
+                      (t.cue || "").includes(p.name) || (t.check || "").includes(p.name) || (t.check || "").includes("失效")
                     );
                     return (
                       <div key={i} className={`p-2 rounded border ${mappedCheck ? 'bg-emerald-50 border-emerald-300' : 'bg-amber-50 border-amber-300'}`}>
@@ -1487,24 +1551,21 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                         </div>
                         {mappedCheck ? (
                           <div className="text-[10px] text-emerald-700 mt-1">
-                            ✓ 已有 WHEN 檢查：「{mappedCheck.cue}」→「{mappedCheck.check}」
+                            ✓ 已有 HOW CHECK：「{mappedCheck.cue}」→「{mappedCheck.check}」
                           </div>
                         ) : (
                           <button
-                            onClick={() => patch({
-                              whenData: {
-                                ...formData.whenData!,
-                                triggers: [...(formData.whenData?.triggers || []), {
-                                  id: `w-${Date.now()}`,
-                                  cue: `在 ${p.name} 視角下`,
-                                  check: `檢查是否遇到：${p.failureMode}`,
-                                  keywords: [p.name, "失效模式"]
-                                }]
-                              }
+                            onClick={() => patchHow({
+                              checks: [...(formData.howData?.checks || []), {
+                                id: `chk-${Date.now()}`,
+                                cue: `在 ${p.name} 視角下`,
+                                check: `檢查是否遇到：${p.failureMode}`,
+                                keywords: [p.name, "失效模式"]
+                              }]
                             })}
                             className="mt-1 text-[10px] px-2 py-0.5 rounded bg-amber-600 text-white hover:bg-amber-700"
                           >
-                            + 建立 WHEN 檢查
+                            + 建立 CHECK 檢查項
                           </button>
                         )}
                       </div>
@@ -1512,118 +1573,143 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   })}
                 </div>
               )}
-              
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700">觸發線索（看到 ___ → 檢查 ___）</span>
-                <button
-                  onClick={() => patch({
-                    whenData: {
-                      ...formData.whenData!,
-                      triggers: [...(formData.whenData?.triggers || []), { id: `w-${Date.now()}`, cue: "", check: "", keywords: [] }],
-                    },
-                  })}
-                  className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold"
-                >
-                  + 新增線索
-                </button>
-              </div>
-              {formData.whenData?.triggers?.map((t, i) => (
-                <div key={i} className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
-                  <div className="flex gap-2 items-center">
-                    <span className="font-bold text-blue-700 w-12 text-[11px]">看到</span>
-                    <input
-                      value={t.cue}
-                      onChange={(e) => {
-                        const list = [...formData.whenData!.triggers];
-                        list[i] = { ...list[i], cue: e.target.value };
-                        patch({ whenData: { ...formData.whenData!, triggers: list } });
-                      }}
-                      className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
-                      placeholder="具體關鍵詞，例：「催化劑」"
-                    />
-                    <button
-                      onClick={() => patch({ whenData: { ...formData.whenData!, triggers: formData.whenData!.triggers.filter((_, x) => x !== i) } })}
-                      className="text-slate-400 hover:text-rose-600"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <span className="font-bold text-emerald-700 w-12 text-[11px]">→檢查</span>
-                    <input
-                      value={t.check}
-                      onChange={(e) => {
-                        const list = [...formData.whenData!.triggers];
-                        list[i] = { ...list[i], check: e.target.value };
-                        patch({ whenData: { ...formData.whenData!, triggers: list } });
-                      }}
-                      className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
-                      placeholder="例：$K$ 是否改變（絕對不變）"
-                    />
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <span className="font-bold text-slate-500 w-12 text-[11px]">關鍵詞</span>
-                    <input
-                      value={(t.keywords || []).join(", ")}
-                      onChange={(e) => {
-                        const list = [...formData.whenData!.triggers];
-                        list[i] = { ...list[i], keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) };
-                        patch({ whenData: { ...formData.whenData!, triggers: list } });
-                      }}
-                      className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
-                      placeholder="逗號分隔"
-                    />
-                  </div>
-                </div>
-              ))}
 
-              {/* v4 新增：WHEN·可用（能力辨識：看到 ___ → 就能做 ___） */}
+              {/* v5：CHECK · 橫跨性前置關卡 */}
+              <div className="p-3 bg-indigo-50/40 rounded-lg border border-indigo-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-indigo-900 flex items-center gap-1">
+                    <ShieldCheck className="w-4 h-4" /> CHECK · 橫跨性前置關卡（看到 ___ → 檢查 ___）
+                  </span>
+                  <button
+                    onClick={() => patchHow({
+                      checks: [...(formData.howData?.checks || []), { id: `chk-${Date.now()}`, cue: "", check: "", keywords: [] }],
+                    })}
+                    className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold"
+                  >
+                    + 新增檢查項
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  橫跨整個程序、不限單一分支的把關寫這層（v5 起 WHEN·警示併入這裡）；只在某個分支內要查的，寫進該分支的「區域性 CHECK」。不要抽象套話（如『在高維時注意』）。
+                </p>
+                {(formData.howData?.checks || []).length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">無橫跨性檢查項</p>
+                ) : (formData.howData!.checks || []).map((t, i) => (
+                  <div key={t.id || i} className="p-2.5 bg-white rounded-lg border border-indigo-200 space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <span className="font-bold text-blue-700 w-12 text-[11px]">看到</span>
+                      <input
+                        value={t.cue}
+                        onChange={(e) => {
+                          const list = [...(formData.howData!.checks || [])];
+                          list[i] = { ...list[i], cue: e.target.value };
+                          patchHow({ checks: list });
+                        }}
+                        className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
+                        placeholder="具體關鍵詞，例：「催化劑」"
+                      />
+                      <button
+                        onClick={() => patchHow({ checks: (formData.howData!.checks || []).filter((_, x) => x !== i) })}
+                        className="text-slate-400 hover:text-rose-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <span className="font-bold text-emerald-700 w-12 text-[11px]">→檢查</span>
+                      <input
+                        value={t.check}
+                        onChange={(e) => {
+                          const list = [...(formData.howData!.checks || [])];
+                          list[i] = { ...list[i], check: e.target.value };
+                          patchHow({ checks: list });
+                        }}
+                        className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
+                        placeholder="例：$K$ 是否改變（絕對不變）"
+                      />
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <span className="font-bold text-slate-500 w-12 text-[11px]">關鍵詞</span>
+                      <input
+                        value={(t.keywords || []).join(", ")}
+                        onChange={(e) => {
+                          const list = [...(formData.howData!.checks || [])];
+                          list[i] = { ...list[i], keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) };
+                          patchHow({ checks: list });
+                        }}
+                        className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
+                        placeholder="逗號分隔"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* v5：分支（可巢狀，含區域性 CHECK） */}
+              <div className="pt-2 border-t border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-700">分支（可巢狀，含區域性 CHECK）</span>
+                  <button
+                    onClick={() => patchHow({ branches: addBranchDeep(formData.howData?.branches, { id: `b-${Date.now()}`, title: "", action: "", isCompiled: false }) })}
+                    className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold"
+                  >
+                    + 新增分支
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  先過上面的 CHECK 關卡再進分支執行。分支可再開子分支（例：「算擾動瞬間的 $Q$」之下，加濃度／加壓／升溫各走一支）；只在某一支內要查的事，寫該分支的區域性 CHECK。
+                </p>
+                {(formData.howData?.branches || []).length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">尚未填寫分支</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(formData.howData?.branches || []).map((b, i) => renderBranchEditor(b, `${i + 1}`, 0))}
+                  </div>
+                )}
+              </div>
+
+              {/* v5：CAN · 下游解鎖（原 WHEN·可用併入） */}
               <div className="pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-bold text-slate-700">
-                    WHEN·可用（能力辨識：看到 ___ → 就能做 ___）
+                  <span className="font-bold text-slate-700 flex items-center gap-1">
+                    <KeyRound className="w-4 h-4 text-emerald-600" />
+                    CAN · 下游解鎖（看到 ___ → 就能做 ___）
                   </span>
                   <button
                     onClick={() =>
-                      patch({
-                        whenData: {
-                          ...formData.whenData!,
-                          enables: [
-                            ...(formData.whenData?.enables || []),
-                            { id: `en-${Date.now()}`, trigger: "", capability: "" },
-                          ],
-                        },
+                      patchHow({
+                        can: [
+                          ...(formData.howData?.can || []),
+                          { id: `can-${Date.now()}`, trigger: "", capability: "" },
+                        ],
                       })
                     }
                     className="text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold"
                   >
-                    + 新增能力
+                    + 新增解鎖
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 italic mb-2">
-                  僅通用技巧型才寫（一次性證明型通常為空，不強制填——見 v4 手冊 WHEN·可用說明）
+                  僅通用技巧型才寫（一次性證明型通常為空，不強制填）；HOW 編譯（✓展）後這些能力才真正解鎖。
                 </p>
-                {formData.whenData?.enables?.map((en, i) => (
-                  <div key={i} className="p-2.5 bg-emerald-50/60 rounded-lg border border-emerald-200 space-y-2">
+                {(formData.howData?.can || []).map((en, i) => (
+                  <div key={en.id || i} className="p-2.5 bg-emerald-50/60 rounded-lg border border-emerald-200 space-y-2 mb-2">
                     <div className="flex gap-2 items-center">
                       <span className="font-bold text-indigo-700 w-12 text-[11px]">看到</span>
                       <input
                         value={en.trigger}
                         onChange={(e) => {
-                          const list = [...formData.whenData!.enables!];
+                          const list = [...(formData.howData!.can || [])];
                           list[i] = { ...list[i], trigger: e.target.value };
-                          patch({ whenData: { ...formData.whenData!, enables: list } });
+                          patchHow({ can: list });
                         }}
                         className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
                         placeholder="例：看到線性時不變系統的微分方程"
                       />
                       <button
                         onClick={() =>
-                          patch({
-                            whenData: {
-                              ...formData.whenData!,
-                              enables: formData.whenData!.enables!.filter((_, x) => x !== i),
-                            },
+                          patchHow({
+                            can: (formData.howData!.can || []).filter((_, x) => x !== i),
                           })
                         }
                         className="text-slate-400 hover:text-rose-600"
@@ -1636,9 +1722,9 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                       <input
                         value={en.capability}
                         onChange={(e) => {
-                          const list = [...formData.whenData!.enables!];
+                          const list = [...(formData.howData!.can || [])];
                           list[i] = { ...list[i], capability: e.target.value };
-                          patch({ whenData: { ...formData.whenData!, enables: list } });
+                          patchHow({ can: list });
                         }}
                         className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
                         placeholder="例：就能把微分運算轉換為頻域代數相乘"
@@ -1646,6 +1732,17 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* v5：邊界約束（原 WHEN·boundaryNotes 併入） */}
+              <div className="pt-2 border-t border-slate-200">
+                <label className="font-bold text-slate-700 block mb-1">邊界約束（程序邊界外的情形怎麼處理）</label>
+                <input
+                  value={formData.howData?.boundaryNotes || ""}
+                  onChange={(e) => patchHow({ boundaryNotes: e.target.value })}
+                  className="w-full p-2 rounded-lg border border-slate-300 text-xs"
+                  placeholder="例：當熱庫熱容有限時，熱源溫度會隨排熱變化，需改用微分積分平均溫度。"
+                />
               </div>
             </div>
           )}

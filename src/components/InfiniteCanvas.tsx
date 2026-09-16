@@ -593,7 +593,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             <option value="WHAT">WHAT</option>
             <option value="WHY">WHY</option>
             <option value="HOW">HOW</option>
-            <option value="WHEN">WHEN</option>
             <option value="ORIGIN">ORIGIN</option>
             <option value="AUXILIARY">輔助</option>
           </select>
