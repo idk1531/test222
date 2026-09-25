@@ -9,24 +9,25 @@ import { ShapeClassifier } from "./ShapeClassifier";
 import { runFourPointCheck, collectHowChecks } from "@/lib/inspect";
 import { useWorkspaceState } from "@/lib/store";
 import {
-  SectionHeader,
-  SectionBackground,
-  SectionConstructionThinking,
-  SectionThoughtPoints,
-  SectionWhat,
-  SectionWhy,
-  SectionHow,
-  SectionOrigin,
-  SectionIntuitionTraps,
-  SectionClaims,
-  SectionDiagnostics,
-  SectionRelations,
-  SectionProcessLogs,
+  V6Page1HeaderOverview,
+  V6Page2Background,
+  V6Page3ConstructionThinking,
+  V6Page4Why,
+  V6Page5What,
+  V6Page6Apply,
+  V6Page7ProcessLogs,
+  V6ContinuousPaper,
+  MilestoneRuler,
+  CardThemeCustomizer,
+  CardPaperTheme,
+  DEFAULT_PAPER_THEME,
+  getGridPaperStyle,
   FourPointCheckPanel,
 } from "./CardPaperSections";
 import {
   X, Sparkles, Save, Trash2, Lock, Eye, Edit3, FileText, Files, Type,
   ChevronLeft, ChevronRight, Sigma, AlertCircle, CheckCircle, AlertTriangle, ShieldCheck, KeyRound,
+  Palette, Printer,
 } from "lucide-react";
 
 interface CardDetailModalProps {
@@ -58,6 +59,27 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [activeTab, setActiveTab] = useState<
     "basic" | "what" | "why" | "how" | "origin" | "epistemology" | "diagnostics"
   >("basic");
+
+  // v6 主題配色與自由自訂（紙張背景色、字體顏色、格線樣式等）
+  const [cardTheme, setCardTheme] = useState<CardPaperTheme>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = window.localStorage.getItem("scinotes-card-preview-theme");
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return DEFAULT_PAPER_THEME;
+  });
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+
+  const handleUpdateTheme = (nextTheme: CardPaperTheme) => {
+    setCardTheme(nextTheme);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem("scinotes-card-preview-theme", JSON.stringify(nextTheme));
+      } catch (e) {}
+    }
+  };
 
   const cardFont = formData.cardFont || fontFamily;
   const ff = resolveFont(cardFont);
@@ -228,38 +250,55 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     </div>
   );
 
-  /** 分頁模式：把八個區塊分配到多張 A4 紙 */
-  // v5 順序：構造思路 → ORIGIN（兩個「觸發」放一起對照）→ WHY（含追問點）→ WHAT → HOW（CHECK＋分支＋CAN，WHEN 已併入）→ 認識論 → 診斷
-  const PAGES: Array<{ title: string; render: () => React.ReactNode }> = [
+  /** 分頁模式：對應 PDF v6 的 7 頁方格紙版面 */
+  const PAGES: Array<{
+    key: "header" | "background" | "construction" | "why" | "what" | "apply" | "logs";
+    title: string;
+    render: () => React.ReactNode;
+  }> = [
     {
-      title: "卡頭 · 背景 · 構造思路 · ORIGIN",
+      key: "header",
+      title: "卡頭 · 概覽 · 關係邊 · 診斷",
       render: () => (
-        <>
-          <SectionHeader card={formData} font={ff} />
-          <SectionBackground card={formData} font={ff} />
-          <SectionConstructionThinking card={formData} font={ff} />
-          <SectionOrigin card={formData} font={ff} />
-        </>
+        <V6Page1HeaderOverview
+          card={formData}
+          font={ff}
+          relations={wsRelations}
+          cardTitles={wsTitles}
+          theme={cardTheme}
+          onNavigatePage={(p) => setActivePage(p)}
+        />
       ),
     },
     {
-      title: "WHY · 深度推理",
-      render: () => (
-        <>
-          <SectionWhy card={formData} font={ff} />
-          <SectionThoughtPoints card={formData} font={ff} />
-        </>
-      ),
-    },
-    { title: "WHAT · 概念本質", render: () => <SectionWhat card={formData} font={ff} /> },
-    { title: "HOW · 程序（CHECK＋分支＋CAN）", render: () => <SectionHow card={formData} font={ff} /> },
-    {
-      title: "關係邊 · 過程日誌",
-      render: () => (<><SectionRelations card={formData} font={ff} relations={wsRelations} cardTitles={wsTitles} /><SectionProcessLogs card={formData} font={ff} processLogs={wsLogs} /></>),
+      key: "background",
+      title: "背景 · 梯形收窄條",
+      render: () => <V6Page2Background card={formData} font={ff} theme={cardTheme} />,
     },
     {
-      title: "認識論 · 診斷",
-      render: () => (<><SectionIntuitionTraps card={formData} font={ff} /><SectionClaims card={formData} font={ff} /><SectionDiagnostics card={formData} font={ff} /></>),
+      key: "construction",
+      title: "構造思路 · 收斂漏斗",
+      render: () => <V6Page3ConstructionThinking card={formData} font={ff} theme={cardTheme} />,
+    },
+    {
+      key: "why",
+      title: "WHY · 不對稱塔木德",
+      render: () => <V6Page4Why card={formData} font={ff} theme={cardTheme} />,
+    },
+    {
+      key: "what",
+      title: "WHAT · 平行多視角",
+      render: () => <V6Page5What card={formData} font={ff} theme={cardTheme} />,
+    },
+    {
+      key: "apply",
+      title: "APPLY · CHECK/分支/CAN",
+      render: () => <V6Page6Apply card={formData} font={ff} theme={cardTheme} />,
+    },
+    {
+      key: "logs",
+      title: "過程日誌 · 方格填色",
+      render: () => <V6Page7ProcessLogs card={formData} font={ff} processLogs={wsLogs} theme={cardTheme} />,
     },
   ];
 
@@ -305,11 +344,48 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             <button
               onClick={() => { setPageMode("paged"); setActivePage(0); }}
               className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-medium transition-all ${pageMode === "paged" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-              title="分頁：多張 A4 紙"
+              title="分頁：7 頁方格紙指南"
             >
-              <Files className="w-3.5 h-3.5" /> <span className="hidden sm:inline">分頁 A4</span>
+              <Files className="w-3.5 h-3.5" /> <span className="hidden sm:inline">分頁 B5/A4</span>
             </button>
           </div>
+        )}
+
+        {/* 主題與配色自訂按鈕 */}
+        {mode === "preview" && (
+          <div className="relative">
+            <button
+              onClick={() => setShowThemeMenu(!showThemeMenu)}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-xs transition-colors"
+              title="卡片預覽主題與配色自由自訂"
+              style={{ fontFamily: UI }}
+            >
+              <Palette className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden sm:inline">主題配色</span>
+            </button>
+            {showThemeMenu && (
+              <div className="absolute top-full right-0 mt-1 z-50">
+                <CardThemeCustomizer
+                  currentTheme={cardTheme}
+                  onUpdateTheme={handleUpdateTheme}
+                  onClose={() => setShowThemeMenu(false)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 一鍵列印 / 匯出 PDF */}
+        {mode === "preview" && (
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-xs transition-colors"
+            title="列印或另存為 PDF"
+            style={{ fontFamily: UI }}
+          >
+            <Printer className="w-3.5 h-3.5 text-blue-600" />
+            <span className="hidden sm:inline">列印/PDF</span>
+          </button>
         )}
 
         {/* 每張卡片獨立字體 */}
@@ -379,9 +455,12 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
   // ============ 預覽模式 ============
   if (mode === "preview") {
+    const gridStyle = getGridPaperStyle(cardTheme);
+    const activeSectionKey = PAGES[activePage]?.key || "header";
+
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4">
-        <div className="modal-frame bg-slate-100 sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-4xl sm:max-h-[94vh] flex flex-col overflow-hidden safe-top safe-bottom">
+        <div className="modal-frame bg-slate-100 sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-5xl sm:max-h-[96vh] flex flex-col overflow-hidden safe-top safe-bottom">
           {Toolbar}
 
           {/* 分頁導覽列（手機可橫向捲動） */}
@@ -400,10 +479,12 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                     key={i}
                     onClick={() => setActivePage(i)}
                     className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap ${
-                      activePage === i ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                      activePage === i
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
                     }`}
                   >
-                    <span className="hidden sm:inline">第 {i + 1} 頁 · {p.title}</span>
+                    <span className="hidden sm:inline">P{i + 1} · {p.title.split(" · ")[0]}</span>
                     <span className="sm:hidden">P{i + 1}</span>
                   </button>
                 ))}
@@ -418,66 +499,79 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             </div>
           )}
 
-          {/* 紙張區 */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6">
+          {/* 紙張預覽區 */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-6 bg-slate-200/60">
             {pageMode === "single" ? (
-              // —— 一頁式：連續長紙（寬度自適應，最大 794px）——
-              <div
-                className="w-full max-w-[794px] mx-auto bg-white shadow-lg rounded-sm px-5 py-6 sm:px-14 sm:py-12"
-                style={{
-                  fontFamily: ff,
-                  backgroundImage:
-                    "repeating-linear-gradient(to bottom, transparent, transparent 31px, rgba(148,163,184,0.10) 31px, rgba(148,163,184,0.10) 32px)",
-                  backgroundPosition: "0 14px",
-                }}
-              >
-                 <SectionHeader card={formData} font={ff} />
-                 <SectionBackground card={formData} font={ff} />
-                 <SectionConstructionThinking card={formData} font={ff} />
-                 <SectionOrigin card={formData} font={ff} />
-                 <SectionWhy card={formData} font={ff} />
-                 <SectionThoughtPoints card={formData} font={ff} />
-                 <SectionWhat card={formData} font={ff} />
-                 <SectionHow card={formData} font={ff} />
-                 <SectionIntuitionTraps card={formData} font={ff} />
-                 <SectionRelations card={formData} font={ff} relations={wsRelations} cardTitles={wsTitles} />
-                 <SectionProcessLogs card={formData} font={ff} processLogs={wsLogs} />
-                 <SectionClaims card={formData} font={ff} />
-                 <SectionDiagnostics card={formData} font={ff} />
-                <div className="text-center text-[10px] text-slate-400 pt-4 border-t border-slate-200" style={{ fontFamily: UI }}>
-                  一頁式 · 全部內容連續呈現
+              // —— 一頁式：連續長紙，附帶左側導軌里程尺 ——
+              <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
+                <div className="sticky top-4 hidden sm:block">
+                  <MilestoneRuler
+                    activeKey="header"
+                    theme={cardTheme}
+                    onSelectSection={(sec) => {
+                      const el = document.getElementById(`section-${sec}`);
+                      if (el) el.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  />
+                </div>
+                <div
+                  className="flex-1 w-full max-w-[794px] shadow-xl rounded-sm px-4 py-6 sm:px-12 sm:py-10 transition-all border"
+                  style={{
+                    ...gridStyle,
+                    fontFamily: ff,
+                    borderColor: cardTheme.borderColor,
+                  }}
+                >
+                  <V6ContinuousPaper
+                    card={formData}
+                    font={ff}
+                    relations={wsRelations}
+                    cardTitles={wsTitles}
+                    processLogs={wsLogs}
+                    theme={cardTheme}
+                    onNavigateSection={(p) => {
+                      setPageMode("paged");
+                      setActivePage(p);
+                    }}
+                  />
+                  <div className="text-center text-[10px] pt-4 mt-8 border-t" style={{ borderColor: cardTheme.borderColor, color: cardTheme.mutedTextColor, fontFamily: UI }}>
+                    一頁式 · 全部內容連續方格排版
+                  </div>
                 </div>
               </div>
             ) : (
-              // —— 分頁：A4 紙張。桌機固定 794×1123；手機寬度自適應（保持 A4 比例）——
-              <div className="flex flex-col items-center gap-6 sm:gap-8">
-                {PAGES.map((p, i) => (
-                  <div
-                    key={i}
-                    id={`a4-page-${i}`}
-                    className={`bg-white shadow-lg rounded-sm px-5 py-6 sm:px-14 sm:py-12 flex flex-col transition-all w-full sm:w-[794px] sm:min-h-[1123px] ${
-                      activePage === i ? "ring-2 ring-slate-900" : "opacity-60"
-                    }`}
-                    style={{
-                      // 手機用 A4 比例 (1:1.414) 保持紙張感，桌機用固定尺寸
-                      aspectRatio: undefined,
-                      fontFamily: ff,
-                      backgroundImage:
-                        "repeating-linear-gradient(to bottom, transparent, transparent 31px, rgba(148,163,184,0.10) 31px, rgba(148,163,184,0.10) 32px)",
-                      backgroundPosition: "0 14px",
+              // —— 分頁：B5/A4 紙張（7 頁完整指南），附帶左側貫穿里程尺 ——
+              <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
+                <div className="sticky top-4 hidden sm:block">
+                  <MilestoneRuler
+                    activeKey={activeSectionKey}
+                    theme={cardTheme}
+                    onSelectSection={(sec) => {
+                      const idxMap: Record<string, number> = {
+                        background: 1,
+                        construction: 2,
+                        why: 3,
+                        what: 4,
+                        apply: 5,
+                      };
+                      if (idxMap[sec] !== undefined) setActivePage(idxMap[sec]);
                     }}
-                    onClick={() => setActivePage(i)}
-                  >
-                    <div className="flex-1">{p.render()}</div>
-                    <div
-                      className="pt-4 mt-auto border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400"
-                      style={{ fontFamily: UI }}
-                    >
-                      <span className="truncate max-w-[55%]">{formData.title}</span>
-                      <span className="truncate">A4 · {i + 1}/{PAGES.length} — {p.title}</span>
-                    </div>
+                  />
+                </div>
+
+                <div
+                  id={`v6-page-${activePage}`}
+                  className="w-full max-w-[794px] min-h-[820px] sm:min-h-[960px] shadow-xl rounded-sm px-4 py-5 sm:px-12 sm:py-8 flex flex-col justify-between transition-all border"
+                  style={{
+                    ...gridStyle,
+                    fontFamily: ff,
+                    borderColor: cardTheme.borderColor,
+                  }}
+                >
+                  <div className="flex-1">
+                    {PAGES[activePage].render()}
                   </div>
-                ))}
+                </div>
               </div>
             )}
           </div>
