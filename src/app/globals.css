@@ -164,6 +164,284 @@
   );
 }
 
+/* ===== v8.0 虛擬書房（半擬 3D；CSS 3D，不使用 three.js） ===== */
+:root {
+  /* 木材 */
+  --study-oak: #d9b98a;
+  --study-honey: #c79a5b;
+  --study-brown: #8a6440;
+  /* 牆面 */
+  --study-wall: #f3ece0;
+  --study-wall-warm: #e6ded2;
+  --study-cream: #faf5ea;
+  /* 光線（主光源左上，陰影往右下） */
+  --study-sun: #fff3d6;
+  /* 畫布紙面（與 v7.2 紙張一致） */
+  --study-paper: #faf7ee;
+  --study-wood-shadow: rgba(64, 42, 18, 0.32);
+}
+
+/* 書房外殼：單一主光源氛圍＋透視容器 */
+.study-room-view {
+  perspective: 1500px;
+  background: linear-gradient(180deg, var(--study-wall) 0%, var(--study-wall-warm) 100%);
+}
+
+/* 環繞容器（StudyRoomView 以 ref + rAF 直改 transform，不重算 React state） */
+.study-room-3d {
+  transform-style: preserve-3d;
+}
+
+/* 牆面：米白 → 暖灰＋淡淡牆紙直紋（略放大避免環繞露邊） */
+.study-back-wall {
+  position: absolute;
+  left: -18%;
+  right: -18%;
+  top: -14%;
+  bottom: 16%;
+  transform: translateZ(-320px);
+  background:
+    repeating-linear-gradient(90deg, rgba(138, 100, 64, 0.035) 0 2px, transparent 2px 46px),
+    linear-gradient(180deg, #f7f1e4 0%, var(--study-wall) 55%, var(--study-wall-warm) 100%);
+  border-bottom: 10px solid #d6c3a4;
+  pointer-events: none;
+}
+
+/* 主光源：左上淡金光暈 */
+.study-light {
+  position: absolute;
+  left: -12%;
+  top: -14%;
+  width: 64%;
+  height: 62%;
+  transform: translateZ(-300px);
+  background: radial-gradient(closest-side, rgba(255, 243, 214, 0.95), rgba(255, 243, 214, 0));
+  pointer-events: none;
+}
+
+/* 地板：往後延伸的水平面（淺橡木） */
+.study-floor {
+  position: absolute;
+  left: -24%;
+  right: -24%;
+  bottom: -36%;
+  height: 56%;
+  transform-origin: top center;
+  transform: rotateX(76deg) translateZ(-40px);
+  background: linear-gradient(180deg, var(--study-oak) 0%, var(--study-honey) 42%, var(--study-brown) 100%);
+  box-shadow: inset 0 12px 24px var(--study-wood-shadow);
+  pointer-events: none;
+}
+
+/* 書架在房間中的錨點（右側、靠牆；手機改置於書桌下方） */
+.study-shelf-anchor {
+  position: absolute;
+  right: 2.5%;
+  top: 5%;
+  bottom: 19%;
+  width: 36%;
+  transform: translateZ(-140px) rotateY(-3deg);
+  transform-style: preserve-3d;
+}
+
+/* 書架外框：側板＋背板 */
+.study-bookshelf {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  border-radius: 12px;
+  padding: 10px 14px;
+  transform-style: preserve-3d;
+  filter: drop-shadow(10px 14px 18px var(--study-wood-shadow));
+}
+.study-shelf-back {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #cbb08a 0%, #b8946b 60%, #a57f57 100%);
+  box-shadow: inset 0 2px 12px rgba(64, 42, 18, 0.35);
+}
+.study-shelf-side {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 13px;
+  background: linear-gradient(90deg, var(--study-honey), var(--study-brown));
+  border-radius: 8px;
+  box-shadow: 2px 4px 10px rgba(64, 42, 18, 0.35);
+}
+.study-shelf-side-left { left: 0; }
+.study-shelf-side-right {
+  right: 0;
+  background: linear-gradient(90deg, var(--study-brown), var(--study-honey));
+}
+
+/* 書架內部捲動區（手機：書架可捲動） */
+.study-shelf-scroll {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 4px 6px;
+}
+.study-shelf-row { display: flex; flex-direction: column; flex-shrink: 0; }
+.study-shelf-boards {
+  display: flex;
+  align-items: flex-end;
+  min-height: 128px;
+}
+.study-shelf-board {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 104px;
+  padding: 0 10px;
+  border-left: 2px solid rgba(138, 100, 64, 0.5);
+}
+.study-board-label-wrap { position: relative; margin-bottom: 2px; }
+/* 櫃板標籤：紙膠帶（微微歪斜、低飽和） */
+.study-board-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 9px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fffdf8;
+  transform: rotate(-1.4deg);
+}
+/* 櫃板隔板底座 */
+.study-board-divider {
+  width: 100%;
+  height: 5px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--study-oak), var(--study-brown));
+  box-shadow: 0 1px 3px rgba(64, 42, 18, 0.35);
+}
+.study-board-books {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  min-height: 118px;
+  padding-top: 4px;
+}
+.study-empty-hint {
+  align-self: center;
+  margin: 0 4px;
+  padding: 8px 10px;
+  border: 1px dashed #c9b28e;
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.55);
+  font-size: 10px;
+  color: #8a7a66;
+  white-space: nowrap;
+}
+.study-drop-line {
+  flex-shrink: 0;
+  width: 3px;
+  height: 104px;
+  border-radius: 2px;
+  background: #d97706;
+  box-shadow: 0 0 6px rgba(217, 119, 6, 0.6);
+}
+/* 層板（厚度感） */
+.study-shelf-plank {
+  height: 12px;
+  margin: 3px 2px 0;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--study-oak) 0%, var(--study-honey) 45%, var(--study-brown) 100%);
+  box-shadow: 0 7px 12px rgba(64, 42, 18, 0.32);
+}
+
+/* 書脊：多書時跳過屏外繪製（>200 本仍可用） */
+.study-book-spine {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px 104px;
+}
+
+/* 書本拖曳中：游標樣式以屬性切換（不直接改 document.body） */
+.study-bookshelf[data-dragging="true"],
+.study-bookshelf[data-dragging="true"] * {
+  cursor: grabbing !important;
+}
+
+/* 書桌固定前景（面向使用者；不隨環繞旋轉，確保畫布座標換算正常） */
+.study-desk-fixed {
+  position: absolute;
+  left: 1.5%;
+  top: 7%;
+  bottom: 3%;
+  width: 58%;
+  z-index: 10;
+}
+.study-desk {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+/* 桌板（上層厚度）：淺橡木→蜂蜜木 */
+.study-desk-top {
+  flex: 1;
+  min-height: 0;
+  padding: 11px 13px 7px;
+  border-radius: 16px 16px 6px 6px;
+  background:
+    repeating-linear-gradient(88deg, rgba(138, 100, 64, 0.05) 0 3px, transparent 3px 64px),
+    linear-gradient(158deg, #e6c89c 0%, var(--study-oak) 38%, var(--study-honey) 100%);
+  box-shadow:
+    0 20px 40px rgba(64, 42, 18, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+/* 畫布鑲嵌面（v7.2 紙面；手勢全部交給 InfiniteCanvas） */
+.study-canvas-inset {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--study-paper);
+  box-shadow:
+    inset 0 2px 12px rgba(64, 42, 18, 0.24),
+    0 0 0 2px rgba(138, 100, 64, 0.45);
+}
+/* 桌板前緣（下層厚度）：陰影往右下 */
+.study-desk-edge {
+  height: 15px;
+  margin: 0 8px;
+  border-radius: 0 0 10px 10px;
+  background: linear-gradient(180deg, var(--study-brown) 0%, #6e4d31 100%);
+  box-shadow: 0 14px 24px rgba(64, 42, 18, 0.42);
+}
+
+/* 手機（375px）：書桌（畫布）在上、書架在下可捲動 */
+@media (max-width: 767px) {
+  .study-desk-fixed {
+    left: 1%;
+    right: 1%;
+    width: auto;
+    top: 0.5%;
+    bottom: auto;
+    height: 56%;
+  }
+  .study-shelf-anchor {
+    left: 1%;
+    right: 1%;
+    width: auto;
+    top: 57.5%;
+    bottom: 1%;
+    transform: none;
+  }
+  .study-shelf-boards { min-height: 112px; }
+  .study-board-books { min-height: 104px; }
+}
+
 /* ===== v7.2：紙上編輯列印（只印紙張，不印工具列與輸入控件） ===== */
 @media print {
   body { background: #ffffff !important; }
@@ -187,4 +465,10 @@
     background: #ffffff !important;
   }
   .paper-scroll > div { max-width: none !important; }
+  /* v8.0：書房是螢幕介面——列印只輸出卡片紙面，書架/書桌/HUD 全部不印 */
+  .study-room-view,
+  .study-book-preview,
+  .study-category-panel {
+    display: none !important;
+  }
 }

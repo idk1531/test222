@@ -1,4 +1,6 @@
 // 純前端型別定義（不依賴資料庫/伺服器）
+import type { StudyCategory, StudyBookLayout, StudyLayout } from "./study";
+
 export interface WorkspaceMeta {
   id: string;
   name: string;
@@ -65,6 +67,11 @@ export interface WorkspaceState {
   blindSpots: BlindSpotItem[];
   motherTopics: MotherTopicItem[];
   versions: VersionItem[];
+  // v8.0 虛擬書房：分類櫃板、書本（1:1 對應卡片）、書房視角/層數。
+  // 與卡片正文、畫布座標分開存放：移動書本不得改 CanvasObjectData.x/y。
+  studyCategories: StudyCategory[];
+  studyBooks: StudyBookLayout[];
+  studyLayout: StudyLayout;
   savedAt?: string;
 }
 
@@ -75,7 +82,9 @@ export interface WorkspaceState {
 // ④ 洞見檢查改為功能判準（每句延伸附一道「拿掉這句就會答錯或做不出來」的題）
 // ⑤ APPLY 來源標籤 [源:___] 併入 [源:WHAT-讀法n] ＋ 兩段式（識別/構造）
 // ⑥ 新增附錄 B（讀法原則 12 條）、附錄 C（橋與平均數示範）、附錄 D（狀態與未解問題）
-export const SCHEMA_VERSION = 7;
+// v8：虛擬書房（階段 1–3）——新增 studyCategories / studyBooks / studyLayout，
+// STORAGE_KEY 由 scinotes-workspace-v7.1 升到 scinotes-workspace-v8.0，舊檔匯入自動補齊。
+export const SCHEMA_VERSION = 8;
 
 export interface ExportFilePayload {
   schemaVersion: number;
