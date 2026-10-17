@@ -644,6 +644,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
             <defs>
               <marker id="arrowhead-indigo" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#6366f1" /></marker>
               <marker id="arrowhead-amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#f59e0b" /></marker>
+              <marker id="arrowhead-teal" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#0d9488" /></marker>
             </defs>
             {relations.map((rel) => {
               const from = objects.find((o) => o.cardId === rel.fromCardId);
@@ -654,7 +655,8 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
               const x2 = to.x + to.width / 2;
               const y2 = to.y + to.height / 2;
               const isUnverified = rel.relationType === "analogy_unverified";
-              const color = isUnverified ? "#f59e0b" : "#6366f1";
+              const isDerived = rel.relationType === "derived";
+              const color = isUnverified ? "#f59e0b" : isDerived ? "#0d9488" : "#6366f1";
               return (
                 <g
                   key={rel.id}
@@ -685,12 +687,12 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                     stroke={color}
                     strokeWidth="2.5"
                     strokeDasharray={isUnverified ? "6,6" : "none"}
-                    markerEnd={isUnverified ? "url(#arrowhead-amber)" : "url(#arrowhead-indigo)"}
+                    markerEnd={isUnverified ? "url(#arrowhead-amber)" : isDerived ? "url(#arrowhead-teal)" : "url(#arrowhead-indigo)"}
                     pointerEvents="none"
                   />
                   <foreignObject data-relation-control="true" x={(x1 + x2) / 2 - 76} y={(y1 + y2) / 2 - 14} width={152} height={30} className="overflow-visible pointer-events-auto">
                     <div data-relation-control="true" className="flex items-center justify-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-xs ${isUnverified ? "bg-amber-50 text-amber-800 border-amber-300" : "bg-white text-indigo-800 border-indigo-300"}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-xs ${isUnverified ? "bg-amber-50 text-amber-800 border-amber-300" : isDerived ? "bg-teal-50 text-teal-800 border-teal-300" : "bg-white text-indigo-800 border-indigo-300"}`}>
                         {rel.label || rel.relationType}
                       </span>
                     </div>

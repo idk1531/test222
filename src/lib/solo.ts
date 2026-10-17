@@ -16,9 +16,11 @@ export interface SoloAssessment {
     unverifiedAnalogies: number;
     verifiedAnalogies: number;
     generalizations: number;
+    derivedRelations: number;
     motifsContaining: number;
     verifiedMotifs: number;
     perspectiveCount: number;
+    readingCount: number;
     hasTwoPerspectives: boolean;
     cardsWithOpenBlindSpots: number;
   };
@@ -28,8 +30,9 @@ export interface SoloAssessment {
 
 /**
  * SOLO = 知識網整合度（與 Bloom 單點深度嚴格分離）
- * 依據真實關係邊計算；~ 未驗證類比不計分；
- * v4 新規則：邊指向目標有未決盲區（▲）時，該邊暫不計入。
+ * 依據真實關係邊計算；[表面相似] 未驗證類比不計分；
+ * v4 新規則：邊指向目標有未決盲區（[未決]）時，該邊暫不計入。
+ * v7 新規則：新增 [衍生] 關係邊（A [衍生]→ B 表示 B 是用 A 造出來的，B 須有 [前提] 指回 A）。
  */
 export function assessSolo(
   card: CardData,
@@ -43,12 +46,21 @@ export function assessSolo(
     (r) => r.fromCardId === cardId || r.toCardId === cardId
   );
 
-  // v4: 邊類型合法 + 指向目標無未決盲區才計入
+  // v4/v7: 邊類型合法 + 指向目標無未決盲區 + 若為 [衍生] 須雙向對齊 [前提] 才計入
   const countedRelations = rels.filter((r) => {
     if (r.relationType === "analogy_unverified") return false;
     const otherCardId = r.fromCardId === cardId ? r.toCardId : r.fromCardId;
-    if (!otherCardId) return true;
-    if (blindSpotOpenCardIds.has(otherCardId)) return false;
+    if (otherCardId && blindSpotOpenCardIds.has(otherCardId)) return false;
+    if (r.relationType === "derived") {
+      // v7 機械檢查：A [衍生]→ B，B 必須有 [前提] 指回 A
+      const hasBackPrereq = relations.some(
+        (p) =>
+          p.relationType === "prerequisite" &&
+          ((p.fromCardId === r.toCardId && p.toCardId === r.fromCardId) ||
+            (p.fromCardId === r.fromCardId && p.toCardId === r.toCardId))
+      );
+      if (!hasBackPrereq) return false;
+    }
     return true;
   });
 
@@ -57,6 +69,7 @@ export function assessSolo(
   const generalizations = rels.filter(
     (r) => r.relationType === "generalization" || r.relationType === "special_case"
   );
+  const derivedRelations = rels.filter((r) => r.relationType === "derived");
 
   const motifsContaining = (motherTopics || []).filter((m) =>
     (m.instanceCardIds || []).includes(cardId)
@@ -64,6 +77,7 @@ export function assessSolo(
   const verifiedMotifs = motifsContaining.filter((m) => m.isVerified);
 
   const perspectiveCount = card.whatData?.perspectives?.length ?? 0;
+  const readingCount = card.whatData?.readings?.length ?? 0;
   const hasTwoPerspectives = Boolean(
     card.whyData?.perspective1?.content && card.whyData?.perspective2?.content
   );
@@ -79,10 +93,10 @@ export function assessSolo(
     reasons.push("WHAT/WHY 已有內容，可掌握單一面向。");
   }
 
-  if (perspectiveCount >= 2 || hasTwoPerspectives) {
+  if (perspectiveCount >= 2 || readingCount >= 2 || hasTwoPerspectives) {
     level = "多點結構";
     reasons.push(
-      `具備 ${Math.max(perspectiveCount, hasTwoPerspectives ? 2 : 0)} 個獨立面向（多視角或雙失效模式視角），但面向之間尚未必然收束。`
+      `具備 ${Math.max(perspectiveCount, readingCount, hasTwoPerspectives ? 2 : 0)} 個獨立面向（多讀法／多視角或雙失效模式視角），但面向之間尚未必然透過跨卡關係收束。`
     );
   }
 
@@ -90,22 +104,27 @@ export function assessSolo(
     level = "關聯結構";
     reasons.push(
       `具 ${countedRelations.length} 條計分關係邊${
-        verifiedAnalogies.length > 0 ? `（含 ${verifiedAnalogies.length} 條已驗證結構類比 ≈）` : ""
+        verifiedAnalogies.length > 0 ? `（含 ${verifiedAnalogies.length} 條已驗證結構類比 [結構類比]）` : ""
+      }${
+        derivedRelations.length > 0 ? `（含 ${derivedRelations.length} 條 [衍生] 邊）` : ""
       }，各面向已被關係串成一體。`
     );
   }
 
-  if (verifiedMotifs.length >= 1 && (generalizations.length >= 1 || verifiedAnalogies.length >= 1)) {
+  if (
+    verifiedMotifs.length >= 1 &&
+    (generalizations.length >= 1 || verifiedAnalogies.length >= 1 || derivedRelations.length >= 1)
+  ) {
     level = "抽象拓展";
     reasons.push(
-      `屬於 ${verifiedMotifs.length} 個已成立母題，且具備推廣/特例或已驗證類比邊，可跨框架遷移並對新情境做預測。`
+      `屬於 ${verifiedMotifs.length} 個已成立母題，且具備推廣/特例、[衍生] 或已驗證類比邊，可跨框架遷移並對新情境做預測。`
     );
   }
 
   const blockers: string[] = [];
   if (unverifiedAnalogies.length > 0) {
     blockers.push(
-      `有 ${unverifiedAnalogies.length} 條未驗證類比 ~[d]，依規則不計入整合度。請先完成候選推理測試。`
+      `有 ${unverifiedAnalogies.length} 條未驗證類比 [表面相似:d]，依規則不計入整合度。請先完成候選推理測試。`
     );
   }
   if (countedRelations.length === 0) {
@@ -127,7 +146,7 @@ export function assessSolo(
   });
   if (excludedByBlindSpot.length > 0) {
     blockers.push(
-      `有 ${excludedByBlindSpot.length} 條邊因指向目標仍有未決盲區（▲）而暫不計入——先處理目標卡的盲區，這些邊才會重新計分。`
+      `有 ${excludedByBlindSpot.length} 條邊因指向目標仍有未決盲區（[未決]）而暫不計入——先處理目標卡的盲區，這些邊才會重新計分。`
     );
   }
 
@@ -157,15 +176,17 @@ export function assessSolo(
       unverifiedAnalogies: unverifiedAnalogies.length,
       verifiedAnalogies: verifiedAnalogies.length,
       generalizations: generalizations.length,
+      derivedRelations: derivedRelations.length,
       motifsContaining: motifsContaining.length,
       verifiedMotifs: verifiedMotifs.length,
       perspectiveCount,
+      readingCount,
       hasTwoPerspectives,
       cardsWithOpenBlindSpots: blindSpotOpenCardIds.size,
     },
     v4RuleApplied: true,
     v4Note:
-      "邊指向目標有未決盲區（▲）時，該邊暫不計入 SOLO 判定——目標本身站不住，邊就不能算有效整合。",
+      "邊指向目標有未決盲區（[未決]）時，該邊暫不計入 SOLO 判定；[衍生] 邊須通過 B 有 [前提] 指回 A 的機械檢查才計入。",
   };
 }
 

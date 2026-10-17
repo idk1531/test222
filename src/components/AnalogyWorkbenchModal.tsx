@@ -160,6 +160,7 @@ export const AnalogyWorkbenchModal: React.FC<AnalogyWorkbenchModalProps> = ({
               className="w-full p-2 rounded-lg border border-slate-300 bg-white font-medium"
             >
               <option value="prerequisite">[前提] A 是 B 成立的必要基礎</option>
+              <option value="derived">[衍生] B 是用 A「造」出來的（v7新增：B 須有 [前提] 指回 A）</option>
               <option value="analogy_verified">[結構類比:d] 已過候選推理測試（計入整合度）</option>
               <option value="analogy_unverified">[表面相似:d] 未驗證（不計入整合度）</option>
               <option value="contrast">[對照:d] 對照／衝突（須點名維度）</option>
@@ -170,6 +171,13 @@ export const AnalogyWorkbenchModal: React.FC<AnalogyWorkbenchModalProps> = ({
               <option value="motif_instance">[歸屬母題] 需≥3實例＋候選推理測試雙達標</option>
             </select>
           </div>
+
+          {relationType === "derived" && (
+            <div className="p-2.5 rounded-lg bg-teal-50 border border-teal-200 text-teal-900 text-[11px] leading-relaxed">
+              <b>v7 [衍生] 機械檢查：</b><code className="font-mono">A [衍生]→ B</code> 表示 B 是用 A 當零件「造」出來的（對應 WHAT 六方向延伸的第 6 方向「造」）。
+              <b>B 那張卡必須有 <code className="font-mono">[前提]</code> 指回 A</b>，兩邊對得上才算數！
+            </div>
+          )}
 
           {needsDimension && (
             <div>

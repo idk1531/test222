@@ -12,7 +12,7 @@ export interface ProcessLogItem {
   id: string;
   workspaceId: string;
   cardId?: string;
-  logType: string; // ⟲ | ⚡ | ⇹ | ⋯
+  logType: string; // [增量] | [框架衝突] | [同session矛盾] | [未編譯]
   title: string;
   oldContent?: string;
   newContent?: string;
@@ -68,8 +68,14 @@ export interface WorkspaceState {
   savedAt?: string;
 }
 
-// v5：WHEN 併入 HOW（HOW = CHECK 橫跨性前置關卡＋分支（可巢狀，含區域性 CHECK）＋CAN 下游解鎖）
-export const SCHEMA_VERSION = 5;
+// v7：寫入《取用的設計：讀法、視角與六向延伸》（2026-10-13）
+// ① WHAT 新增「讀法」（問題×讀法表、橋的 4 種關係、機械檢查）
+// ② 視角與讀法為兩條獨立軸（4 種組合）＋ v6 借鏡視角與對應表/可核對事實寫作規則
+// ③ 五向延伸改為六向延伸，新增「造」（選了什麼/換選擇會怎樣/連回對象）與關係邊 [衍生]
+// ④ 洞見檢查改為功能判準（每句延伸附一道「拿掉這句就會答錯或做不出來」的題）
+// ⑤ APPLY 來源標籤 [源:___] 併入 [源:WHAT-讀法n] ＋ 兩段式（識別/構造）
+// ⑥ 新增附錄 B（讀法原則 12 條）、附錄 C（橋與平均數示範）、附錄 D（狀態與未解問題）
+export const SCHEMA_VERSION = 7;
 
 export interface ExportFilePayload {
   schemaVersion: number;

@@ -183,6 +183,20 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, action: e.target.value })) })}
         className="w-full p-2 rounded border border-slate-300 text-xs bg-white"
       />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        <input
+          value={b.constructionAction || ""}
+          placeholder="兩段式構造／識別動作（選填：遇到看似不相關題 → 想到把___設成___）"
+          onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, constructionAction: e.target.value })) })}
+          className="p-1.5 rounded border border-amber-300 text-[11px] bg-amber-50/40"
+        />
+        <input
+          value={b.source || ""}
+          placeholder="來源標籤（必填，例：[源:WHAT-讀法2] 或 [源:WHY-推導①]）"
+          onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, source: e.target.value })) })}
+          className="p-1.5 rounded border border-indigo-300 text-[11px] font-mono bg-indigo-50/30"
+        />
+      </div>
       {/* 區域性 CHECK：只在這個分支內要過的「看到___→檢查___」 */}
       {(b.checks || []).length > 0 && (
         <div className="pl-2 border-l-2 border-indigo-300 space-y-1.5">
@@ -207,6 +221,15 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 </button>
               </div>
               <div className="flex gap-2 items-center">
+                <span className="font-bold text-amber-700 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>→變換</span>
+                <input
+                  value={c.twoStageTransform || ""}
+                  onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, twoStageTransform: e.target.value } : cc)) })) })}
+                  className="flex-1 p-1 rounded border border-amber-300 text-[11px] bg-white"
+                  placeholder="兩段式變換／識別動作（選填）"
+                />
+              </div>
+              <div className="flex gap-2 items-center">
                 <span className="font-bold text-emerald-700 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>→檢查</span>
                 <input
                   value={c.check || ""}
@@ -215,14 +238,25 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                   placeholder="例：先分恆容還是恆壓"
                 />
               </div>
-              <div className="flex gap-2 items-center">
-                <span className="font-bold text-slate-500 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>關鍵詞</span>
-                <input
-                  value={(c.keywords || []).join(", ")}
-                  onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : cc)) })) })}
-                  className="flex-1 p-1 rounded border border-slate-300 text-[11px] bg-white"
-                  placeholder="逗號分隔"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <div className="flex gap-2 items-center">
+                  <span className="font-bold text-slate-500 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>關鍵詞</span>
+                  <input
+                    value={(c.keywords || []).join(", ")}
+                    onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : cc)) })) })}
+                    className="flex-1 p-1 rounded border border-slate-300 text-[11px] bg-white"
+                    placeholder="逗號分隔"
+                  />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="font-bold text-indigo-700 w-10 text-[10px] flex-shrink-0" style={{ fontFamily: UI }}>來源</span>
+                  <input
+                    value={c.source || ""}
+                    onChange={(e) => patchHow({ branches: updateBranchDeep(formData.howData?.branches, b.id, (x) => ({ ...x, checks: (x.checks || []).map((cc, j) => (j === ci ? { ...cc, source: e.target.value } : cc)) })) })}
+                    className="flex-1 p-1 rounded border border-indigo-300 text-[11px] font-mono bg-white"
+                    placeholder="[源:WHY-推導②]"
+                  />
+                </div>
               </div>
             </div>
           ))}
@@ -1141,7 +1175,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
               </div>
 
               <div>
-                <label className="font-bold text-slate-700 block mb-1">與 HOW 的嚴格區分</label>
+                <label className="font-bold text-slate-700 block mb-1">與 APPLY（原 HOW）的嚴格區分</label>
                 <input
                   value={formData.whatData?.distinctionFromHow || ""}
                   onChange={(e) => patch({ whatData: { ...formData.whatData!, distinctionFromHow: e.target.value } })}
@@ -1149,55 +1183,531 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                 />
               </div>
 
+              {/* ===== v7 新增：WHAT 第一子節點「讀法」（問題×讀法表 ＋ 讀法之間的橋 ＋ 機械檢查） ===== */}
+              <div className="p-3 rounded-lg border border-sky-200 bg-sky-50/40 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="font-bold text-sky-950 block">
+                      WHAT 第一子節點 · 讀法（v7 新增：取用知識的方式）
+                    </span>
+                    <span className="text-[10px] text-slate-600">
+                      什麼算不同讀法：存在某個問題，在其中一種表述下明顯比另一種容易（若沒有問題因此變容易，如 3×4=12 與 12=3×4，只是換寫法）。
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const cur = formData.whatData?.readings || [];
+                      const n = cur.length + 1;
+                      patch({
+                        whatData: {
+                          ...formData.whatData!,
+                          readings: [
+                            ...cur,
+                            {
+                              id: `r-${Date.now()}`,
+                              name: `讀法${n}：`,
+                              description: "",
+                              linkedPerspective: "",
+                              onlyForUnderstanding: false,
+                            },
+                          ],
+                        },
+                      });
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 font-semibold"
+                  >
+                    + 新增讀法
+                  </button>
+                </div>
+
+                {/* 只有 1 個讀法時的機械檢查標記 */}
+                {(formData.whatData?.readings || []).length === 1 && (
+                  <label className="flex items-center gap-2 p-2 rounded bg-amber-50 border border-amber-300 text-[11px] text-amber-950 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!formData.whatData?.singleReadingBlindSpotNote}
+                      onChange={(e) =>
+                        patch({
+                          whatData: {
+                            ...formData.whatData!,
+                            singleReadingBlindSpotNote: e.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <span>
+                      <b>機械檢查（單一讀法）：</b>標註「<b>單一讀法，盲區未驗</b>」（缺少其他讀法對照時，當事人未必察覺盲區）
+                    </span>
+                  </label>
+                )}
+
+                {/* 讀法列表編輯 */}
+                <div className="space-y-2">
+                  {(formData.whatData?.readings || []).map((r, ri) => (
+                    <div key={r.id || ri} className="p-2.5 bg-white rounded-lg border border-sky-200 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={r.name}
+                          onChange={(e) => {
+                            const list = [...(formData.whatData?.readings || [])];
+                            list[ri] = { ...list[ri], name: e.target.value };
+                            patch({ whatData: { ...formData.whatData!, readings: list } });
+                          }}
+                          placeholder={`讀法${ri + 1}：名稱（例：讀法2：各數偏差正負相消的平衡點）`}
+                          className="flex-1 min-w-[200px] p-1.5 rounded border border-slate-300 text-xs font-bold bg-white"
+                        />
+                        <input
+                          value={r.linkedPerspective || ""}
+                          onChange={(e) => {
+                            const list = [...(formData.whatData?.readings || [])];
+                            list[ri] = { ...list[ri], linkedPerspective: e.target.value };
+                            patch({ whatData: { ...formData.whatData!, readings: list } });
+                          }}
+                          placeholder="配對視角（選填，例：可配視角：天平支點）"
+                          className="w-48 p-1.5 rounded border border-slate-300 text-[11px] bg-white"
+                        />
+                        <label className="flex items-center gap-1 text-[10px] text-slate-600 cursor-pointer" title="沒被任何 APPLY 分支用到時，須標「僅理解用」">
+                          <input
+                            type="checkbox"
+                            checked={!!r.onlyForUnderstanding}
+                            onChange={(e) => {
+                              const list = [...(formData.whatData?.readings || [])];
+                              list[ri] = { ...list[ri], onlyForUnderstanding: e.target.checked };
+                              patch({ whatData: { ...formData.whatData!, readings: list } });
+                            }}
+                          />
+                          <span>僅理解用</span>
+                        </label>
+                        <button
+                          onClick={() =>
+                            patch({
+                              whatData: {
+                                ...formData.whatData!,
+                                readings: (formData.whatData?.readings || []).filter((_, x) => x !== ri),
+                              },
+                            })
+                          }
+                          className="text-slate-400 hover:text-rose-600"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={r.description}
+                        onChange={(e) => {
+                          const list = [...(formData.whatData?.readings || [])];
+                          list[ri] = { ...list[ri], description: e.target.value };
+                          patch({ whatData: { ...formData.whatData!, readings: list } });
+                        }}
+                        placeholder="讀法具體表述（支援 LaTeX，例：$\sum(x_i - \bar{x}) = 0$）"
+                        className="w-full p-1.5 rounded border border-slate-300 text-xs bg-white"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* 問題 × 讀法表編輯 */}
+                {(formData.whatData?.readings || []).length > 0 && (
+                  <div className="pt-2 border-t border-sky-200 space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <span className="font-bold text-sky-950 text-[11px] block">
+                          問題 × 讀法表（列＝問題，欄＝讀法，格＝幾步／多走哪一步／看不見）
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          規則：①每個讀法至少有一題它最便宜（勾選 ★最便宜） ②某問題在所有欄都貴或看不見＝缺讀法的徵兆 ③看不見欄須指向另一個看得見的讀法
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const qs = formData.whatData?.readingQuestions || [];
+                          patch({
+                            whatData: {
+                              ...formData.whatData!,
+                              readingQuestions: [
+                                ...qs,
+                                { id: `rq-${Date.now()}`, question: "", cells: {} },
+                              ],
+                            },
+                          });
+                        }}
+                        className="text-[11px] px-2 py-1 rounded bg-white border border-sky-300 text-sky-800 hover:bg-sky-100 font-semibold"
+                      >
+                        + 新增問題列
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(formData.whatData?.readingQuestions || []).map((rq, qi) => (
+                        <div key={rq.id || qi} className="p-2.5 bg-white rounded-lg border border-sky-200 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-sky-800 flex-shrink-0">問題 {qi + 1}</span>
+                            <input
+                              value={rq.question}
+                              onChange={(e) => {
+                                const qs = [...(formData.whatData?.readingQuestions || [])];
+                                qs[qi] = { ...qs[qi], question: e.target.value };
+                                patch({ whatData: { ...formData.whatData!, readingQuestions: qs } });
+                              }}
+                              placeholder="例：4個人平均70，前3人65、72、68，第4人？"
+                              className="flex-1 p-1.5 rounded border border-slate-300 text-xs font-semibold bg-white"
+                            />
+                            <button
+                              onClick={() =>
+                                patch({
+                                  whatData: {
+                                    ...formData.whatData!,
+                                    readingQuestions: (formData.whatData?.readingQuestions || []).filter((_, x) => x !== qi),
+                                  },
+                                })
+                              }
+                              className="text-slate-400 hover:text-rose-600"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            {(formData.whatData?.readings || []).map((r) => {
+                              const cell = rq.cells?.[r.id] || { text: "" };
+                              const updateCell = (cellPatch: Partial<typeof cell>) => {
+                                const qs = [...(formData.whatData?.readingQuestions || [])];
+                                qs[qi] = {
+                                  ...qs[qi],
+                                  cells: {
+                                    ...(qs[qi].cells || {}),
+                                    [r.id]: { ...cell, ...cellPatch },
+                                  },
+                                };
+                                patch({ whatData: { ...formData.whatData!, readingQuestions: qs } });
+                              };
+                              return (
+                                <div key={r.id} className="p-2 rounded bg-slate-50 border border-slate-200 space-y-1">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[10px] font-bold text-slate-700 truncate">{r.name}</span>
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                      <label className="flex items-center gap-0.5 text-[9px] text-emerald-700 font-bold cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!cell.isCheapest}
+                                          onChange={(e) => updateCell({ isCheapest: e.target.checked })}
+                                        />
+                                        ★最便宜
+                                      </label>
+                                      <label className="flex items-center gap-0.5 text-[9px] text-rose-700 font-bold cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!cell.isInvisible}
+                                          onChange={(e) => updateCell({ isInvisible: e.target.checked })}
+                                        />
+                                        看不見
+                                      </label>
+                                    </div>
+                                  </div>
+                                  <input
+                                    value={cell.text || ""}
+                                    onChange={(e) => updateCell({ text: e.target.value })}
+                                    placeholder="例：一步：偏差 −5,+2,−2，差 +5 所以 75"
+                                    className="w-full p-1 rounded border border-slate-300 text-[11px] bg-white"
+                                  />
+                                  {cell.isInvisible && (
+                                    <select
+                                      value={cell.pointsToReadingId || ""}
+                                      onChange={(e) => updateCell({ pointsToReadingId: e.target.value })}
+                                      className="w-full p-1 rounded border border-rose-300 bg-rose-50 text-[10px] text-rose-900"
+                                    >
+                                      <option value="">指向哪個看得見此題的讀法？</option>
+                                      {(formData.whatData?.readings || [])
+                                        .filter((other) => other.id !== r.id)
+                                        .map((other) => (
+                                          <option key={other.id} value={other.id}>
+                                            指向：{other.name}
+                                          </option>
+                                        ))}
+                                    </select>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 橋（讀法之間的關係，4 種）編輯 */}
+                {(formData.whatData?.readings || []).length >= 2 && (
+                  <div className="pt-2 border-t border-sky-200 space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <span className="font-bold text-sky-950 text-[11px] block">
+                          橋 · 讀法之間的關係（每一對讀法都必須有橋或標 [未查]）
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          四種關係：互通（雙向推導）／單向（推導＋反方向反例）／限定範圍（推導＋範圍條件＋範圍外反例）／走不通（理由＋[已證無橋]或[未找到橋]）
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const rList = formData.whatData?.readings || [];
+                          const bList = formData.whatData?.readingBridges || [];
+                          patch({
+                            whatData: {
+                              ...formData.whatData!,
+                              readingBridges: [
+                                ...bList,
+                                {
+                                  id: `br-${Date.now()}`,
+                                  fromReadingId: rList[0]?.id || "",
+                                  toReadingId: rList[1]?.id || "",
+                                  type: "互通",
+                                  forwardProof: "",
+                                  backwardProof: "",
+                                },
+                              ],
+                            },
+                          });
+                        }}
+                        className="text-[11px] px-2 py-1 rounded bg-white border border-sky-300 text-sky-800 hover:bg-sky-100 font-semibold"
+                      >
+                        + 新增讀法之橋
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(formData.whatData?.readingBridges || []).map((br, bi) => {
+                        const updateBridge = (brPatch: Partial<typeof br>) => {
+                          const bList = [...(formData.whatData?.readingBridges || [])];
+                          bList[bi] = { ...bList[bi], ...brPatch };
+                          patch({ whatData: { ...formData.whatData!, readingBridges: bList } });
+                        };
+                        return (
+                          <div key={br.id || bi} className="p-2.5 bg-white rounded-lg border border-sky-200 space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={br.fromReadingId}
+                                onChange={(e) => updateBridge({ fromReadingId: e.target.value })}
+                                className="p-1 rounded border border-slate-300 text-xs bg-white font-semibold"
+                              >
+                                {(formData.whatData?.readings || []).map((r) => (
+                                  <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                              </select>
+                              <span className="text-xs font-bold text-slate-500">↔</span>
+                              <select
+                                value={br.toReadingId}
+                                onChange={(e) => updateBridge({ toReadingId: e.target.value })}
+                                className="p-1 rounded border border-slate-300 text-xs bg-white font-semibold"
+                              >
+                                {(formData.whatData?.readings || []).map((r) => (
+                                  <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={br.type}
+                                onChange={(e) => updateBridge({ type: e.target.value as any })}
+                                className="p-1 rounded border border-sky-300 text-xs bg-sky-50 font-bold text-sky-900"
+                              >
+                                <option value="互通">互通（雙向推導）</option>
+                                <option value="單向">單向（推導＋反向反例）</option>
+                                <option value="限定範圍">限定範圍（推導＋範圍條件＋範圍外反例）</option>
+                                <option value="走不通">走不通（理由＋無橋標記）</option>
+                                <option value="[未查]">[未查]</option>
+                              </select>
+                              {br.type === "走不通" && (
+                                <select
+                                  value={br.blockedMark || "[已證無橋]"}
+                                  onChange={(e) => updateBridge({ blockedMark: e.target.value as any })}
+                                  className="p-1 rounded border border-rose-300 text-xs bg-rose-50 font-bold text-rose-900"
+                                >
+                                  <option value="[已證無橋]">[已證無橋]</option>
+                                  <option value="[未找到橋]">[未找到橋]</option>
+                                </select>
+                              )}
+                              <button
+                                onClick={() =>
+                                  patch({
+                                    whatData: {
+                                      ...formData.whatData!,
+                                      readingBridges: (formData.whatData?.readingBridges || []).filter((_, x) => x !== bi),
+                                    },
+                                  })
+                                }
+                                className="text-slate-400 hover:text-rose-600 ml-auto"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {(br.type === "互通" || br.type === "單向" || br.type === "限定範圍") && (
+                              <input
+                                value={br.forwardProof || ""}
+                                onChange={(e) => updateBridge({ forwardProof: e.target.value })}
+                                placeholder={br.type === "互通" ? "正向推導（讀法A → 讀法B）：…" : "推導：…"}
+                                className="w-full p-1.5 rounded border border-slate-300 text-[11px] bg-white"
+                              />
+                            )}
+                            {br.type === "互通" && (
+                              <input
+                                value={br.backwardProof || ""}
+                                onChange={(e) => updateBridge({ backwardProof: e.target.value })}
+                                placeholder="反向推導（讀法B → 讀法A）：…"
+                                className="w-full p-1.5 rounded border border-slate-300 text-[11px] bg-white"
+                              />
+                            )}
+                            {br.type === "限定範圍" && (
+                              <input
+                                value={br.scopeCondition || ""}
+                                onChange={(e) => updateBridge({ scopeCondition: e.target.value })}
+                                placeholder="範圍條件（例：在整數環 ℤ 上成立）：…"
+                                className="w-full p-1.5 rounded border border-amber-300 text-[11px] bg-amber-50/40"
+                              />
+                            )}
+                            {(br.type === "單向" || br.type === "限定範圍") && (
+                              <input
+                                value={br.counterExample || ""}
+                                onChange={(e) => updateBridge({ counterExample: e.target.value })}
+                                placeholder={br.type === "單向" ? "反方向的反例（例：sin(1/x) 有中間值性質但不連續）：…" : "範圍外的反例（例：在 ℤ[√-5] 中 2 拆不下去但不滿足歐幾里得引理）：…"}
+                                className="w-full p-1.5 rounded border border-rose-300 text-[11px] bg-rose-50/40"
+                              />
+                            )}
+                            {br.type === "走不通" && (
+                              <input
+                                value={br.blockedReason || ""}
+                                onChange={(e) => updateBridge({ blockedReason: e.target.value })}
+                                placeholder="走不通的理由：…"
+                                className="w-full p-1.5 rounded border border-rose-300 text-[11px] bg-rose-50/40"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <datalist id="perspective-code-suggestions">
-                {["幾何視角", "代數視角", "直覺視角", "計算視角", "算符視角", "應用視角", "物理視角", "經濟學視角", "信息論視角", "操作視角", "統計視角", "拓撲視角", "歷史演化視角"].map((x) => (
+                {["幾何視角", "代數視角", "直覺視角", "計算視角", "算符視角", "應用視角", "物理視角", "經濟學視角", "信息論視角", "操作視角", "統計視角", "拓撲視角", "歷史演化視角", "[借鏡視角:待命名]"].map((x) => (
                   <option key={x} value={x} />
                 ))}
               </datalist>
 
-              <div className="pt-2 border-t border-slate-200">
-                <div className="flex items-center justify-between mb-2">
+              {/* ===== v6/v7：多視角理解 ＋ 借鏡視角 ＋ 視角×讀法獨立軸 ===== */}
+              <div className="pt-2 border-t border-slate-200 space-y-2">
+                <div className="flex items-center justify-between mb-1">
                   <span className="font-bold text-slate-700 flex items-center gap-2 flex-wrap">
-                    <span>多視角理解（自由命名借用哪個學科／框架的工具箱；下限 3 個，不設上限、不要求正交）</span>
+                    <span>多視角理解 & 借鏡視角（下限 3 個；視角與讀法是兩條獨立的軸）</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${(formData.whatData?.perspectives?.length || 0) >= 3 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                       {formData.whatData?.perspectives?.length || 0} / 3
                     </span>
                   </span>
-                  <button
-                    onClick={() => patch({
-                      whatData: {
-                        ...formData.whatData!,
-                        perspectives: [...(formData.whatData?.perspectives || []), { code: "", label: "", content: "" }],
-                      },
-                    })}
-                    className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold"
-                  >
-                    + 新增視角
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => patch({
+                        whatData: {
+                          ...formData.whatData!,
+                          perspectives: [...(formData.whatData?.perspectives || []), { code: "", label: "", content: "", kind: "perspective", mappingTable: "", derivedFact: "" }],
+                        },
+                      })}
+                      className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold"
+                    >
+                      + 新增視角
+                    </button>
+                    <button
+                      onClick={() => patch({
+                        whatData: {
+                          ...formData.whatData!,
+                          perspectives: [...(formData.whatData?.perspectives || []), { code: "[借鏡視角:標題]", label: "借鏡視角", content: "", kind: "mirror", mappingTable: "", derivedFact: "" }],
+                        },
+                      })}
+                      className="text-[11px] px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold"
+                    >
+                      + 新增借鏡視角
+                    </button>
+                  </div>
                 </div>
+
+                {/* 常見視角來源提示清單（8 項） */}
+                <details className="p-2 bg-slate-50 rounded border border-slate-200 text-[10px] text-slate-600">
+                  <summary className="font-bold text-slate-700 cursor-pointer">
+                    💡 常見視角來源提示清單（8 個可考慮的方向，非必填）
+                  </summary>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1.5 pl-2">
+                    <div>1. <b>幾何／空間圖像</b>（向量、投影、距離、面積、曲率）</div>
+                    <div>2. <b>代數／符號結構</b>（群、線性算子、不變量、對偶）</div>
+                    <div>3. <b>物理／力學機制</b>（力矩平衡、位能極小、流體守恆、電路）</div>
+                    <div>4. <b>信息論／編碼</b>（熵、壓縮率、通道容量、冗餘消除）</div>
+                    <div>5. <b>經濟學／博弈與資源配置</b>（邊際代價、套利均衡、預算約束）</div>
+                    <div>6. <b>演算法／計算複雜度與狀態機</b>（輸入輸出、迭代收斂、時間換空間）</div>
+                    <div>7. <b>控制論／系統回饋</b>（設定值、誤差訊號、正負回授、穩定性）</div>
+                    <div>8. <b>統計／隨機過程與系綜</b>（期望值、隨機漫步、大數極限、馬可夫鏈）</div>
+                  </div>
+                </details>
+
                 <div className="space-y-2">
                   {formData.whatData?.perspectives?.map((p, i) => (
-                    <div key={i} className="p-2 bg-slate-50 rounded-lg border border-slate-200 flex gap-2">
-                      <input
-                        list="perspective-code-suggestions"
-                        value={p.code}
-                        onChange={(e) => {
-                          const list = [...formData.whatData!.perspectives];
-                          list[i] = { ...list[i], code: e.target.value };
-                          patch({ whatData: { ...formData.whatData!, perspectives: list } });
-                        }}
-                        placeholder="視角名（自由命名）"
-                        className="w-28 font-bold text-xs p-1 rounded border border-slate-300 bg-white h-fit"
-                      />
-                      <input
-                        value={p.label}
-                        onChange={(e) => {
-                          const list = [...formData.whatData!.perspectives];
-                          list[i] = { ...list[i], label: e.target.value };
-                          patch({ whatData: { ...formData.whatData!, perspectives: list } });
-                        }}
-                        className="w-24 p-1 rounded border border-slate-300 text-xs bg-white h-fit"
-                      />
+                    <div key={i} className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={p.kind || (/借鏡視角|借镜视角/.test(p.code || "") ? "mirror" : "perspective")}
+                          onChange={(e) => {
+                            const list = [...formData.whatData!.perspectives];
+                            list[i] = { ...list[i], kind: e.target.value as "perspective" | "mirror" };
+                            patch({ whatData: { ...formData.whatData!, perspectives: list } });
+                          }}
+                          className="text-[11px] p-1 rounded border border-slate-300 bg-white font-bold"
+                        >
+                          <option value="perspective">視角</option>
+                          <option value="mirror">[借鏡視角]</option>
+                        </select>
+                        <input
+                          list="perspective-code-suggestions"
+                          value={p.code}
+                          onChange={(e) => {
+                            const list = [...formData.whatData!.perspectives];
+                            list[i] = { ...list[i], code: e.target.value };
+                            patch({ whatData: { ...formData.whatData!, perspectives: list } });
+                          }}
+                          placeholder="視角名（例：天平支點視角 或 [借鏡視角:並聯電容]）"
+                          className="w-44 font-bold text-xs p-1 rounded border border-slate-300 bg-white"
+                        />
+                        <input
+                          value={p.label}
+                          onChange={(e) => {
+                            const list = [...formData.whatData!.perspectives];
+                            list[i] = { ...list[i], label: e.target.value };
+                            patch({ whatData: { ...formData.whatData!, perspectives: list } });
+                          }}
+                          placeholder="簡短副標"
+                          className="w-36 p-1 rounded border border-slate-300 text-xs bg-white"
+                        />
+                        <label className="flex items-center gap-1 text-[10px] text-sky-800 font-semibold cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!p.isAlsoReading}
+                            onChange={(e) => {
+                              const list = [...formData.whatData!.perspectives];
+                              list[i] = { ...list[i], isAlsoReading: e.target.checked };
+                              patch({ whatData: { ...formData.whatData!, perspectives: list } });
+                            }}
+                          />
+                          <span>同時為讀法（有題因此變容易）</span>
+                        </label>
+                        <button
+                          onClick={() => patch({
+                            whatData: {
+                              ...formData.whatData!,
+                              perspectives: formData.whatData!.perspectives.filter((_, x) => x !== i),
+                            },
+                          })}
+                          className="text-slate-400 hover:text-rose-600 ml-auto"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                       <textarea
                         rows={2}
                         value={p.content}
@@ -1206,56 +1716,193 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                           list[i] = { ...list[i], content: e.target.value };
                           patch({ whatData: { ...formData.whatData!, perspectives: list } });
                         }}
-                        className="flex-1 p-1 rounded border border-slate-300 text-xs bg-white"
+                        placeholder="視角闡述內容（支援 LaTeX）"
+                        className="w-full p-1.5 rounded border border-slate-300 text-xs bg-white"
                       />
-                      <button
-                        onClick={() => patch({
-                          whatData: {
-                            ...formData.whatData!,
-                            perspectives: formData.whatData!.perspectives.filter((_, x) => x !== i),
-                          },
-                        })}
-                        className="text-slate-400 hover:text-rose-600 h-fit"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        <input
+                          value={p.mappingTable || ""}
+                          onChange={(e) => {
+                            const list = [...formData.whatData!.perspectives];
+                            list[i] = { ...list[i], mappingTable: e.target.value };
+                            patch({ whatData: { ...formData.whatData!, perspectives: list } });
+                          }}
+                          placeholder="(1) 顯式對應表（外部角色 ↔ 本知識點角色）"
+                          className="p-1.5 rounded border border-slate-300 text-[11px] bg-white font-mono"
+                        />
+                        <input
+                          value={p.derivedFact || ""}
+                          onChange={(e) => {
+                            const list = [...formData.whatData!.perspectives];
+                            list[i] = { ...list[i], derivedFact: e.target.value };
+                            patch({ whatData: { ...formData.whatData!, perspectives: list } });
+                          }}
+                          placeholder="(2) 用對應表導出一個讀者能獨立核對的具體事實"
+                          className="p-1.5 rounded border border-emerald-300 text-[11px] bg-emerald-50/40"
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-600 block mb-1">
+                    若未建立借鏡視角，須老實註明（例：「已嘗試尋找借鏡視角，未找到」）
+                  </label>
+                  <input
+                    value={formData.whatData?.mirrorPerspectiveTriedNote || ""}
+                    onChange={(e) =>
+                      patch({
+                        whatData: {
+                          ...formData.whatData!,
+                          mirrorPerspectiveTriedNote: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="已嘗試尋找借鏡視角，未找到"
+                    className="w-full p-1.5 rounded border border-slate-300 text-xs bg-white"
+                  />
+                </div>
               </div>
 
-              {/* v4：五個方向延伸（推深／推淺／推廣／推窄／翻譯）——強烈建議，不強制寫滿；挖不到不用硬湊 */}
+              {/* ===== v7：六個方向延伸（推深／推淺／推廣／推窄／翻譯／造）＋ 功能判準洞見檢查題 ===== */}
               <div className="pt-2 border-t border-slate-200 space-y-2">
-                <span className="font-bold text-slate-700 block">五方向延伸——讓「這是什麼」的說明範圍更完整（每個方向至少自問一次「有沒有東西可挖」）</span>
+                <span className="font-bold text-slate-700 block">
+                  六個方向延伸（v7 新增第 6 方向「造」）——每個方向附一道「拿掉這句就會答錯或做不出來」的功能判準題
+                </span>
                 <p className="text-[10px] text-slate-500">
-                  「視角」是拿別的學科語言重講<b>這個知識點</b>；「翻譯」反過來，把<b>外面的知識／現象</b>收進這個知識點的語言裡講（例：用數學描述經濟學現象）。
+                  「視角」是拿第二個具體對象完整貼合本概念；「翻譯」是結構不完全貼合，或把外部現象收進本知識點語言講；「造」是用本概念當零件，經一個邏輯沒有強迫的選擇，造出新的量／對象／操作（且若造出獨立卡，兩卡之間畫 <code className="font-mono">[衍生]</code> 與反向 <code className="font-mono">[前提]</code> 邊）。
                 </p>
-                <p className="text-[10px] text-slate-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                  <b>洞見檢查</b>：每個方向寫完自問「拿掉這句，讀者會不會真的損失理解？」純事實（A 可用在 B 上）不夠格，要點出為什麼重要（更大理論脈絡／真實後果／一個具體取捨或張力）。讀完要讓讀者「原來如此」而非「喔，知道了」。
+                <p className="text-[10px] text-slate-700 bg-indigo-50 border border-indigo-200 rounded px-2 py-1">
+                  <b>v7 洞見檢查（功能判準，取代 v4 感覺判準）：</b>每一句延伸必須附一道「拿掉這句就會答錯或做不出來」的題；寫不出，就刪掉這句。
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {[
-                    { key: "deeper", label: "推深", hint: "是什麼更底層的東西讓這件事成立？（開放方向，不是重寫 WHY 那條封閉推理鏈）" },
-                    { key: "shallower", label: "推淺", hint: "這件事能推出什麼、撐起什麼後果／應用？" },
-                    { key: "generalize", label: "推廣", hint: "放寬條件／範疇會變成什麼？（例：函數 → 映射）" },
-                    { key: "specialize", label: "推窄", hint: "收緊條件／範疇會變成什麼特例？" },
-                    { key: "translate", label: "翻譯", hint: "把別的知識／現象，用這個知識點的語言重新講一次（與視角相反）" },
-                  ].map((d) => (
-                    <div key={d.key} className="p-2 bg-slate-50 rounded-lg border border-slate-200">
-                      <label className="text-[10px] font-bold text-slate-700 block mb-1">{d.label} <span className="font-normal text-slate-500">· {d.hint}</span></label>
-                      <textarea
-                        rows={2}
-                        value={((formData.whatData?.extensions || {}) as Record<string, string | undefined>)[d.key] || ""}
-                        onChange={(e) => patch({
-                          whatData: {
-                            ...formData.whatData!,
-                            extensions: { ...(formData.whatData?.extensions || {}), [d.key]: e.target.value },
-                          },
-                        })}
-                        className="w-full p-1.5 rounded border border-slate-300 text-xs bg-white"
-                      />
-                    </div>
-                  ))}
+                    { key: "deeper", label: "1. 推深", hint: "奠基在什麼更底層知識？（開放方向，非重寫 WHY）" },
+                    { key: "shallower", label: "2. 推淺", hint: "能推出什麼純邏輯後果？（不要求派上用場）" },
+                    { key: "generalize", label: "3. 推廣", hint: "放寬條件／範疇會變成什麼？" },
+                    { key: "specialize", label: "4. 推窄", hint: "收緊條件會成什麼特例？（挖不到可寫「從缺」）" },
+                    { key: "translate", label: "5. 翻譯", hint: "把別的知識／現象，用本概念語言重講一次" },
+                    { key: "construct", label: "6. 造（v7新增）", hint: "用此概念當零件，經邏輯未逼迫的選擇造出新量/對象/操作" },
+                  ].map((d) => {
+                    const extObj = formData.whatData?.extensions || {};
+                    const qObj = extObj.questions || {};
+                    const cd = extObj.constructDetails || {};
+                    return (
+                      <div
+                        key={d.key}
+                        className={`p-2.5 rounded-lg border space-y-1.5 ${
+                          d.key === "construct" ? "bg-teal-50/50 border-teal-300 sm:col-span-2" : "bg-slate-50 border-slate-200"
+                        }`}
+                      >
+                        <label className="text-[10px] font-bold text-slate-800 block">
+                          {d.label} <span className="font-normal text-slate-500">· {d.hint}</span>
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={(extObj as Record<string, any>)[d.key] || ""}
+                          onChange={(e) =>
+                            patch({
+                              whatData: {
+                                ...formData.whatData!,
+                                extensions: { ...extObj, [d.key]: e.target.value },
+                              },
+                            })
+                          }
+                          placeholder={`${d.label}延伸內容…`}
+                          className="w-full p-1.5 rounded border border-slate-300 text-xs bg-white"
+                        />
+
+                        {/* 若為「造」，顯示必寫的三件事 */}
+                        {d.key === "construct" && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                            <input
+                              value={cd.name || ""}
+                              onChange={(e) =>
+                                patch({
+                                  whatData: {
+                                    ...formData.whatData!,
+                                    extensions: {
+                                      ...extObj,
+                                      constructDetails: { ...cd, name: e.target.value },
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="造出的新量/對象名稱（例：方差 σ²）"
+                              className="p-1.5 rounded border border-teal-300 text-[11px] bg-white font-semibold"
+                            />
+                            <input
+                              value={cd.choice || ""}
+                              onChange={(e) =>
+                                patch({
+                                  whatData: {
+                                    ...formData.whatData!,
+                                    extensions: {
+                                      ...extObj,
+                                      constructDetails: { ...cd, choice: e.target.value },
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="① 選了什麼（邏輯沒逼你做的決定，例：選了「平方」）"
+                              className="p-1.5 rounded border border-teal-300 text-[11px] bg-white"
+                            />
+                            <input
+                              value={cd.alternative || ""}
+                              onChange={(e) =>
+                                patch({
+                                  whatData: {
+                                    ...formData.whatData!,
+                                    extensions: {
+                                      ...extObj,
+                                      constructDetails: { ...cd, alternative: e.target.value },
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="② 換一個選擇會怎樣（例：選「絕對值」不可微、中心變中位數）"
+                              className="p-1.5 rounded border border-teal-300 text-[11px] bg-white"
+                            />
+                            <input
+                              value={cd.linkBack || ""}
+                              onChange={(e) =>
+                                patch({
+                                  whatData: {
+                                    ...formData.whatData!,
+                                    extensions: {
+                                      ...extObj,
+                                      constructDetails: { ...cd, linkBack: e.target.value },
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="③ 連回對象（用可核對式子/推導說明與本對象關係，寫不出不收）"
+                              className="p-1.5 rounded border border-teal-300 text-[11px] bg-white"
+                            />
+                          </div>
+                        )}
+
+                        {/* 功能判準題目 */}
+                        <input
+                          value={(qObj as Record<string, string | undefined>)[d.key] || ""}
+                          onChange={(e) =>
+                            patch({
+                              whatData: {
+                                ...formData.whatData!,
+                                extensions: {
+                                  ...extObj,
+                                  questions: { ...qObj, [d.key]: e.target.value },
+                                },
+                              },
+                            })
+                          }
+                          placeholder={`[功能判準題] 拿掉「${d.label}」這句就會答錯或做不出來的題：…`}
+                          className="w-full p-1.5 rounded border border-indigo-300 bg-indigo-50/40 text-[11px]"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1710,6 +2357,19 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                       </button>
                     </div>
                     <div className="flex gap-2 items-center">
+                      <span className="font-bold text-amber-700 w-12 text-[11px]">→變換</span>
+                      <input
+                        value={t.twoStageTransform || ""}
+                        onChange={(e) => {
+                          const list = [...(formData.howData!.checks || [])];
+                          list[i] = { ...list[i], twoStageTransform: e.target.value };
+                          patchHow({ checks: list });
+                        }}
+                        className="flex-1 p-1.5 rounded border border-amber-300 text-xs bg-amber-50/30"
+                        placeholder="兩段式變換／識別動作（選填：看到原始情境X → 先做變換變成能判斷的Y）"
+                      />
+                    </div>
+                    <div className="flex gap-2 items-center">
                       <span className="font-bold text-emerald-700 w-12 text-[11px]">→檢查</span>
                       <input
                         value={t.check}
@@ -1722,18 +2382,33 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                         placeholder="例：$K$ 是否改變（絕對不變）"
                       />
                     </div>
-                    <div className="flex gap-2 items-center">
-                      <span className="font-bold text-slate-500 w-12 text-[11px]">關鍵詞</span>
-                      <input
-                        value={(t.keywords || []).join(", ")}
-                        onChange={(e) => {
-                          const list = [...(formData.howData!.checks || [])];
-                          list[i] = { ...list[i], keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) };
-                          patchHow({ checks: list });
-                        }}
-                        className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
-                        placeholder="逗號分隔"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="flex gap-2 items-center">
+                        <span className="font-bold text-slate-500 w-12 text-[11px]">關鍵詞</span>
+                        <input
+                          value={(t.keywords || []).join(", ")}
+                          onChange={(e) => {
+                            const list = [...(formData.howData!.checks || [])];
+                            list[i] = { ...list[i], keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) };
+                            patchHow({ checks: list });
+                          }}
+                          className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
+                          placeholder="逗號分隔"
+                        />
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <span className="font-bold text-indigo-700 w-12 text-[11px]">來源</span>
+                        <input
+                          value={t.source || ""}
+                          onChange={(e) => {
+                            const list = [...(formData.howData!.checks || [])];
+                            list[i] = { ...list[i], source: e.target.value };
+                            patchHow({ checks: list });
+                          }}
+                          className="flex-1 p-1.5 rounded border border-indigo-300 text-xs font-mono bg-indigo-50/30"
+                          placeholder="例：[源:定義] 或 [源:WHY-視角1]"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1822,6 +2497,19 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
                         }}
                         className="flex-1 p-1.5 rounded border border-slate-300 text-xs bg-white"
                         placeholder="例：就能把微分運算轉換為頻域代數相乘"
+                      />
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <span className="font-bold text-indigo-700 w-12 text-[11px]">來源</span>
+                      <input
+                        value={en.source || ""}
+                        onChange={(e) => {
+                          const list = [...(formData.howData!.can || [])];
+                          list[i] = { ...list[i], source: e.target.value };
+                          patchHow({ can: list });
+                        }}
+                        className="flex-1 p-1.5 rounded border border-indigo-300 text-xs font-mono bg-white"
+                        placeholder="例：[源:WHY-推導②] 或 [源:WHAT-延伸-造]"
                       />
                     </div>
                   </div>

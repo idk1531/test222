@@ -20,6 +20,7 @@ import { MotherTopicsView } from "@/components/MotherTopicsView";
 import { BackgroundCustomizer } from "@/components/BackgroundCustomizer";
 import { FieldCustomizer, CustomField } from "@/components/FieldCustomizer";
 import { FontSelector } from "@/components/FontSelector";
+import { ManualV7Modal } from "@/components/ManualV7Modal";
 import {
   Sparkles,
   Search,
@@ -118,6 +119,7 @@ export default function WorkbenchPage() {
   const [showBackgroundCustomizer, setShowBackgroundCustomizer] = useState(false);
   const [showFieldCustomizer, setShowFieldCustomizer] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showManualV7, setShowManualV7] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
 
   // 匯出資料為 JSON 檔案：Share → Download → 新頁另存 三層備援
@@ -445,6 +447,15 @@ export default function WorkbenchPage() {
         {/* Right: Actions */}
         <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
           <button
+            onClick={() => setShowManualV7(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-[11px] font-bold transition-colors"
+            title="理科筆記 · 使用手冊（樹狀圖版 · v7修正）——含讀法、問題×讀法表、橋、造、[衍生]邊與附錄B/C/D"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-sky-600" />
+            <span className="hidden lg:inline">v7 手冊 (讀法/附錄B·C·D)</span>
+            <span className="lg:hidden">v7手冊</span>
+          </button>
+          <button
             onClick={() => setShowSearchModal(true)}
             className="touch-target flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
             title="搜尋 (⌘K)"
@@ -586,6 +597,13 @@ export default function WorkbenchPage() {
               ))}
 
               <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1 mt-3">設定</div>
+              <button
+                onClick={() => { setShowManualV7(true); setShowMobileMenu(false); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-bold text-sky-800 bg-sky-50/70 hover:bg-sky-100 mb-0.5"
+              >
+                <BookOpen className="w-4 h-4 text-sky-600" />
+                <span>v7 使用手冊（讀法/附錄B·C·D）</span>
+              </button>
               <button
                 onClick={() => { setShowTutorial(true); setShowMobileMenu(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-blue-50 hover:text-blue-700 mb-0.5"
@@ -928,6 +946,19 @@ export default function WorkbenchPage() {
             });
           }}
           onClose={() => setShowFieldCustomizer(false)}
+        />
+      )}
+
+      {/* v7 Manual & Appendices B/C/D Modal */}
+      {showManualV7 && (
+        <ManualV7Modal
+          onClose={() => setShowManualV7(false)}
+          onOpenCardById={(cardId) => {
+            const target = cards.find((c) => c.id === cardId);
+            if (target) {
+              setPreviewCard(target);
+            }
+          }}
         />
       )}
     </div>
