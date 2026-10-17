@@ -26,8 +26,22 @@ export interface StudyBookLayout {
   updatedAt: string;
 }
 
+/**
+ * v8.1：書房相機狀態（可序列化，預留同步介面）。
+ * yaw/pitch 為「角度」（與 v8.0 儲存格式相容；three.js 用時再轉弧度）。
+ * yaw：360° 連續（水平任意轉）；pitch：−70°～+40°。
+ * x/z：房間中的走動位置（公尺，缺省＝房間中央偏後）；height：視高（缺省 1.5）。
+ */
+export interface StudyCamera {
+  yaw: number; // 角度，連續（不夾限，寫入前正規化至 (−180, 180]）
+  pitch: number; // 角度，夾限 −70～+40
+  x?: number; // 公尺
+  z?: number; // 公尺
+  height?: number; // 公尺
+}
+
 export interface StudyLayout {
-  camera: { yaw: number; pitch: number }; // 記住上次書房視角
+  camera: StudyCamera; // 記住上次書房視角（含走動位置）
   shelfRows: number; // 書架層數（可隨書量增加）
 }
 
@@ -52,9 +66,18 @@ export const UNCATEGORIZED_ID = "cat-uncategorized";
 export const UNCATEGORIZED_NAME = "未分類";
 export const UNCATEGORIZED_COLOR = "#a8a29e";
 
-/** 環繞視角的角度限制（避免轉到無法操作畫布） */
-export const CAMERA_LIMITS = { yawMin: -28, yawMax: 28, pitchMin: -6, pitchMax: 14 };
-export const DEFAULT_CAMERA = { yaw: 0, pitch: 0 };
+/**
+ * v8.1：房間為 360° 可走動空間——yaw 不再夾限（連續旋轉），
+ * pitch 夾限 −70°～+40°（避免穿地／穿天花）。
+ */
+export const CAMERA_LIMITS = { pitchMin: -70, pitchMax: 40 };
+export const DEFAULT_CAMERA: StudyCamera = {
+  yaw: -20, // 望向窗景（略偏西）
+  pitch: -2,
+  x: 0.9,
+  z: 1.55,
+  height: 1.5,
+};
 
 /** 分類預設色票（低飽和暖色系） */
 export const CATEGORY_PALETTE = [
@@ -81,9 +104,17 @@ export function genStudyId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 }
 
+/** yaw 正規化至 (−180, 180]（360° 連續旋轉的儲存形式） */
+export function normalizeYawDeg(yaw: number): number {
+  let y = yaw % 360;
+  if (y > 180) y -= 360;
+  if (y <= -180) y += 360;
+  return y;
+}
+
 export function clampCamera(yaw: number, pitch: number): { yaw: number; pitch: number } {
   return {
-    yaw: Math.min(CAMERA_LIMITS.yawMax, Math.max(CAMERA_LIMITS.yawMin, yaw)),
+    yaw: normalizeYawDeg(yaw),
     pitch: Math.min(CAMERA_LIMITS.pitchMax, Math.max(CAMERA_LIMITS.pitchMin, pitch)),
   };
 }
@@ -304,10 +335,16 @@ export function ensureStudyState<T extends StudyMigratable>(s: T): T & StudyStat
   }
 
   // ---- 書房佈局 ----
-  const camera = clampCamera(
-    Number(s.studyLayout?.camera?.yaw) || 0,
-    Number(s.studyLayout?.camera?.pitch) || 0
-  );
+  // v8.1：camera 新增選填 x/z/height（舊資料自動補齊，STORAGE_KEY 不變）
+  const rawCam = s.studyLayout?.camera;
+  const num = (v: unknown, fallback: number) =>
+    Number.isFinite(Number(v)) ? Number(v) : fallback;
+  const camera = {
+    ...clampCamera(num(rawCam?.yaw, 0), num(rawCam?.pitch, 0)),
+    x: num(rawCam?.x, DEFAULT_CAMERA.x ?? 0.9),
+    z: num(rawCam?.z, DEFAULT_CAMERA.z ?? 1.55),
+    height: num(rawCam?.height, DEFAULT_CAMERA.height ?? 1.5),
+  };
   const studyLayout: StudyLayout = {
     camera,
     shelfRows: Math.max(1, Math.floor(Number(s.studyLayout?.shelfRows) || 1)),
