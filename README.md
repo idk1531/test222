@@ -43,9 +43,10 @@ npx serve out                                  # 本機驗證
 
 | 檔案 | 職責 |
 |---|---|
-| `src/lib/store.ts` | 全域狀態倉庫（`useSyncExternalStore`）、CRUD actions、localStorage 自動持久化、`exportFile` / `importFile` / `resetToSeed`、**v4→v5 結構遷移**（WHEN 併入 HOW：triggers→checks、steps→branches、enables→can；本機載入與 JSON 匯入都會自動跑） |
+| `src/lib/store.ts` | 全域狀態倉庫（`useSyncExternalStore`）、CRUD actions、localStorage 自動持久化、`exportFile` / `importFile` / `resetToSeed`、**v4→v5 結構遷移**（WHEN 併入 HOW：triggers→checks、steps→branches、enables→can；本機載入與 JSON 匯入都會自動跑）、**v7.1→v8.0 書房資料遷移**、純函式 `applyPatch`（預留 op log/同步介接） |
+| `src/lib/study.ts` | **v8.0 虛擬書房**資料型別（分類櫃板／書本佈置／視角）、顏色與排列 helper、遷移補齊 `ensureStudyState` |
 | `src/lib/seedData.ts` | 預設種子資料（4 張完整例卡＋畫布物件＋關係邊＋日誌＋盲區＋母題） |
-| `src/lib/types.ts` | 資料型別與匯出檔格式（`schemaVersion`，v5 = 5） |
+| `src/lib/types.ts` | 資料型別與匯出檔格式（`schemaVersion`，v8.0 = 8） |
 
 - **自動保存**：任何編輯立即寫入 localStorage，重新整理不遺失；畫布拖曳採「畫面立即更新＋250ms 防抖寫入」，放開手指／滑鼠後立即提交最後座標，低階平板不會因保存而卡頓。
 - **備份／遷移**：頭部 `下載` 圖標匯出 JSON、`上傳` 圖標匯入、`重轉` 還原為範例。畫布節點的 `style.accentColor`（v7.2 節點顏色）會一併匯出／匯入。
@@ -148,6 +149,21 @@ WHY 只有結論 · 推理跳步 · 循環解釋 · **偷渡前提**（與假設
 
 ---
 
+## 虛擬書房（v8.0）
+
+開站預設進入**「溫和陽光下的半擬 3D 木色書房」**：書桌上嵌著原有的無限畫布（操作完全不變），書架把每張筆記卡呈現為一本書，並可建立分類櫃板與標籤。純 CSS 3D（`perspective` + `preserve-3d` + 分層平面），**不使用 three.js**，畫布仍是真正的 HTML（事件、輸入框、IME 全部正常）。
+
+- **書桌**：桌板＋前緣厚度，畫布紙面 `#faf7ee`（與 v7.2 紙張一致）；新增卡、選取、拖曳、框選、縮放、雙擊開卡、關聯邊、右鍵選單全部沿用 `InfiniteCanvas`。
+- **書架與書本**：平時只看書脊（書名直排、分類色條、形狀色、依內容長度微調厚度、高度微差異）；桌機 hover／手機第一次點擊 → 書本向前抽出＋書封預覽（標題、領域、推理形狀、摘要首行）；再點一次或按「開啟筆記卡」→ 開啟既有 `CardDetailModal`（單一渲染路徑）；「在畫布定位」→ 切回書桌並把該卡置中／選取。
+- **分類櫃板**：分類 CRUD（新增／改名／改色／上下移動／刪除），櫃板貼紙膠帶標籤；拖書到另一櫃板＝改分類並插到尾端，櫃板內可拖曳排序；刪除分類只把書移回「未分類」，不刪卡。「未分類」為系統保留分類。
+- **視角**：在書房背景／家具上拖曳可環繞視角（yaw ±28°、pitch −6°～+14°），另有「重置視角」與「平移 ↔ 環繞」模式切換（觸控裝置預設平移）。**畫布上的手勢永遠交給畫布**，不觸發環繞。
+- **資料**：一卡一書（1:1，`cardId` 為 key）；書本佈置（`orderInShelf`／`categoryId`）與畫布座標（`x/y`）完全分離。`STORAGE_KEY` 升到 `scinotes-workspace-v8.0`，載入舊 key 自動遷移、舊資料不掉；JSON 匯出／匯入含書房資料，舊檔自動補齊。
+- **列印**：書房為螢幕介面，`@media print` 只輸出卡片紙面（沿用 v7.2 規則）。
+
+設計細節與取捨見 [`docs/v8.0-study-room.md`](docs/v8.0-study-room.md)。
+
+---
+
 ## 編輯體驗（v7.2）
 
 - **紙上編輯 ≡ 預覽**：同一棵 `V6Page*` / `V6ContinuousPaper` 元件樹，只差外層 `CardEditContext.Provider` 的 `editable` 旗標；不再有另一套「編輯版面」。點擊紙上的任一格即可就地編輯，LaTeX 以 `MathText`（KaTeX）顯示、編輯時回到原始碼 textarea，不對 KaTeX DOM 做 contentEditable。
@@ -182,11 +198,14 @@ src/
 │   ├── BackgroundCustomizer.tsx   背景自訂
 │   ├── BlindSpotsView.tsx         盲區清單
 │   ├── BlockageGuideModal.tsx     卡關／堵塞感引導
+│   ├── BookSpine.tsx              書房：單本書書脊＋抽出預覽（v8.0）
+│   ├── BookshelfView.tsx          書房：書架／櫃板／書本拖曳排列（v8.0）
 │   ├── CardDetailModal.tsx        卡片詳細（預覽／編輯、一頁式／分頁、每卡字體）
 │   ├── CardIndexView.tsx          卡片索引
 │   ├── AppThemeCustomizer.tsx     工具列配色面板（v7.2）
 │   ├── CardPaperEditor.tsx        紙上編輯原子元件 + CardEditContext（v7.2）
 │   ├── CardPaperSections.tsx      紙張區塊渲染 + 四點自我檢查面板
+│   ├── DeskCanvas.tsx             書房：書桌＋內嵌 InfiniteCanvas（v8.0）
 │   ├── ExpansionTestModal.tsx     展開測試（追問測試）
 │   ├── FieldCustomizer.tsx        自訂欄位
 │   ├── FontSelector.tsx           字體選擇
@@ -203,6 +222,8 @@ src/
 │   ├── ProcessLogsView.tsx        過程日誌
 │   ├── ShapeClassifier.tsx        推理形狀判型（含複合型）
 │   ├── SoloAssessmentPanel.tsx    Bloom × SOLO 診斷
+│   ├── StudyCategoryPanel.tsx     書房：分類櫃板管理（v8.0）
+│   ├── StudyRoomView.tsx          書房外殼：CSS 3D 環繞＋光源＋牆／地板／家具（v8.0）
 │   └── TemplateSelectorModal.tsx  模板選擇
 └── lib/
     ├── appTheme.ts                工具列配色主題 + localStorage（v7.2）
@@ -211,6 +232,7 @@ src/
     ├── seedData.ts                預設種子資料
     ├── solo.ts                    SOLO 診斷邏輯
     ├── store.ts                   狀態管理 ＋ localStorage 持久化
+    ├── study.ts                   書房資料型別／helper／遷移（v8.0）
     └── types.ts                   型別定義
 ```
 
