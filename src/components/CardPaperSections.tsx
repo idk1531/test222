@@ -445,6 +445,16 @@ export function V6Page1HeaderOverview({
               <MathText text={card.whyData?.closedBookDraft || card.whyData?.fullReasoning?.slice(0, 70) || "（見 WHY 頁深度推導）"} />
             </span>
           </div>
+          {(card.whatData?.readings || []).length > 0 && (
+            <div className="flex items-baseline gap-1">
+              <span className="font-bold flex-shrink-0" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+                讀法①②③：
+              </span>
+              <span className="truncate">
+                {(card.whatData?.readings || []).map((r) => r.name).join(" ； ")}
+              </span>
+            </div>
+          )}
           <div className="flex items-baseline gap-1">
             <span className="font-bold flex-shrink-0" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
               視角①②③：
@@ -482,7 +492,7 @@ export function V6Page1HeaderOverview({
               className="relative w-48 h-28 rounded-md border flex items-center justify-center p-1 text-[9px]"
               style={{ borderColor: theme.borderColor, backgroundColor: "rgba(255,255,255,0.4)", fontFamily: UI_FONT }}
             >
-              <div className="absolute top-1 text-center font-bold text-blue-800">[前提]</div>
+              <div className="absolute top-1 text-center font-bold text-blue-800">[前提] / [衍生]</div>
               <div className="absolute left-1 text-center font-bold text-slate-600">[表面相似:d=]</div>
               <div className="absolute left-1 bottom-1 font-bold text-amber-800">[對照:d=]</div>
               <div className="absolute right-1 text-center font-bold text-emerald-800">[結構類比:d=]</div>
@@ -504,7 +514,8 @@ export function V6Page1HeaderOverview({
 
           {/* 右側規則文字與現存關係邊 */}
           <div className="md:col-span-7 text-[10px] space-y-1 leading-relaxed" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-            <p><b className="text-slate-800">[前提]</b>：A是B成立的必要基礎</p>
+            <p><b className="text-slate-800">[前提]</b>：A是B成立的必要基礎（擦掉A，B的WHY斷在哪一步）</p>
+            <p><b className="text-teal-800">[衍生]（v7 新增）</b>：A [衍生]→ B 表示 B 是用 A「造」出來的；<b>機械檢查</b>：B 那張卡必須有 [前提] 指回 A，兩邊對得上才算數</p>
             <p><b className="text-slate-800">[結構類比:d]</b>：已過候選推理測試——由共享結構能否推出具體、可驗證的新預測</p>
             <p><b className="text-slate-800">[表面相似:d]</b>：感覺像但未驗證，不計入網絡整合度</p>
             <p><b className="text-slate-800">[對照:d] / [正反例] / [母題]</b>：對照須點名分歧維度；母題需≥3實例+雙達標</p>
@@ -1297,17 +1308,265 @@ export function V6Page5What({
   theme?: CardPaperTheme;
 }) {
   const whatData = card.whatData || { summary: "", perspectives: [], distinctionFromHow: "" };
+  const readings = whatData.readings || [];
+  const readingQuestions = whatData.readingQuestions || [];
+  const readingBridges = whatData.readingBridges || [];
   const perspectives = whatData.perspectives || [];
   const extensions = whatData.extensions || {};
+  const extQuestions = extensions.questions || {};
+  const constructDetails = extensions.constructDetails || {};
+  const readingNameMap = Object.fromEntries(readings.map((r) => [r.id, r.name]));
 
   return (
     <div className="flex flex-col h-full space-y-4">
       <V6PageHeaderBox
         title="WHAT"
-        subtitle="緊接 WHY 之後，換視角重講一次——至少三個視角，不設上限"
+        subtitle="緊接 WHY 之後：讀法（問題×讀法表＋橋）· 多視角重講（至少三個＋借鏡視角）· 六個方向延伸（含「造」與功能判準）"
         pageNumber="5/7"
         theme={theme}
       />
+
+      {/* 若此卡為 v6 對照保留示範卡（如勒沙特列原理），顯示手冊 v7 前言註記 */}
+      {whatData.v6DemoPreservedNote && (
+        <div
+          className="p-2.5 rounded-sm border text-[11px] leading-relaxed bg-amber-50/90 border-amber-300 text-amber-950"
+          style={{ fontFamily: UI_FONT }}
+        >
+          <MathText text={whatData.v6DemoPreservedNote} />
+        </div>
+      )}
+
+      {/* =================================================================
+          子節點 1：讀法（v7 新增：什麼算不同讀法 · 問題×讀法表 · 橋 · 機械檢查）
+         ================================================================= */}
+      {!whatData.v6DemoPreservedNote && (
+        <div
+          className="p-3.5 rounded-sm border space-y-3"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-1.5" style={{ borderColor: theme.borderColor }}>
+            <div>
+              <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+                WHAT 第一子節點 · 讀法（v7 新增：取用知識的方式）
+              </span>
+              <p className="text-[10px] leading-tight mt-0.5" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                <b>什麼算不同讀法</b>：存在某個問題，在其中一種表述下明顯比另一種容易（沒有問題因此變容易＝只是換寫法，如 3×4=12 與 12=3×4）。
+              </p>
+            </div>
+            {readings.length === 1 && (
+              <span
+                className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold"
+                style={{ fontFamily: UI_FONT }}
+              >
+                單一讀法，盲區未驗
+              </span>
+            )}
+          </div>
+
+          {/* 讀法清單 */}
+          {readings.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+              {readings.map((r, rIdx) => (
+                <div
+                  key={r.id || rIdx}
+                  className="p-2.5 rounded bg-white/80 border space-y-1 flex flex-col justify-between"
+                  style={{ borderColor: theme.borderColor }}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[11px] font-bold text-slate-900" style={{ fontFamily: UI_FONT }}>
+                        {r.name || `讀法${rIdx + 1}`}
+                      </span>
+                      {r.onlyForUnderstanding && (
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 text-[9px]" style={{ fontFamily: UI_FONT }}>
+                          僅理解用
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
+                      <MathText text={r.description} />
+                    </div>
+                  </div>
+                  {r.linkedPerspective && (
+                    <div className="text-[9px] text-indigo-700 font-medium pt-1 border-t border-dotted" style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}>
+                      🔗 {r.linkedPerspective}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-2.5 rounded bg-white/60 border text-xs italic text-slate-400" style={{ borderColor: theme.borderColor }}>
+              （尚未建立讀法；若只有單一讀法請標「單一讀法，盲區未驗」）
+            </div>
+          )}
+
+          {/* 問題 × 讀法表 */}
+          {readings.length > 0 && readingQuestions.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-1">
+                <span className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+                  問題 × 讀法表（列＝問題，欄＝讀法，格＝在此讀法下需要幾步／多走哪一步／看不見）
+                </span>
+                <span className="text-[9px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                  ① 每讀法至少一題最便宜 ｜ ② 全欄都貴或看不見＝缺讀法徵兆
+                </span>
+              </div>
+              <div className="overflow-x-auto border rounded" style={{ borderColor: theme.borderColor }}>
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr style={{ backgroundColor: "rgba(0,0,0,0.04)", fontFamily: UI_FONT }}>
+                      <th className="p-2 border-b border-r text-[10px] font-bold" style={{ borderColor: theme.borderColor, color: theme.headingColor }}>
+                        問題 ＼ 讀法
+                      </th>
+                      {readings.map((r, rIdx) => (
+                        <th key={r.id || rIdx} className="p-2 border-b border-r last:border-r-0 text-[10px] font-bold" style={{ borderColor: theme.borderColor, color: theme.accentColor }}>
+                          {r.name || `讀法${rIdx + 1}`}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: theme.borderColor }}>
+                    {readingQuestions.map((rq, qIdx) => (
+                      <tr key={rq.id || qIdx} className="bg-white/75">
+                        <td className="p-2 border-r font-semibold text-slate-900 align-top" style={{ borderColor: theme.borderColor, fontFamily: font }}>
+                          <MathText text={rq.question} />
+                        </td>
+                        {readings.map((r) => {
+                          const cell = rq.cells?.[r.id];
+                          const isCheap = cell?.isCheapest;
+                          const isInv = cell?.isInvisible || /看不見|看不见/.test(cell?.text || "");
+                          return (
+                            <td
+                              key={r.id}
+                              className={`p-2 border-r last:border-r-0 align-top ${
+                                isCheap
+                                  ? "bg-emerald-50/80 font-semibold text-emerald-950"
+                                  : isInv
+                                  ? "bg-rose-50/60 text-rose-900"
+                                  : "text-slate-700"
+                              }`}
+                              style={{ borderColor: theme.borderColor, fontFamily: font }}
+                            >
+                              <div className="flex flex-wrap items-center gap-1 mb-0.5" style={{ fontFamily: UI_FONT }}>
+                                {isCheap && (
+                                  <span className="px-1 py-0.2 rounded bg-emerald-600 text-white text-[9px] font-bold">
+                                    ★ 最便宜
+                                  </span>
+                                )}
+                                {isInv && (
+                                  <span className="px-1 py-0.2 rounded bg-rose-200 text-rose-900 text-[9px] font-bold">
+                                    看不見
+                                  </span>
+                                )}
+                                {isInv && cell?.pointsToReadingId && readingNameMap[cell.pointsToReadingId] && (
+                                  <span className="text-[9px] text-rose-700 font-medium">
+                                    → 見 {readingNameMap[cell.pointsToReadingId]}
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                <MathText text={cell?.text || "—"} />
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 橋（讀法之間的關係，4 種：互通 / 單向 / 限定範圍 / 走不通） */}
+          {readingBridges.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <div className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+                橋 · 讀法之間的關係（四種：互通〔雙向推導〕／單向〔推導＋反向反例〕／限定範圍〔推導＋範圍條件＋範圍外反例〕／走不通〔理由＋[已證無橋]或[未找到橋]〕）
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {readingBridges.map((br, bIdx) => {
+                  const fromName = readingNameMap[br.fromReadingId] || br.fromReadingId;
+                  const toName = readingNameMap[br.toReadingId] || br.toReadingId;
+                  const arrow =
+                    br.type === "互通"
+                      ? "↔"
+                      : br.type === "單向"
+                      ? "→"
+                      : br.type === "限定範圍"
+                      ? "⇄(限定)"
+                      : br.type === "走不通"
+                      ? "✕"
+                      : "⋯";
+                  return (
+                    <div
+                      key={br.id || bIdx}
+                      className="p-2.5 rounded bg-white/80 border text-xs space-y-1"
+                      style={{ borderColor: theme.borderColor }}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-1" style={{ fontFamily: UI_FONT }}>
+                        <span className="font-bold text-slate-900 text-[11px]">
+                          {fromName} {arrow} {toName}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                            br.type === "互通"
+                              ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                              : br.type === "單向"
+                              ? "bg-blue-100 text-blue-900 border-blue-300"
+                              : br.type === "限定範圍"
+                              ? "bg-amber-100 text-amber-900 border-amber-300"
+                              : br.type === "走不通"
+                              ? "bg-rose-100 text-rose-900 border-rose-300"
+                              : "bg-slate-100 text-slate-700 border-slate-300"
+                          }`}
+                        >
+                          橋類型：{br.type} {br.blockedMark ? `· ${br.blockedMark}` : ""}
+                        </span>
+                      </div>
+                      <div className="space-y-0.5 text-[11px] leading-relaxed" style={{ fontFamily: font, color: theme.textColor }}>
+                        {br.forwardProof && (
+                          <div>
+                            <b style={{ fontFamily: UI_FONT }} className="text-slate-700">
+                              {br.type === "互通" ? "正向推導：" : "推導："}
+                            </b>
+                            <MathText text={br.forwardProof} />
+                          </div>
+                        )}
+                        {br.backwardProof && (
+                          <div>
+                            <b style={{ fontFamily: UI_FONT }} className="text-slate-700">反向推導：</b>
+                            <MathText text={br.backwardProof} />
+                          </div>
+                        )}
+                        {br.scopeCondition && (
+                          <div>
+                            <b style={{ fontFamily: UI_FONT }} className="text-amber-800">範圍條件：</b>
+                            <MathText text={br.scopeCondition} />
+                          </div>
+                        )}
+                        {br.counterExample && (
+                          <div>
+                            <b style={{ fontFamily: UI_FONT }} className="text-rose-800">反例：</b>
+                            <MathText text={br.counterExample} />
+                          </div>
+                        )}
+                        {br.blockedReason && (
+                          <div>
+                            <b style={{ fontFamily: UI_FONT }} className="text-rose-800">走不通理由：</b>
+                            <MathText text={br.blockedReason} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* WHY 到視角的發散關係連線圖示 */}
       <div className="flex items-center justify-center gap-3 py-1 text-xs" style={{ fontFamily: UI_FONT }}>
@@ -1316,36 +1575,59 @@ export function V6Page5What({
         </span>
         <ArrowRight className="w-4 h-4" style={{ color: theme.accentColor }} />
         <span className="text-[11px] font-bold" style={{ color: theme.accentColor }}>
-          平行多視角闡述
+          平行多視角闡述（視角與讀法是兩條獨立的軸）
         </span>
       </div>
 
       {/* 平行欄位：視角①、②、③... */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {perspectives.length > 0 ? (
-          perspectives.map((p, idx) => (
-            <div
-              key={p.code || idx}
-              className="p-3 rounded-sm border space-y-2 flex flex-col shadow-xs"
-              style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
-            >
-              <div className="flex items-center justify-between border-b pb-1" style={{ borderColor: theme.borderColor }}>
-                <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-                  視角 {idx + 1} · {p.label || p.code}
-                </span>
+          perspectives.map((p, idx) => {
+            const isMirror = p.kind === "mirror" || /借鏡視角|借镜视角/.test(`${p.code || ""} ${p.label || ""}`);
+            return (
+              <div
+                key={p.code || idx}
+                className="p-3 rounded-sm border space-y-2 flex flex-col shadow-xs"
+                style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+              >
+                <div className="flex items-center justify-between border-b pb-1 gap-1" style={{ borderColor: theme.borderColor }}>
+                  <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+                    視角 {idx + 1} · {p.label || p.code}
+                  </span>
+                  {p.isAlsoReading && (
+                    <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 border border-sky-300 text-[9px] font-bold" style={{ fontFamily: UI_FONT }}>
+                      同時為讀法
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                  <span className={!isMirror ? "font-bold text-slate-900" : ""}>{!isMirror ? "☑" : "□"} 視角</span>
+                  <span className={isMirror ? "font-bold text-indigo-800" : ""}>{isMirror ? "☑" : "□"} 借鏡視角</span>
+                </div>
+                <div className="text-[10px] font-mono p-1.5 rounded bg-white/75 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
+                  <div className="font-bold text-slate-800" style={{ fontFamily: UI_FONT }}>
+                    (1) 對應表：
+                  </div>
+                  <div style={{ fontFamily: font, color: theme.textColor }}>
+                    <MathText text={p.mappingTable || `${p.code} ↔ ${p.label}`} />
+                  </div>
+                </div>
+                <div className="text-xs leading-relaxed flex-1" style={{ color: theme.textColor, fontFamily: font }}>
+                  <MathText text={p.content || "（視角闡述內容）"} />
+                </div>
+                {p.derivedFact && (
+                  <div className="text-[10px] p-1.5 rounded bg-emerald-50/80 border border-emerald-200 text-emerald-950 space-y-0.5">
+                    <div className="font-bold text-emerald-800" style={{ fontFamily: UI_FONT }}>
+                      (2) 導出可獨立核對的具體事實：
+                    </div>
+                    <div style={{ fontFamily: font }}>
+                      <MathText text={p.derivedFact} />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-                <span>□ 視角</span>
-                <span>□ 借鏡視角</span>
-              </div>
-              <div className="text-[10px] font-mono p-1 rounded bg-white/70 border" style={{ borderColor: theme.borderColor }}>
-                對應表：{p.code} ↔ {p.label}
-              </div>
-              <div className="text-xs leading-relaxed flex-1" style={{ color: theme.textColor, fontFamily: font }}>
-                <MathText text={p.content || "（視角闡述內容）"} />
-              </div>
-            </div>
-          ))
+            );
+          })
         ) : (
           <div className="col-span-3 p-4 rounded border text-center text-xs italic" style={{ borderColor: theme.borderColor, color: theme.mutedTextColor }}>
             （尚未建立視角，建議至少撰寫 3 個不同視角）
@@ -1353,65 +1635,123 @@ export function V6Page5What({
         )}
       </div>
 
-      {/* 視角 vs 借鏡視角 判定與檢驗句 */}
+      {whatData.mirrorPerspectiveTriedNote && (
+        <div
+          className="p-2 rounded border text-[11px] bg-slate-50 text-slate-700"
+          style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}
+        >
+          <b>借鏡視角誠實標註：</b>{whatData.mirrorPerspectiveTriedNote}
+        </div>
+      )}
+
+      {/* 視角 vs 讀法 兩條獨立軸 & 借鏡視角判定 */}
       <div
         className="p-3 rounded-sm border text-[10px] leading-relaxed space-y-1"
         style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg, color: theme.mutedTextColor, fontFamily: UI_FONT }}
       >
         <p>
-          <b style={{ color: theme.headingColor }}>視角（借外部工具箱重講自己）/ 借鏡視角（拿外部對象E，透過對應動作M，發現共享結構）</b>
-          ——強烈建議每張卡至少寫一個，除非真的想不出來，想不出來要註明「已嘗試尋找，未找到」。
+          <b style={{ color: theme.headingColor }}>視角與讀法是兩條獨立的軸（v7）：</b>
+          視角問「有沒有第二個對象、結構貼不貼」；讀法問「有沒有題變容易」——四種組合都存在（是視角也是讀法：天平支點；是視角不是讀法：純結構對應無題變快；是讀法不是視角：總和÷個數、偏差相消點；兩者都不是：3×4=12 改寫成 12=3×4）。
         </p>
         <p>
-          <b style={{ color: theme.accentColor }}>檢驗句：「講完後讀者對誰的理解變多了？」</b>——兩種都要過寫作規則：(1)顯式列出對應表 (2)導出一個讀者能獨立核對的具體事實。
+          <b style={{ color: theme.accentColor }}>外部工具視角寫作規則（v6/v7）：</b>
+          (1) 顯式列出對應表（外部角色 ↔ 本知識點角色）；(2) 用對應表導出一個讀者能獨立核對對錯的具體事實。借鏡視角若真的想不出來，須註明「已嘗試尋找借鏡視角，未找到」。
         </p>
       </div>
 
-      {/* 五個方向延伸（推深 / 推淺 / 推廣 / 推窄 / 翻譯） */}
+      {/* 六個方向延伸（推深 / 推淺 / 推廣 / 推窄 / 翻譯 / 造） */}
       <div
-        className="p-3.5 rounded-sm border space-y-2"
+        className="p-3.5 rounded-sm border space-y-2.5"
         style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
       >
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-            五個方向延伸（推深 / 推淺 / 推廣 / 推窄 / 翻譯）
+            {whatData.v6DemoPreservedNote
+              ? "五個方向延伸（v6 對照示範：推深 / 推淺 / 推廣 / 推窄 / 翻譯）"
+              : "六個方向延伸（v7：推深 / 推淺 / 推廣 / 推窄 / 翻譯 / 造）"}
           </span>
         </div>
         <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-          每個方向寫完自問洞見檢查——「拿掉這句話，讀者會不會真的損失理解？」純粹陳述一個事實不夠格，挖不到不用硬湊。⚠ 與 APPLY 強制分離，「知道原理」≠「會做題」。
+          <b>洞見檢查（v7 改為功能判準，取代 v4 感覺判準）：</b>每一句延伸附一道「拿掉這句就會答錯或做不出來」的題；寫不出，就刪掉這句。⚠ 與 APPLY 強制分離，「知道原理」≠「會做題」。
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 pt-1 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1 text-xs">
           {[
-            { label: "推深 (Deeper)", val: extensions.deeper, desc: "奠基在什麼更底層知識" },
-            { label: "推淺 (Shallower)", val: extensions.shallower, desc: "能撐起什麼後果/應用" },
-            { label: "推廣 (Generalize)", val: extensions.generalize, desc: "放寬條件會變成什麼" },
-            { label: "推窄 (Specialize)", val: extensions.specialize, desc: "收緊條件會成什麼特例" },
-            { label: "翻譯 (Translate)", val: extensions.translate, desc: "用此語言重講別的知識" },
+            { key: "deeper", label: "1. 推深 (Deeper)", val: extensions.deeper, q: extQuestions.deeper, desc: "奠基在什麼更底層知識（開放方向，非重寫WHY）" },
+            { key: "shallower", label: "2. 推淺 (Shallower)", val: extensions.shallower, q: extQuestions.shallower, desc: "能推出什麼純邏輯後果（不要求派上用場）" },
+            { key: "generalize", label: "3. 推廣 (Generalize)", val: extensions.generalize, q: extQuestions.generalize, desc: "放寬條件／範疇會變成什麼" },
+            { key: "specialize", label: "4. 推窄 (Specialize)", val: extensions.specialize, q: extQuestions.specialize, desc: "收緊條件會成什麼特例（無則從缺）" },
+            { key: "translate", label: "5. 翻譯 (Translate)", val: extensions.translate, q: extQuestions.translate, desc: "用本概念語言重講別的現象（結構不完全貼合/對外部理解變多）" },
+            ...(!whatData.v6DemoPreservedNote || extensions.construct
+              ? [{ key: "construct", label: "6. 造 (Construct · v7新增)", val: extensions.construct, q: extQuestions.construct, desc: "用此概念當零件，經邏輯未強迫的選擇造出新量/對象/操作" }]
+              : []),
           ].map((ext) => (
             <div
-              key={ext.label}
-              className="p-2 rounded bg-white/70 border flex flex-col justify-between"
+              key={ext.key}
+              className={`p-2.5 rounded bg-white/80 border flex flex-col justify-between space-y-2 ${
+                ext.key === "construct" ? "ring-1 ring-teal-500/40 bg-teal-50/30" : ""
+              }`}
               style={{ borderColor: theme.borderColor }}
             >
-              <div>
-                <div className="font-bold text-[10px] text-slate-800" style={{ fontFamily: UI_FONT }}>
+              <div className="space-y-1">
+                <div className="font-bold text-[10px] text-slate-900" style={{ fontFamily: UI_FONT }}>
                   {ext.label}
                 </div>
-                <div className="text-[9px] text-slate-400 mb-1" style={{ fontFamily: UI_FONT }}>
+                <div className="text-[9px] text-slate-500" style={{ fontFamily: UI_FONT }}>
                   {ext.desc}
                 </div>
+                <div className="text-xs leading-relaxed pt-0.5" style={{ color: theme.textColor, fontFamily: font }}>
+                  {ext.val ? <MathText text={ext.val} /> : <span className="text-slate-300 italic text-[10px]">（從缺）</span>}
+                </div>
+
+                {/* 若為第 6 方向「造」，顯示必寫的三件事 */}
+                {ext.key === "construct" && (constructDetails.choice || constructDetails.alternative || constructDetails.linkBack) && (
+                  <div className="mt-1.5 pt-1.5 border-t border-teal-200 space-y-1 text-[10px]" style={{ fontFamily: font }}>
+                    {constructDetails.name && (
+                      <div className="font-bold text-teal-900" style={{ fontFamily: UI_FONT }}>
+                        造出新對象：<MathText text={constructDetails.name} />
+                      </div>
+                    )}
+                    {constructDetails.choice && (
+                      <div>
+                        <b className="text-teal-800" style={{ fontFamily: UI_FONT }}>① 選了什麼：</b>
+                        <MathText text={constructDetails.choice} />
+                      </div>
+                    )}
+                    {constructDetails.alternative && (
+                      <div>
+                        <b className="text-amber-800" style={{ fontFamily: UI_FONT }}>② 換一個選擇會怎樣：</b>
+                        <MathText text={constructDetails.alternative} />
+                      </div>
+                    )}
+                    {constructDetails.linkBack && (
+                      <div>
+                        <b className="text-indigo-800" style={{ fontFamily: UI_FONT }}>③ 連回對象（可核對式子）：</b>
+                        <MathText text={constructDetails.linkBack} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="text-xs leading-tight" style={{ color: theme.textColor, fontFamily: font }}>
-                {ext.val ? <MathText text={ext.val} /> : <span className="text-slate-300 italic text-[10px]">（略）</span>}
-              </div>
+
+              {/* v7 功能判準洞見檢查題 */}
+              {ext.q && (
+                <div className="p-1.5 rounded bg-indigo-50/80 border border-indigo-200 text-[10px] text-indigo-950">
+                  <span className="font-bold text-indigo-800" style={{ fontFamily: UI_FONT }}>
+                    [功能判準題]{" "}
+                  </span>
+                  <span style={{ fontFamily: font }}>
+                    <MathText text={ext.q} />
+                  </span>
+                </div>
+              )}
             </div>
           ))}
         </div>
       </div>
 
       <V6PageFooter
-        note="版式：平行欄位，視角彼此並列，不是誰包含誰"
+        note="版式：讀法（問題×讀法表＋橋）· 平行視角欄 · 六向延伸（含「造」三要素與功能判準題）"
         theme={theme}
       />
     </div>
@@ -1440,7 +1780,7 @@ export function V6Page6Apply({
     <div className="flex flex-col h-full space-y-4">
       <V6PageHeaderBox
         title="APPLY"
-        subtitle="能不能用 / 怎麼用 / 用了能幹嘛——每條內容句尾都要掛來源標籤 [源:＿＿＿]"
+        subtitle="能不能用 / 怎麼用 / 用了能幹嘛——每條內容句尾都要掛來源標籤 [源:＿＿＿]（含 [源:WHAT-讀法n]）"
         pageNumber="6/7"
         theme={theme}
       />
@@ -1464,7 +1804,7 @@ export function V6Page6Apply({
           </span>
         </div>
         <p className="text-[9px] text-slate-500">
-          ‖ = CHECK關卡（過不了不能往下選） →分岔=分支 ┄→CAN（選填，某能力只屬於該分支時寫在分支末端）
+          ‖ = CHECK關卡（過不了不能往下選） →分岔=分支（標明用哪個讀法 [源:WHAT-讀法n]） ┄→CAN（選填，某能力只屬於該分支時寫在分支末端）
         </p>
       </div>
 
@@ -1490,11 +1830,17 @@ export function V6Page6Apply({
                   <div className="font-bold text-blue-900">
                     看到：<MathText text={c.cue} />
                   </div>
+                  {c.twoStageTransform && (
+                    <div className="text-[11px] text-amber-900 bg-amber-50/80 px-1.5 py-0.5 rounded border border-amber-200">
+                      <b>→ 兩段式變換／識別：</b>
+                      <MathText text={c.twoStageTransform} />
+                    </div>
+                  )}
                   <div className="font-bold text-emerald-900">
                     → 檢查：<MathText text={c.check} />
                   </div>
-                  <div className="text-[9px] text-slate-400 mt-0.5" style={{ fontFamily: UI_FONT }}>
-                    來源 [源:定義/前置]
+                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
+                    {c.source || "[源:定義/前置]"}
                   </div>
                 </div>
               ))
@@ -1524,8 +1870,8 @@ export function V6Page6Apply({
                   <div className="font-bold text-purple-900">
                     看到 <MathText text={cn.trigger} /> → 就能 <MathText text={cn.capability} />
                   </div>
-                  <div className="text-[9px] text-slate-400 mt-0.5" style={{ fontFamily: UI_FONT }}>
-                    來源 [源:HOW解鎖]
+                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
+                    {cn.source || "[源:HOW解鎖]"}
                   </div>
                 </div>
               ))
@@ -1543,7 +1889,7 @@ export function V6Page6Apply({
       >
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
-            分支（左觸發 · 中流程 · 右來源）
+            分支（左觸發 · 中流程 · 右來源 [源:WHAT-讀法n] 等）
           </span>
         </div>
         <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
@@ -1564,18 +1910,88 @@ export function V6Page6Apply({
           <div className="divide-y" style={{ borderColor: theme.borderColor }}>
             {branches.length > 0 ? (
               branches.map((b, bi) => (
-                <div key={b.id || bi} className="grid grid-cols-12 py-2 px-2 items-start text-xs bg-white/60">
-                  <div className="col-span-4 font-bold text-slate-900 pr-2">
-                    【看到 {b.title || `分支 ${bi + 1}`}】
-                    {b.isCompiled && <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>}
+                <React.Fragment key={b.id || bi}>
+                  <div className="grid grid-cols-12 py-2 px-2 items-start text-xs bg-white/60">
+                    <div className="col-span-4 font-bold text-slate-900 pr-2 space-y-1">
+                      <div>
+                        【看到 {b.title || `分支 ${bi + 1}`}】
+                        {b.isCompiled ? (
+                          <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>
+                        ) : (
+                          <span className="ml-1 text-[9px] text-amber-600 font-normal">[未編譯]</span>
+                        )}
+                      </div>
+                      {b.constructionAction && (
+                        <div className="text-[10px] font-normal text-amber-900 bg-amber-50 p-1 rounded border border-amber-200">
+                          <b>兩段式構造：</b>
+                          <MathText text={b.constructionAction} />
+                        </div>
+                      )}
+                    </div>
+                    <div className="col-span-6 leading-relaxed pr-2 space-y-1.5" style={{ fontFamily: font }}>
+                      <div>
+                        <MathText text={b.action || "（執行步驟）"} />
+                      </div>
+                      {/* 分支內的區域性 CHECK */}
+                      {b.checks && b.checks.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {b.checks.map((rc: any, rci: number) => (
+                            <div key={rc.id || rci} className="p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px]" style={{ fontFamily: UI_FONT }}>
+                              <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
+                              看到「<MathText text={rc.cue} />」
+                              {rc.twoStageTransform && <> → 變換：<MathText text={rc.twoStageTransform} /></>}
+                              {" "}→ 檢查：<MathText text={rc.check} />{" "}
+                              {rc.source && <span className="text-indigo-700 font-mono">{rc.source}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="col-span-2 text-right text-[10px] text-indigo-700 font-mono">
+                      {b.source || "[源:WHY/分支]"}
+                    </div>
                   </div>
-                  <div className="col-span-6 leading-relaxed pr-2" style={{ fontFamily: font }}>
-                    <MathText text={b.action || "（執行步驟）"} />
-                  </div>
-                  <div className="col-span-2 text-right text-[10px] text-slate-500 font-mono">
-                    [源:WHY/分支]
-                  </div>
-                </div>
+                  {/* 巢狀子分支 */}
+                  {b.branches &&
+                    b.branches.map((sb: any, sbi: number) => (
+                      <div
+                        key={sb.id || `${bi}-${sbi}`}
+                        className="grid grid-cols-12 py-2 px-2 pl-6 items-start text-xs bg-slate-50/80 border-t border-dashed"
+                        style={{ borderColor: theme.borderColor }}
+                      >
+                        <div className="col-span-4 font-bold text-slate-800 pr-2">
+                          ↳ 【{sb.title || `子分支 ${sbi + 1}`}】
+                          {sb.isCompiled ? (
+                            <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>
+                          ) : (
+                            <span className="ml-1 text-[9px] text-amber-600 font-normal">[未編譯]</span>
+                          )}
+                        </div>
+                        <div className="col-span-6 leading-relaxed pr-2 space-y-1" style={{ fontFamily: font }}>
+                          <div>
+                            <MathText text={sb.action || ""} />
+                          </div>
+                          {sb.checks &&
+                            sb.checks.map((srcChk: any, sci: number) => (
+                              <div
+                                key={srcChk.id || sci}
+                                className="p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px]"
+                                style={{ fontFamily: UI_FONT }}
+                              >
+                                <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
+                                看到「<MathText text={srcChk.cue} />」
+                                {srcChk.twoStageTransform && <> → 變換：<MathText text={srcChk.twoStageTransform} /></>}
+                                {" "}→ 檢查：<MathText text={srcChk.check} />{" "}
+                                {srcChk.source && <span className="text-indigo-700 font-mono">{srcChk.source}</span>}
+                              </div>
+                            ))}
+                        </div>
+                        <div className="col-span-2 text-right text-[10px] text-indigo-700 font-mono">
+                          {sb.source || b.source || "[源:WHY/子分支]"}
+                        </div>
+                      </div>
+                    ))}
+                </React.Fragment>
               ))
             ) : (
               <div className="p-3 text-center text-xs italic text-slate-400">
@@ -1591,7 +2007,7 @@ export function V6Page6Apply({
         className="p-2 rounded-sm border text-[10px] leading-relaxed"
         style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg, color: theme.mutedTextColor, fontFamily: UI_FONT }}
       >
-        來源標籤照實寫，不預先限定：[源:定義]∕[源:WHY-推導X]∕[源:視角X或借鏡視角:標題]∕[源:關係邊-X]——APPLY裡任何一條內容都不能憑空冒出來，要交代來處。
+        來源標籤照實寫，不預先限定：[源:定義]／[源:WHY-推導X]／[源:WHAT-視角X或借鏡視角:標題]／[源:WHAT-讀法n]／[源:關係邊-X]——APPLY 裡任何一條內容都不能憑空冒出來，要交代來處；沒被任何分支用到的讀法須標「僅理解用」。
       </div>
 
       <V6PageFooter

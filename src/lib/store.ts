@@ -13,7 +13,7 @@ import {
 import { normalizeLogType } from "./inspect";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
-const STORAGE_KEY = "scinotes-workspace-v4";
+const STORAGE_KEY = "scinotes-workspace-v7";
 
 function clone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
@@ -235,8 +235,21 @@ export const actions = {
           intuitionTraps: [],
           whatData: {
             summary: "",
+            readings: [],
+            readingQuestions: [],
+            readingBridges: [],
             perspectives: [],
             distinctionFromHow: "",
+            extensions: {
+              deeper: "",
+              shallower: "",
+              generalize: "",
+              specialize: "",
+              translate: "",
+              construct: "",
+              constructDetails: { name: "", choice: "", alternative: "", linkBack: "" },
+              questions: {},
+            },
           },
           whyData: {
             confidenceBefore: 3,
@@ -245,8 +258,7 @@ export const actions = {
             confidenceAfter: 3,
             subGoals: [],
           },
-          howData: { steps: [], status: "uncompiled" },
-          whenData: { triggers: [], enables: [] },
+          howData: { checks: [], branches: [], can: [], status: "uncompiled" },
           ...data,
           id,
           createdAt: new Date().toISOString(),

@@ -7,6 +7,44 @@ import { resolveFont } from "@/lib/fonts";
 import { runFourPointCheckOnCard, STATUS_COMPILED, STATUS_UNCOMPILED } from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
 
+/** v7：WHAT·讀法條目（取用知識的方式，以「有沒有某個問題換此讀法就變容易」界定） */
+export interface ReadingItem {
+  id: string;
+  name: string;               // 例：「讀法1：總和÷個數」
+  description: string;        // 讀法具體表述
+  linkedPerspective?: string; // 可選：配對的視角（例：「可配視角：天平支點」）
+  onlyForUnderstanding?: boolean; // 沒被任何 APPLY 分支用到時，標「僅理解用」
+}
+
+/** v7：問題×讀法表的單格內容 */
+export interface ReadingMatrixCell {
+  text: string;               // 「一步：…」「要先換回總和，多一步」「看不見」
+  isCheapest?: boolean;       // 這一題在此讀法下是否最便宜
+  isInvisible?: boolean;      // 在此讀法下是否「看不見」
+  pointsToReadingId?: string; // 若看不見，指向哪個看得見的讀法 ID
+}
+
+/** v7：問題×讀法表的問題列 */
+export interface ReadingMatrixQuestion {
+  id: string;
+  question: string;
+  cells: Record<string, ReadingMatrixCell>; // key = ReadingItem.id
+}
+
+/** v7：讀法之間的「橋」（四種關係＋未查） */
+export interface ReadingBridge {
+  id: string;
+  fromReadingId: string;
+  toReadingId: string;
+  type: "互通" | "單向" | "限定範圍" | "走不通" | "[未查]";
+  forwardProof?: string;      // 互通(正向) / 單向(推導) / 限定範圍(推導)
+  backwardProof?: string;     // 互通(反向推導)
+  counterExample?: string;    // 單向(反方向反例) / 限定範圍(範圍外反例)
+  scopeCondition?: string;    // 限定範圍(範圍條件)
+  blockedReason?: string;     // 走不通(理由)
+  blockedMark?: "[已證無橋]" | "[未找到橋]"; // 走不通標記
+}
+
 export interface CardData {
   id: string;
   workspaceId: string;
@@ -16,7 +54,7 @@ export interface CardData {
   backgroundDescription?: string;
   cardFont?: string;
   pageMode?: "single" | "paged";
-  constructionThinking?: string; // v4: 邏輯觸發，與 ORIGIN 歷史觸發分開
+  constructionThinking?: string; // v4: 邏輯觸發，與【背景】第四段歷史線分開
   /**
    * v4：「理解問題」信心校準（Polya 理解問題階段）。
    * 與 WHY 的 IOED 是平行但獨立的兩次校準：這輪測「有沒有搞懂題目在問什麼」，
@@ -85,18 +123,64 @@ export interface CardData {
   shapeRationale?: string;
   shapeConfidence?: number;
   shapeAccepted?: boolean;
+  /** v4/v7：核心內容寫完後的可複選獨立標籤與互斥二選一 */
+  cardTags?: string[]; // [有分支] | [連續鏈] | [存在性可分離] | [前提依賴] | [純約定]
+  skillType?: "通用技巧" | "一次性結論";
   whatData?: {
     summary: string;
-    /** v4：視角標籤不再限定 G/L/I/C/O/A/P，`code` 為自由命名（如「經濟學視角」）；下限 3 個 */
-    perspectives: Array<{ code: string; label: string; content: string }>;
+    /** v7 新增：WHAT 的第一個子節點「讀法」（問題×讀法表＋讀法之間的橋＋機械檢查） */
+    readings?: ReadingItem[];
+    readingQuestions?: ReadingMatrixQuestion[];
+    readingBridges?: ReadingBridge[];
+    /** v7：只有一個讀法時，標「單一讀法，盲區未驗」 */
+    singleReadingBlindSpotNote?: boolean;
+    /** v7：若此卡為保留 v6 寫法的對照示範卡（如勒沙特列原理），明確標註 */
+    v6DemoPreservedNote?: string;
+    /**
+     * v4/v6/v7：多視角理解（自由命名，下限 3 個）
+     * v6 新增：借鏡視角 `[借鏡視角:標題]` ＋ 外部工具視角寫作規則（(1)顯式對應表 (2)可獨立核對的具體事實）
+     * v7 新增：視角與讀法是兩條獨立的軸（4 種組合：是視角且是讀法 / 是視角不是讀法 / 是讀法不是視角 / 兩者都不是）
+     */
+    perspectives: Array<{
+      code: string;
+      label: string;
+      content: string;
+      kind?: "perspective" | "mirror"; // 一般視角 vs 借鏡視角
+      mappingTable?: string;           // v6 (1) 顯式列出對應表（外部角色 ↔ 本知識點角色）
+      derivedFact?: string;            // v6 (2) 用對應表導出一個讀者能獨立核對對錯的具體事實
+      isAlsoReading?: boolean;         // v7 視角×讀法獨立軸：此視角是否同時也是讀法（有題因此變容易）
+      linkedReadingId?: string;        // 若同時為讀法，對應哪個讀法 ID
+    }>;
+    /** v6：若真的想不出借鏡視角，須在視角段落末尾老實註明「已嘗試尋找借鏡視角，未找到」 */
+    mirrorPerspectiveTriedNote?: string;
     distinctionFromHow: string;
-    /** v4：五個方向延伸（強烈建議，不強制寫滿；挖不到不用硬湊） */
+    /**
+     * v7：六個方向延伸（v4 五個方向 → v7 新增第 6 方向「造」）
+     * 洞見檢查改為功能判準：每一句延伸附一道「拿掉這句就會答錯或做不出來」的題，寫不出就刪
+     */
     extensions?: {
       deeper?: string;     // 推深：奠基在什麼更底層的知識上（開放方向，不是重寫 WHY）
-      shallower?: string;  // 推淺：能推出什麼／撐起什麼後果／應用
+      shallower?: string;  // 推淺：能推出什麼／撐起什麼後果（純邏輯推論，不要求派上用場）
       generalize?: string; // 推廣：放寬條件／範疇會變成什麼
-      specialize?: string; // 推窄：收緊條件／範疇會變成什麼特例
-      translate?: string;  // 翻譯：把別的知識／現象，用這個知識點的語言重講一次（與「視角」方向相反）
+      specialize?: string; // 推窄：收緊條件／範疇會變成什麼特例（挖不到可寫「從缺」）
+      translate?: string;  // 翻譯：把別的知識／現象，用這個知識點的語言重講一次（結構不完全貼合／對外部現象理解變多）
+      construct?: string;  // v7 新增「造」：用這個知識點當零件，造出新的量／對象／操作
+      /** v7「造」必寫的三件事 */
+      constructDetails?: {
+        name?: string;        // 造出的新量/對象/操作名稱（如：方差）
+        choice?: string;      // ① 選了什麼：造的過程中，邏輯沒有逼你做的那個決定
+        alternative?: string; // ② 換一個選擇會怎樣：至少寫出一個別的選擇和結果
+        linkBack?: string;    // ③ 連回對象：用可核對的式子或推導說明新東西與本對象的關係（寫不出就不收）
+      };
+      /** v7 洞見檢查（功能判準）：每一句延伸附一道「拿掉這句就會答錯或做不出來」的題 */
+      questions?: {
+        deeper?: string;
+        shallower?: string;
+        generalize?: string;
+        specialize?: string;
+        translate?: string;
+        construct?: string;
+      };
     };
   };
   whyData?: {
@@ -121,29 +205,55 @@ export interface CardData {
     name: string;
     status: "locked" | "smuggled_candidate";
     description: string;
-    /** v4：假設鎖定 vs 適用範圍。一次性情境設定 → situation；「通常在什麼範圍成立」→ scope（該寫 WHEN/WHY 前提說明） */
+    /** v4：假設鎖定 vs 適用範圍。一次性情境設定 → situation；「通常在什麼範圍成立」→ scope（該寫 APPLY·CHECK/WHY 前提說明） */
     kind?: "situation" | "scope";
   }>;
   /**
-   * v5：HOW = CHECK 橫跨性前置關卡 ＋ 分支（可巢狀，含區域性 CHECK）＋ CAN 下游解鎖。
-   * WHEN 整格併入 HOW：原 WHEN·警示（triggers）→ checks（橫跨性）、
-   * 原 HOW steps → branches（可巢狀）、原 WHEN·可用（enables）→ can。
+   * v5/v6/v7：APPLY（原 HOW + WHEN 合併）
+   * = CHECK（橫跨性前置關卡）＋ 分支（可巢狀，含區域性 CHECK 與兩段式構造）＋ CAN（下游解鎖，不綁定卡片類型）
+   * v6/v7 來源標籤：任何一條內容都要在句尾交代來處 `[源:___]`，含 v7 新增 `[源:WHAT-讀法n]`
    */
   howData?: {
     /** CHECK · 橫跨性前置關卡——進程序前全程把關的「看到___→檢查___」（橫跨全部分支） */
-    checks?: Array<{ id: string; cue: string; check: string; keywords?: string[] }>;
-    /** 分支（可巢狀）；每個分支可帶自己的區域性 CHECK（只在該分支內要過的關卡） */
+    checks?: Array<{
+      id: string;
+      cue: string;
+      check: string;
+      keywords?: string[];
+      /** v6：兩段式（若不能從題目原始樣子直接判斷，先經變換/識別動作） */
+      twoStageTransform?: string;
+      /** v6/v7：來源標籤 `[源:___]` */
+      source?: string;
+    }>;
+    /** 分支（可巢狀）；每個分支可帶自己的區域性 CHECK、兩段式構造與來源標籤 `[源:WHAT-讀法n]` 等 */
     branches?: Array<{
       id: string;
       title: string;
       action: string;
       isCompiled: boolean;
-      checks?: Array<{ id: string; cue: string; check: string; keywords?: string[] }>;
+      /** v6：觸發點兩段式構造/識別動作（遇到看似不相關問題 → 想到把___設成___ → 觸發點） */
+      constructionAction?: string;
+      /** v6/v7：來源標籤，如 `[源:WHAT-讀法1]`、`[源:定義]`、`[源:WHY-推導①]`、`[源:WHAT-視角1]` */
+      source?: string;
+      checks?: Array<{
+        id: string;
+        cue: string;
+        check: string;
+        keywords?: string[];
+        twoStageTransform?: string;
+        source?: string;
+      }>;
       /** 子分支（可巢狀，結構同上） */
       branches?: Array<any>;
     }>;
-    /** CAN · 下游解鎖——編譯後「看到___→就能做___」（僅通用技巧型才寫） */
-    can?: Array<{ id: string; trigger: string; capability: string }>;
+    /** CAN · 下游解鎖——v5 起不綁定[通用技巧]/[一次性結論]，只問下游有沒有解鎖原本做不到的具體問題 */
+    can?: Array<{
+      id: string;
+      trigger: string;
+      capability: string;
+      /** v6/v7：來源標籤 `[源:___]` */
+      source?: string;
+    }>;
     status: "compiled" | "uncompiled";
     testNotes?: string;
     /** 邊界約束（原 WHEN·boundaryNotes 併入） */
@@ -208,6 +318,8 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
   const probePassed =
     (card.thoughtPoints?.filter((t) => t.passed).length || 0) +
     (card.intuitionTraps?.filter((t) => t.passed).length || 0);
+
+  const readingsCount = card.whatData?.readings?.length || 0;
 
   const shapeDef = SHAPE_DEFS[card.reasoningShape] || SHAPE_DEFS.A;
   const isComposite = card.reasoningShape === "COMPOSITE";
@@ -299,7 +411,7 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
         </div>
       </div>
 
-      {/* 底部：Bloom · SOLO ｜ 追問點 · HOW · 自檢（⑦點＋符號綁定，極簡，僅供掃描） */}
+      {/* 底部：Bloom · SOLO ｜ 讀法 · 追問點 · APPLY · 自檢 */}
       <div className="px-3 py-1.5 border-t border-slate-100 flex items-center justify-between text-[9px] text-slate-500 gap-1">
         <div className="flex items-center gap-1 min-w-0 overflow-hidden truncate">
           <span className="text-emerald-600">{card.bloomLevel}</span>
@@ -307,6 +419,11 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
           <span className="text-indigo-600">{card.soloData?.declaredLevel || card.soloLevel}</span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {readingsCount > 0 && (
+            <span className="text-sky-700 font-semibold" title={`WHAT 讀法數：${readingsCount}`}>
+              讀法 {readingsCount}
+            </span>
+          )}
           {probeTotal > 0 && (
             <span
               className={probePassed === probeTotal ? "text-emerald-600" : "text-amber-600"}
@@ -315,11 +432,11 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
               追問 {probePassed}/{probeTotal}
             </span>
           )}
-           {card.howData?.status === "compiled" ? (
-             <span className="text-emerald-600" title="HOW 已編譯">{STATUS_COMPILED}</span>
-           ) : (
-             <span className="text-amber-600" title="HOW 未編譯（仍需臨場重推）">{STATUS_UNCOMPILED}</span>
-           )}
+          {card.howData?.status === "compiled" ? (
+            <span className="text-emerald-600" title="APPLY 已編譯">{STATUS_COMPILED}</span>
+          ) : (
+            <span className="text-amber-600" title="APPLY 未編譯（仍需臨場重推）">{STATUS_UNCOMPILED}</span>
+          )}
           {qualityClean ? (
             <span className="text-slate-400" title="構造思路與 WHY 正文已通過八點自我檢查＋符號綁定">✓</span>
           ) : (

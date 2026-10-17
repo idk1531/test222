@@ -34,6 +34,7 @@ export function relationLabelText(
     case "special_case": return "[特例]";
     case "generalization": return "[推廣]";
     case "motif_instance": return "[歸屬母題]";
+    case "derived": return "[衍生]";
     default: return `[${relationType || "?"}]`;
   }
 }
@@ -68,6 +69,13 @@ export const STATUS_COMPILED = "[已編譯]";
 export const STATUS_WARNING = "[警示]";
 export const ORIGIN_MARK = "[歷史起源]";
 export const ORIGIN_MARK_KEY = "[歷史起源:關鍵]";
+
+/** v7 讀法標記（見 WHAT·讀法） */
+export const READING_NO_BRIDGE_PROVED = "[已證無橋]";
+export const READING_NO_BRIDGE_UNFOUND = "[未找到橋]";
+export const READING_BRIDGE_UNCHECKED = "[未查]";
+export const READING_ONLY_UNDERSTANDING = "僅理解用";
+export const READING_SINGLE_BLINDSPOT = "單一讀法，盲區未驗";
 
 /**
  * v5：收集 HOW 的全部 CHECK——橫跨性前置關卡（howData.checks）＋各分支的區域性 CHECK。
@@ -466,41 +474,363 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
     }
   }
 
-  // ===== v4：WHAT 五方向延伸 · 洞見檢查 =====
-  // 「拿掉這句話，讀者會不會真的損失理解？」——純事實陳述（"A可以用在B上"）不夠格，
-  // 必須點出這個連接為什麼重要（更大的理論脈絡／真實應用後果／一個具體的取捨或張力）。
-  const ext = (card as any)?.whatData?.extensions;
-  if (ext) {
-    const dirLabels: Record<string, string> = {
-      deeper: "推深", shallower: "推淺", generalize: "推廣", specialize: "推窄", translate: "翻譯",
-    };
-    // 洞見訊號：因果／後果／重要性／取捨／張力／「這正是…源頭／催生」等
-    const insightMarkers = [
-      "因為", "因此", "所以", "這正是", "正是", "催生", "源頭", "發源", "權衡", "取捨", "張力",
-      "代價", "貴", "慢", "快", "代價是", "因此才有", "結果", "後果", "→", "推得", "引起",
-      "支撐起", "撐起", "故", "由此", "於是", "相當於", "翻譯成", "翻成", "禁止", "不可能", "必須", "只有", "只剩", "換句話說", "也就是", "低通", "衰減", "靠", "依賴", "關鍵", "真正的", "實質", "重要性", "意義", "背後", "本質",
-      "然而", "但", "卻", "反而", "代價", "compromise", "trade-off",
-      "\u2192", "→", "\\to", "\\propto", "\\sim", "\\le", "\\ge", "\\rightarrow",
-      "退化為", "退化", "奠基在", "另開", "從這條",
-    ];
-    const bareDirections: string[] = [];
-    for (const [key, label] of Object.entries(dirLabels)) {
-      const text = (ext as any)[key];
-      if (!text || !String(text).trim()) continue;
-      const t = String(text);
-      // 太短 → 幾乎只能是事實陳述
-      const bare = !insightMarkers.some((m) => t.includes(m));
-      if (bare) bareDirections.push(label);
+  // ===== v7：WHAT·讀法（問題×讀法表、橋、與 APPLY 連接、機械檢查） =====
+  const isV6DemoPreserved = Boolean((card?.whatData as any)?.v6DemoPreservedNote);
+  const readings = (card?.whatData?.readings || []).filter((r: any) => (r?.name || r?.description || "").trim());
+  const readingQuestions = card?.whatData?.readingQuestions || [];
+  const readingBridges = card?.whatData?.readingBridges || [];
+
+  if (!isV6DemoPreserved) {
+    // (a) 只有一個讀法時，須標「單一讀法，盲區未驗」
+    if (readings.length === 1) {
+      const r0 = readings[0];
+      const hasSingleMark =
+        Boolean(card?.whatData?.singleReadingBlindSpotNote) ||
+        /單一讀法|单一读法/.test(`${r0.name || ""} ${r0.description || ""}`);
+      if (!hasSingleMark) {
+        issues.push({
+          severity: "warning",
+          category: "WHAT 讀法機械檢查",
+          title: "只有一個讀法時，未標「單一讀法，盲區未驗」",
+          description:
+            "v7 機械檢查：當知識點只有 1 個讀法時，必須標註「單一讀法，盲區未驗」（缺少其他讀法對照時，當事人未必察覺盲區，見附錄 B 讀法原則第 9 條）。",
+          targetSlot: "WHAT",
+        });
+      }
     }
-    if (bareDirections.length > 0) {
+
+    // (b) 問題×讀法表：規則 1（每個讀法至少有一題最便宜）& 規則 2（某問題在所有欄都貴或看不見＝缺讀法徵兆）& 看不見欄指向
+    if (readings.length >= 1 && readingQuestions.length > 0) {
+      for (const r of readings) {
+        const hasCheapest = readingQuestions.some((q: any) => {
+          const cell = q?.cells?.[r.id];
+          if (!cell) return false;
+          const txt = (cell.text || "").trim();
+          return Boolean(cell.isCheapest) || /一步|最便宜|就是結論本身|直接看出/.test(txt);
+        });
+        if (!hasCheapest) {
+          issues.push({
+            severity: "warning",
+            category: "WHAT 問題×讀法表",
+            title: `讀法「${r.name || r.id}」沒有任何一題最便宜`,
+            description:
+              "v7 問題×讀法表規則：每個讀法至少有一題它最便宜；沒有，就併入別的讀法，它只是換寫法（例：3×4=12 與 12=3×4 沒有任何問題因此變容易，不算兩個讀法）。",
+            targetSlot: "WHAT",
+          });
+        }
+      }
+
+      for (const q of readingQuestions) {
+        if (!(q?.question || "").trim()) continue;
+        const cellsForQ = readings.map((r: any) => ({ r, cell: q?.cells?.[r.id] }));
+        const anyCheapAndVisible = cellsForQ.some(({ cell }) => {
+          if (!cell) return false;
+          const txt = (cell.text || "").trim();
+          const inv = Boolean(cell.isInvisible) || /看不見|看不见/.test(txt);
+          if (inv) return false;
+          return Boolean(cell.isCheapest) || /一步|最便宜|就是結論本身|直接/.test(txt);
+        });
+        if (!anyCheapAndVisible) {
+          issues.push({
+            severity: "warning",
+            category: "WHAT 問題×讀法表",
+            title: `問題「${q.question.slice(0, 22)}」在所有欄都貴或看不見`,
+            description:
+              "v7 問題×讀法表規則：某個問題在所有欄都貴或看不見，是「缺讀法」的徵兆（見附錄 B 讀法原則第 5、9 條）。請尋找能讓此題變容易的新讀法。",
+            targetSlot: "WHAT",
+          });
+        }
+
+        // 每個讀法的「看不見」欄，指向另一個讀法下看得見的題
+        for (const { r, cell } of cellsForQ) {
+          if (!cell) continue;
+          const txt = (cell.text || "").trim();
+          const isInv = Boolean(cell.isInvisible) || /看不見|看不见/.test(txt);
+          if (!isInv) continue;
+          const targetId = cell.pointsToReadingId;
+          const targetVisible =
+            (targetId &&
+              q?.cells?.[targetId] &&
+              !q.cells[targetId].isInvisible &&
+              !/看不見|看不见/.test(q.cells[targetId].text || "") &&
+              (q.cells[targetId].text || "").trim().length > 0) ||
+            /指向讀法|見讀法|讀法\s*\d/.test(txt);
+          if (!targetVisible) {
+            issues.push({
+              severity: "warning",
+              category: "WHAT 讀法機械檢查",
+              title: `「${r.name || r.id}」於問題「${q.question.slice(0, 16)}」看不見，但未指向看得見的讀法`,
+              description:
+                "v7 機械檢查：每個讀法的「看不見」欄，必須明確指向另一個讀法下看得見該題的欄位。",
+              targetSlot: "WHAT",
+            });
+          }
+        }
+      }
+    }
+
+    // (c) 橋（讀法之間的關係）機械檢查：每一對讀法都有橋或標 [未查]，且證據齊全
+    if (readings.length >= 2) {
+      for (let i = 0; i < readings.length; i++) {
+        for (let j = i + 1; j < readings.length; j++) {
+          const rA = readings[i];
+          const rB = readings[j];
+          const bridge = readingBridges.find(
+            (b: any) =>
+              (b.fromReadingId === rA.id && b.toReadingId === rB.id) ||
+              (b.fromReadingId === rB.id && b.toReadingId === rA.id)
+          );
+          if (!bridge) {
+            issues.push({
+              severity: "warning",
+              category: "WHAT 讀法之橋",
+              title: `讀法「${rA.name || rA.id}」與「${rB.name || rB.id}」之間缺橋`,
+              description:
+                "v7 機械檢查：每一對讀法都必須有橋（互通／單向／限定範圍／走不通），若尚未查驗須明確標 [未查]。",
+              targetSlot: "WHAT",
+            });
+          } else if (bridge.type === "互通") {
+            if (!(bridge.forwardProof || "").trim() || !(bridge.backwardProof || "").trim()) {
+              issues.push({
+                severity: "warning",
+                category: "WHAT 讀法之橋",
+                title: `橋「${rA.name} ↔ ${rB.name}」（互通）缺少雙向推導證據`,
+                description: "v7 橋的證據要求：【互通】必須寫出兩個方向各一個推導。",
+                targetSlot: "WHAT",
+              });
+            }
+          } else if (bridge.type === "單向") {
+            if (!(bridge.forwardProof || "").trim() || !(bridge.counterExample || "").trim()) {
+              issues.push({
+                severity: "warning",
+                category: "WHAT 讀法之橋",
+                title: `橋「${rA.name} → ${rB.name}」（單向）缺少推導或反方向反例`,
+                description: "v7 橋的證據要求：【單向】必須寫出一個推導，加反方向的反例（例：連續推出中間值性質，反例 sin(1/x) 有中間值性質但不連續）。",
+                targetSlot: "WHAT",
+              });
+            }
+          } else if (bridge.type === "限定範圍") {
+            if (
+              !(bridge.forwardProof || "").trim() ||
+              !(bridge.scopeCondition || "").trim() ||
+              !(bridge.counterExample || "").trim()
+            ) {
+              issues.push({
+                severity: "warning",
+                category: "WHAT 讀法之橋",
+                title: `橋「${rA.name} — ${rB.name}」（限定範圍）證據不全`,
+                description: "v7 橋的證據要求：【限定範圍】必須寫齊三件事：推導、範圍條件、範圍外的反例（例：質數在 ℤ 等價，在 ℤ[√-5] 2 拆不下去卻不滿足歐幾里得引理）。",
+                targetSlot: "WHAT",
+              });
+            }
+          } else if (bridge.type === "走不通") {
+            const hasMark =
+              bridge.blockedMark === "[已證無橋]" ||
+              bridge.blockedMark === "[未找到橋]" ||
+              /\[已證無橋\]|\[未找到橋\]|\[已证无桥\]|\[未找到桥\]/.test(bridge.blockedReason || "");
+            if (!(bridge.blockedReason || "").trim() || !hasMark) {
+              issues.push({
+                severity: "warning",
+                category: "WHAT 讀法之橋",
+                title: `橋「${rA.name} ✕ ${rB.name}」（走不通）缺少理由或標記`,
+                description: "v7 橋的證據要求：【走不通】必須寫出理由，並標 [已證無橋] 或 [未找到橋]。",
+                targetSlot: "WHAT",
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // (d) 與 APPLY 的連接：沒被任何分支用到的讀法，須標「僅理解用」
+    if (readings.length > 0) {
+      const allBranchSources = branches
+        .map((b: any) => `${b.source || ""} ${b.title || ""} ${b.action || ""}`)
+        .join(" ");
+      readings.forEach((r: any, idx: number) => {
+        const rNum = idx + 1;
+        const usedByBranch =
+          allBranchSources.includes(r.id) ||
+          allBranchSources.includes(r.name) ||
+          new RegExp(`讀法\\s*${rNum}|读法\\s*${rNum}`, "i").test(allBranchSources);
+        const markedOnlyUnderstanding =
+          Boolean(r.onlyForUnderstanding) ||
+          /僅理解用|仅理解用/.test(`${r.name || ""} ${r.description || ""}`);
+        if (!usedByBranch && !markedOnlyUnderstanding) {
+          issues.push({
+            severity: "suggestion",
+            category: "WHAT 讀法機械檢查",
+            title: `讀法「${r.name || `讀法${rNum}`}」未被 APPLY 分支引用，亦未標「僅理解用」`,
+            description:
+              "v7 機械檢查：每個 APPLY 分支在來源標籤標明用哪個讀法 [源:WHAT-讀法n]；沒被任何分支用到的讀法，須標「僅理解用」。",
+            targetSlot: "WHAT",
+          });
+        }
+      });
+    }
+  }
+
+  // ===== v6 + v7：外部工具視角／借鏡視角寫作規則檢查 =====
+  if (!isV6DemoPreserved && perspectives.length > 0) {
+    const missingRulePerspectives: string[] = [];
+    for (const p of perspectives) {
+      const hasMap = Boolean((p.mappingTable || "").trim()) || /對應|↔|映射/.test(p.content || "");
+      const hasFact = Boolean((p.derivedFact || "").trim()) || /導出|推出|可核對|因此|預測/.test(p.content || "");
+      if (!hasMap || !hasFact) {
+        missingRulePerspectives.push(p.code || p.label || "未命名視角");
+      }
+    }
+    if (missingRulePerspectives.length > 0) {
       issues.push({
         severity: "suggestion",
-        category: "WHAT 洞見檢查",
-        title: `${bareDirections.join("、")} 可能只是事實陳述，缺「洞見」`,
+        category: "WHAT 視角寫作規則",
+        title: `視角（${missingRulePerspectives.slice(0, 3).join("、")}）建議補齊「對應表＋可核對事實」`,
         description:
-          "v4 洞見檢查：每個方向延伸寫完自問「拿掉這句話，讀者會不會真的損失理解？」純事實（A 可以用在 B 上）不夠格，要點出這個連接為什麼重要。讀完要讓讀者「原來如此」而非「喔，知道了」——挖不到就不寫，別留一句事實充數。",
+          "v6 外部工具視角寫作規則：不能只寫「這可以理解成___」就結束，必須 (1) 顯式列出對應表（外部角色 ↔ 本知識點角色）；(2) 用這張對應表導出一個讀者能獨立核對對錯的具體事實。",
         targetSlot: "WHAT",
       });
+    }
+
+    const hasMirror = perspectives.some(
+      (p: any) =>
+        p.kind === "mirror" ||
+        /借鏡視角|借镜视角/.test(`${p.code || ""} ${p.label || ""} ${p.content || ""}`)
+    );
+    const hasMirrorTriedNote = Boolean((card?.whatData?.mirrorPerspectiveTriedNote || "").trim());
+    if (!hasMirror && !hasMirrorTriedNote) {
+      issues.push({
+        severity: "suggestion",
+        category: "WHAT 借鏡視角審查",
+        title: "尚未建立 `[借鏡視角:標題]`，亦未註明「已嘗試尋找，未找到」",
+        description:
+          "v6 規定：借鏡視角（拿一個看似無關的獨立外部對象 E，透過對應動作 M 發現共享結構，加深對本知識點的理解）強烈建議每張卡都嘗試；若真的想不出來，須在 WHAT 視角段末尾老實註明「已嘗試尋找借鏡視角，未找到」。",
+        targetSlot: "WHAT",
+      });
+    }
+  }
+
+  // ===== v7：WHAT 六個方向延伸（新增「造」）· 功能判準洞見檢查 =====
+  // v7 改為功能判準：「每一句延伸附一道『拿掉這句就會答錯或做不出來』的題；寫不出，就刪掉這句」
+  const ext = (card as any)?.whatData?.extensions;
+  if (ext && !isV6DemoPreserved) {
+    const dirLabels: Record<string, string> = {
+      deeper: "推深",
+      shallower: "推淺",
+      generalize: "推廣",
+      specialize: "推窄",
+      translate: "翻譯",
+      construct: "造",
+    };
+    const questionsObj = ext.questions || {};
+    const missingQuestionDirs: string[] = [];
+
+    for (const [key, label] of Object.entries(dirLabels)) {
+      const text = String((ext as any)[key] || "").trim();
+      if (!text || /^(從缺|从缺|（略）|\(略\)|無|无|—|-)$/.test(text)) continue;
+      const qText = String(questionsObj[key] || "").trim();
+      const hasInlineQ = /[？?]|題[:：]|题[:：]/.test(text);
+      if (!qText && !hasInlineQ) {
+        missingQuestionDirs.push(label);
+      }
+    }
+
+    if (missingQuestionDirs.length > 0) {
+      issues.push({
+        severity: "warning",
+        category: "WHAT 洞見檢查（v7 功能判準）",
+        title: `六向延伸（${missingQuestionDirs.join("、")}）未附「拿掉這句就會答錯或做不出來」的題`,
+        description:
+          "v7 洞見檢查改為功能判準（取代 v4 感覺判準）：每一句延伸必須附一道「拿掉這句就會答錯或做不出來」的題；寫不出，就刪掉這句。純粹陳述一個事實（「A 可以用在 B 上」）寫不出這樣的題，所以不夠格。",
+        targetSlot: "WHAT",
+      });
+    }
+
+    // v7 新增第 6 方向「造」的三件事檢查：選了什麼、換一個選擇會怎樣、連回對象
+    const constructText = String(ext.construct || "").trim();
+    const cd = ext.constructDetails || {};
+    if (
+      (constructText && !/^(從缺|从缺|（略）|—|-)$/.test(constructText)) ||
+      cd.choice ||
+      cd.alternative ||
+      cd.linkBack
+    ) {
+      const hasChoice = Boolean((cd.choice || "").trim()) || /選了什麼|选了什么|選了|选了/.test(constructText);
+      const hasAlt =
+        Boolean((cd.alternative || "").trim()) || /換一個選擇|换一个选择|換成|换成/.test(constructText);
+      const hasLink =
+        Boolean((cd.linkBack || "").trim()) || /連回對象|连回对象|最小|驗算|验算|=/.test(constructText);
+      if (!hasChoice || !hasAlt || !hasLink) {
+        issues.push({
+          severity: "warning",
+          category: "WHAT 六向延伸 · 造",
+          title: `「造」缺少必寫三件事中的：${[
+            !hasChoice ? "①選了什麼" : "",
+            !hasAlt ? "②換一個選擇會怎樣" : "",
+            !hasLink ? "③連回對象（可核對式子/推導）" : "",
+          ]
+            .filter(Boolean)
+            .join("、")}`,
+          description:
+            "v7 新增第 6 方向「造」（用這個知識點當零件，造出新的量/對象/操作）：每一條必須寫齊三件事——(1) 選了什麼（邏輯沒逼你做的決定）；(2) 換一個選擇會怎樣；(3) 連回對象（用可核對的式子或推導說明新東西與本對象的關係；寫不出來就不收）。",
+          targetSlot: "WHAT",
+        });
+      }
+    }
+  }
+
+  // ===== v6 + v7：APPLY 來源標籤 `[源:___]` 機械檢查（含 `[源:WHAT-讀法n]`） =====
+  {
+    const cans = card?.howData?.can || [];
+    const missingSourceItems: string[] = [];
+    for (const c of checks) {
+      const hasSrc = Boolean((c.source || "").trim()) || /\[源[:：]/.test(`${c.cue || ""} ${c.check || ""}`);
+      if (!hasSrc) missingSourceItems.push(`CHECK「${(c.cue || "").slice(0, 12)}」`);
+    }
+    for (const b of branches) {
+      const hasSrc = Boolean((b.source || "").trim()) || /\[源[:：]/.test(`${b.title || ""} ${b.action || ""}`);
+      if (!hasSrc) missingSourceItems.push(`分支「${(b.title || "").slice(0, 12)}」`);
+    }
+    for (const cn of cans) {
+      const hasSrc =
+        Boolean((cn.source || "").trim()) || /\[源[:：]/.test(`${cn.trigger || ""} ${cn.capability || ""}`);
+      if (!hasSrc) missingSourceItems.push(`CAN「${(cn.trigger || "").slice(0, 12)}」`);
+    }
+    if (missingSourceItems.length > 0) {
+      issues.push({
+        severity: "suggestion",
+        category: "APPLY 來源標籤",
+        title: `APPLY 有 ${missingSourceItems.length} 條內容尚未標註來源標籤 [源:___]`,
+        description: `未標來源：${missingSourceItems.slice(0, 4).join("、")}${
+          missingSourceItems.length > 4 ? "…" : ""
+        }。v6/v7 規定：APPLY（CHECK／分支／CAN）裡任何一條內容都要交代來處，如 [源:定義]、[源:WHY-推導X]、[源:WHAT-讀法n]、[源:WHAT-視角X] 或 [源:WHAT-借鏡視角:標題]、[源:關係邊-X]。`,
+        targetSlot: "HOW",
+      });
+    }
+  }
+
+  // ===== v7：關係邊 `[衍生]` 雙向機械檢查（A [衍生]→ B 則 B 須有 [前提] 指回 A） =====
+  if (card?.id && relations.length > 0) {
+    const derivedEdges = relations.filter(
+      (r: any) =>
+        r.relationType === "derived" && (r.fromCardId === card.id || r.toCardId === card.id)
+    );
+    for (const de of derivedEdges) {
+      const hasBackPrereq = relations.some(
+        (p: any) =>
+          p.relationType === "prerequisite" &&
+          ((p.fromCardId === de.toCardId && p.toCardId === de.fromCardId) ||
+            (p.fromCardId === de.fromCardId && p.toCardId === de.toCardId))
+      );
+      if (!hasBackPrereq) {
+        issues.push({
+          severity: "warning",
+          category: "關係邊 [衍生] 機械檢查",
+          title: `[衍生] 邊「${de.label || `${de.fromCardId} → ${de.toCardId}`}」缺少反向 [前提] 邊對齊`,
+          description:
+            "v7 機械檢查：A [衍生]→ B 表示 B 是用 A 造出來的；B 那張卡必須有 [前提] 指回 A，兩邊對得上才算數。",
+          targetSlot: "RELATIONS",
+        });
+      }
     }
   }
 

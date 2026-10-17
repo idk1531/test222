@@ -123,6 +123,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
       const isAnalogy = rel.relationType.includes("analogy");
       const isUnverified = rel.relationType === "analogy_unverified";
       const isContrast = rel.relationType === "contrast";
+      const isDerived = rel.relationType === "derived";
 
       ctx.save();
       ctx.beginPath();
@@ -133,6 +134,9 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
       } else if (isContrast) {
         ctx.strokeStyle = "#ef4444"; // red
         ctx.lineWidth = 2;
+      } else if (isDerived) {
+        ctx.strokeStyle = "#0d9488"; // teal
+        ctx.lineWidth = 2.5;
       } else {
         ctx.strokeStyle = "#6366f1"; // indigo
         ctx.lineWidth = 2;
@@ -147,6 +151,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
       const midY = (from.y + to.y) / 2;
 
       let symbol = "→";
+      if (rel.relationType === "derived") symbol = "造→";
       if (rel.relationType === "analogy_verified") symbol = "≈";
       if (rel.relationType === "analogy_unverified") symbol = "~";
       if (rel.relationType === "contrast") symbol = "⇄";
@@ -324,6 +329,9 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
             <div className="font-bold text-slate-700">圖例說明：</div>
             <div className="flex items-center gap-1.5 text-slate-600">
               <span className="w-2 h-0.5 bg-indigo-600"></span> 實線：已驗證前提/類比 (≈/→)
+            </div>
+            <div className="flex items-center gap-1.5 text-teal-700">
+              <span className="w-2 h-0.5 bg-teal-600"></span> 青綠線：[衍生] (造→，須配反向[前提])
             </div>
             <div className="flex items-center gap-1.5 text-amber-700">
               <span className="w-2 h-0.5 border-t border-dashed border-amber-600"></span> 虛線：{relationLabelText("analogy_unverified")}（不計分）
