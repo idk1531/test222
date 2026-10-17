@@ -15,6 +15,16 @@ import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
 const STORAGE_KEY = "scinotes-workspace-v7.1";
 
+/** v7.2：各推理形狀的預設節點主色（與 SHAPE_DEFS.hex 一致；避免 lib → component 相依） */
+const SHAPE_ACCENT_HEX: Record<string, string> = {
+  A: "#3b82f6",
+  B: "#10b981",
+  C: "#f59e0b",
+  D: "#a855f7",
+  E: "#f43f5e",
+  COMPOSITE: "#1e293b",
+};
+
 function clone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
 }
@@ -285,6 +295,8 @@ export const actions = {
             borderColor: "#3b82f6",
             borderWidth: 2,
             borderRadius: 12,
+            // v7.2：節點主色，預設跟著推理形狀；使用者可於畫布上自訂
+            accentColor: SHAPE_ACCENT_HEX[data.reasoningShape || "A"] || "#3b82f6",
           },
           isLocked: false,
           isHidden: false,
@@ -297,12 +309,29 @@ export const actions = {
   },
 
   updateCard(id: string, updates: Partial<any>) {
-    setState((s) => ({
-      ...s,
-      cards: s.cards.map((c) =>
-        c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
-      ),
-    }));
+    setState((s) => {
+      const prev = s.cards.find((c) => c.id === id);
+      const shapeChanged =
+        typeof updates.reasoningShape === "string" &&
+        updates.reasoningShape !== prev?.reasoningShape;
+      const oldHex = SHAPE_ACCENT_HEX[prev?.reasoningShape || "A"] || "#3b82f6";
+      const newHex = SHAPE_ACCENT_HEX[updates.reasoningShape || "A"] || "#3b82f6";
+      return {
+        ...s,
+        cards: s.cards.map((c) =>
+          c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
+        ),
+        // 形狀改了、而節點仍停在舊形狀的「預設色」時，跟著換成新形狀預設色；
+        // 已被使用者自訂過的顏色不動。
+        canvasObjects: shapeChanged
+          ? s.canvasObjects.map((o) =>
+              o.cardId === id && o.style?.accentColor === oldHex
+                ? { ...o, style: { ...o.style, accentColor: newHex }, updatedAt: new Date().toISOString() }
+                : o
+            )
+          : s.canvasObjects,
+      };
+    });
   },
 
   deleteCard(id: string) {
