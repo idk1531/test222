@@ -741,13 +741,6 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                     onRunAudit={() => onRunAudit(card)}
                     onExpansionTest={() => onExpansionTest(card)}
                     fontFamily={fontFamily}
-                    accentColor={obj.style?.accentColor as string | undefined}
-                    onChangeAccentColor={(hex) => {
-                      const nextStyle = { ...(obj.style || {}) };
-                      if (hex) nextStyle.accentColor = hex;
-                      else delete nextStyle.accentColor;
-                      onUpdateObjects([{ id: obj.id, style: nextStyle }]);
-                    }}
                   />
                 )}
 
