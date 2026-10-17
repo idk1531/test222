@@ -712,7 +712,13 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                 key={obj.id}
                 data-canvas-object="true"
                 onPointerDown={(e) => handleObjectPointerDown(e, obj)}
-                className={`absolute pointer-events-auto transition-shadow ${isSelected ? "ring-2 ring-blue-500 shadow-2xl" : "shadow-md"} ${obj.isLocked ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}`}
+                className={`absolute pointer-events-auto transition-shadow ${
+                  isSelected
+                    ? obj.type === "card_node"
+                      ? "shadow-2xl"
+                      : "ring-2 ring-blue-500 shadow-2xl"
+                    : "shadow-md"
+                } ${obj.isLocked ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}`}
                 style={{
                   left: `${obj.x}px`, top: `${obj.y}px`, width: `${obj.width}px`, height: `${obj.height}px`,
                   transform: `rotate(${obj.rotation || 0}deg)`, zIndex: obj.zIndex || 1, touchAction: "none",
@@ -735,6 +741,13 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                     onRunAudit={() => onRunAudit(card)}
                     onExpansionTest={() => onExpansionTest(card)}
                     fontFamily={fontFamily}
+                    accentColor={obj.style?.accentColor as string | undefined}
+                    onChangeAccentColor={(hex) => {
+                      const nextStyle = { ...(obj.style || {}) };
+                      if (hex) nextStyle.accentColor = hex;
+                      else delete nextStyle.accentColor;
+                      onUpdateObjects([{ id: obj.id, style: nextStyle }]);
+                    }}
                   />
                 )}
 

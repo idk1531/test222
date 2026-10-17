@@ -48,7 +48,7 @@ npx serve out                                  # 本機驗證
 | `src/lib/types.ts` | 資料型別與匯出檔格式（`schemaVersion`，v5 = 5） |
 
 - **自動保存**：任何編輯立即寫入 localStorage，重新整理不遺失；畫布拖曳採「畫面立即更新＋250ms 防抖寫入」，放開手指／滑鼠後立即提交最後座標，低階平板不會因保存而卡頓。
-- **備份／遷移**：頭部 `下載` 圖標匯出 JSON、`上傳` 圖標匯入、`重轉` 還原為範例。
+- **備份／遷移**：頭部 `下載` 圖標匯出 JSON、`上傳` 圖標匯入、`重轉` 還原為範例。畫布節點的 `style.accentColor`（v7.2 節點顏色）會一併匯出／匯入。
   - 手機／平板優先使用系統**分享面板**，請選「儲存到檔案」。
   - 桌機使用原生 JSON 下載。
   - Safari／WebView 無法直接下載時會開啟 JSON 備份頁面，使用瀏覽器的分享／另存。
@@ -148,6 +148,19 @@ WHY 只有結論 · 推理跳步 · 循環解釋 · **偷渡前提**（與假設
 
 ---
 
+## 編輯體驗（v7.2）
+
+- **紙上編輯 ≡ 預覽**：同一棵 `V6Page*` / `V6ContinuousPaper` 元件樹，只差外層 `CardEditContext.Provider` 的 `editable` 旗標；不再有另一套「編輯版面」。點擊紙上的任一格即可就地編輯，LaTeX 以 `MathText`（KaTeX）顯示、編輯時回到原始碼 textarea，不對 KaTeX DOM 做 contentEditable。
+- **鍵盤**：`Esc` 取消此格；`Ctrl/⌘+Enter` 提交並跳下一格；輸入時 `stopPropagation`，不會誤觸全域快捷鍵。
+- **清單**：構造步驟、思考點、直覺陷阱、claims、assumptions、子目標、readings、readingQuestions、bridges、perspectives、HOW 的 CHECK / CAN / 分支，皆可新增、刪除、上下移動；分支支援巢狀子分支與區域 CHECK。
+- **標記即控件**：APPLY 的 `[已編譯]/[未編譯]`、`[已推出]`、僅理解用、cheapest / invisible、`epistemicMark`、信心 1–5、形狀 A–E 都是可操作的控制項，列印時自動隱藏（`print:hidden`）。
+- **還原未儲存變更**：進入編輯時深拷貝整張卡片為快照，工具列可一鍵還原（含分頁與頁碼），不影響已儲存的資料。
+- **進階表單**：舊有的分頁表單完整保留，於編輯模式切換「紙上編輯 / 進階表單」即可，功能沒有被移除。
+- **節點顏色**：畫布上的卡片節點可開啟「節點顏色」Palette，改寫 `style.accentColor`（hex），即時套用到頂部色帶與形狀徽章；可選形狀預設色或自訂色，亦可還原為形狀預設。顏色跟著 JSON 匯出／匯入走，舊資料（無 `accentColor`）行為完全不變。
+- **工具列配色**：頂部工具列、分頁條與強調色可自訂（`src/lib/appTheme.ts`，localStorage `scinotes-app-theme`），內建四組預設、12 個顏色欄位（原生 `<input type="color">`），可一鍵還原預設；手機版側欄同樣能開啟配色面板。
+
+---
+
 ## 快捷鍵
 
 `⌘/Ctrl+K` 全域搜尋 · `T` 文字 · `C` 卡片 · `L` 線 · `A` 箭頭 · `G` 群組 · `Space` 平移
@@ -171,6 +184,8 @@ src/
 │   ├── BlockageGuideModal.tsx     卡關／堵塞感引導
 │   ├── CardDetailModal.tsx        卡片詳細（預覽／編輯、一頁式／分頁、每卡字體）
 │   ├── CardIndexView.tsx          卡片索引
+│   ├── AppThemeCustomizer.tsx     工具列配色面板（v7.2）
+│   ├── CardPaperEditor.tsx        紙上編輯原子元件 + CardEditContext（v7.2）
 │   ├── CardPaperSections.tsx      紙張區塊渲染 + 四點自我檢查面板
 │   ├── ExpansionTestModal.tsx     展開測試（追問測試）
 │   ├── FieldCustomizer.tsx        自訂欄位
@@ -190,6 +205,7 @@ src/
 │   ├── SoloAssessmentPanel.tsx    Bloom × SOLO 診斷
 │   └── TemplateSelectorModal.tsx  模板選擇
 └── lib/
+    ├── appTheme.ts                工具列配色主題 + localStorage（v7.2）
     ├── fonts.ts                   字體清單
     ├── inspect.ts                 審查引擎 ＋ 四點自我檢查
     ├── seedData.ts                預設種子資料

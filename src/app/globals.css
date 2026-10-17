@@ -163,3 +163,28 @@
     #ffffff 20px
   );
 }
+
+/* ===== v7.2：紙上編輯列印（只印紙張，不印工具列與輸入控件） ===== */
+@media print {
+  body { background: #ffffff !important; }
+  .modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    backdrop-filter: none !important;
+  }
+  .modal-overlay > .modal-frame {
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  .paper-scroll {
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+  .paper-scroll > div { max-width: none !important; }
+}
