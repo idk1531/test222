@@ -152,6 +152,41 @@ export interface AuditIssue {
   targetSlot: string;
 }
 
+/**
+ * v7.1：各卡「最後才要構造出的最終公式」簽章。
+ *
+ * 手冊核心筆記原則：劇透管的是「最終答案本身」不能提前；
+ * 先給形式管的是「半路要用的工具／背景定義」。
+ * 因此【背景】第二段可以寫「半路要用的形式」（例：L[x]=2x(t-0.5)、Q=[NH3]^2/(...)），
+ * 但不能寫「本卡最後才要構造出來的最終公式」（例：σ²=…、1-T_C/T_H、iℏ∂_tΨ=ĤΨ）。
+ * 命中即代表背景提前把答案端出來，應改為在【構造思路】自然引出。
+ */
+const FINAL_FORM_SPOILERS: Array<{ re: RegExp; label: string }> = [
+  { re: /\\sigma\s*\^\s*2\s*=/, label: "方差定義式 $\\sigma^2 = \\frac{1}{n}\\sum(x_i-\\bar{x})^2$" },
+  { re: /1\s*-\s*T_\{?(C|cold)\}?\s*[\/\\]\s*T_\{?(H|hot)\}?/i, label: "卡諾效率理論上界 $1 - T_C/T_H$" },
+  { re: /1\s*-\s*\\frac\{[^}]*T_\{?(C|cold)\}?/i, label: "卡諾效率理論上界 $1 - \\frac{T_C}{T_H}$" },
+  { re: /i\\hbar\s*\\partial_t\s*\\Psi\s*=/, label: "薛丁格方程 $i\\hbar\\partial_t\\Psi = \\hat{H}\\Psi$" },
+  { re: /\\bar\{x\}\s*=\s*\\frac\{\s*1\s*\}\{\s*n\s*\}\s*\\sum/, label: "算術平均數定義式 $\\bar{x} = \\frac{1}{n}\\sum x_i$" },
+  { re: /\\hat\{?\s*f\s*\}?\s*\(\s*\\omega\s*\)\s*=\s*\\int/, label: "傅立葉變換定義式 $\\hat{f}(\\omega) = \\int f(t)e^{-i\\omega t}dt$" },
+];
+
+/** 從候選形式（candidateForm）抓「本卡最後才構造出來的量」的左側符號（例：\sigma^2、\bar{x}） */
+function extractFinalFormLhs(candidateForm: string): string {
+  if (!candidateForm) return "";
+  const m = candidateForm.match(/\$([^$]{1,240})\$/);
+  if (!m) return "";
+  const inner = m[1];
+  const eq = inner.indexOf("=");
+  if (eq < 0) return "";
+  const lhs = inner.slice(0, eq).trim();
+  if (lhs.length < 2 || lhs.length > 40) return "";
+  return lhs;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function fullCardAudit(card: CardData | null | undefined, relations: any[] = []) {
   const issues: AuditIssue[] = [];
 
@@ -869,6 +904,37 @@ export function fullCardAudit(card: CardData | null | undefined, relations: any[
       description: "v4 把【背景】從構造思路拆成獨立主幹：先答「為什麼需要、在哪個情境下被逼出」，再讓構造思路答「怎麼想到候選工具」。沒有背景，構造思路的動機就缺了一個精確表述的問題當起點。",
       targetSlot: "BACKGROUND",
     });
+  }
+
+  // ===== v7.1：背景第二段禁劇透最終算法（先給形式 ≠ 提前給答案） =====
+  // 手冊核心筆記原則：劇透管的是「最終答案本身」不能提前；
+  // 先給形式管的是「半路要用的工具／背景定義」。
+  // 因此【背景】第二段可以寫「半路要用的形式」（例：L[x]=2x(t-0.5)、Q=[NH3]^2/(...)），
+  // 但不能寫「本卡最後才要構造出來的最終公式」（例：σ²=…、1-T_C/T_H、iℏ∂_tΨ=ĤΨ）。
+  {
+    const bgObj: any = (card as any)?.backgroundData || {};
+    const preciseObject: string = bgObj.preciseObject || "";
+    if (preciseObject.trim()) {
+      const hits: string[] = [];
+      for (const p of FINAL_FORM_SPOILERS) {
+        if (p.re.test(preciseObject)) hits.push(p.label);
+      }
+      // 泛用：本卡候選段才構造出來的最終量，其定義式不該出現在背景第二段
+      const finalLhs = extractFinalFormLhs((card as any)?.candidate?.candidateForm || "");
+      if (finalLhs && new RegExp(`${escapeRegExp(finalLhs)}\\s*=`).test(preciseObject)) {
+        hits.push(`本卡候選段才構造出的最終量 ${finalLhs}`);
+      }
+      if (hits.length > 0) {
+        issues.push({
+          severity: "warning",
+          category: "背景三段式",
+          title: `【背景】第二段疑似提前劇透最終公式：${hits.join("、")}`,
+          description:
+            "【背景】第二段管的是「先給半路要用的形式」：可以寫工具（例：L[x]=2x(t-0.5)、Q=[NH3]^2/(...)）、可以寫背景定義，但「本卡最後才要構造出來的最終公式」不能提前端出來——那等於把答案先講完，構造思路就沒有東西可自然引出了。請把該公式移到【構造思路】，由候選比較自然帶出；背景只留下「為什麼需要這個量」的精確需求。",
+          targetSlot: "BACKGROUND",
+        });
+      }
+    }
   }
 
   // ===== v4：計畫缺失檢查（構造思路要有收尾） =====

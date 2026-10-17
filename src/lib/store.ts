@@ -13,7 +13,7 @@ import {
 import { normalizeLogType } from "./inspect";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
-const STORAGE_KEY = "scinotes-workspace-v7";
+const STORAGE_KEY = "scinotes-workspace-v7.1";
 
 function clone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
