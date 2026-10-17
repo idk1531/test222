@@ -21,6 +21,8 @@ import { BackgroundCustomizer } from "@/components/BackgroundCustomizer";
 import { FieldCustomizer, CustomField } from "@/components/FieldCustomizer";
 import { FontSelector } from "@/components/FontSelector";
 import { ManualV7Modal } from "@/components/ManualV7Modal";
+import { AppThemeCustomizer } from "@/components/AppThemeCustomizer";
+import { useAppTheme } from "@/lib/appTheme";
 import {
   Sparkles,
   Search,
@@ -84,6 +86,8 @@ export default function WorkbenchPage() {
   const [showCopyBackupAction, setShowCopyBackupAction] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [showTutorial, setShowTutorial] = useState(false);
+
   // 避免伺服器預渲染與瀏覽器本機快取的水合差異：
   // 等待客戶端掛載後才讀取本機快取狀態
   const [mounted, setMounted] = useState(false);
@@ -118,9 +122,12 @@ export default function WorkbenchPage() {
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showBackgroundCustomizer, setShowBackgroundCustomizer] = useState(false);
   const [showFieldCustomizer, setShowFieldCustomizer] = useState(false);
+  const [showAppThemeCustomizer, setShowAppThemeCustomizer] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showManualV7, setShowManualV7] = useState(false);
-  const [showTutorial, setShowTutorial] = useState(false);
+
+  // v7.2 頂部工具列與介面配色自訂
+  const { theme: appTheme, setTheme: setAppTheme, resetTheme: resetAppTheme } = useAppTheme();
 
   // 匯出資料為 JSON 檔案：Share → Download → 新頁另存 三層備援
   const handleExport = async () => {
@@ -404,33 +411,47 @@ export default function WorkbenchPage() {
   return (
     <div className="app-shell flex flex-col overflow-hidden bg-slate-50 text-slate-900">
       {/* Header — responsive */}
-      <header className="h-12 sm:h-11 bg-white border-b border-slate-200 px-3 sm:px-4 flex items-center justify-between z-40 flex-shrink-0 safe-top">
+      <header
+        className="h-12 sm:h-11 border-b px-3 sm:px-4 flex items-center justify-between z-40 flex-shrink-0 safe-top transition-colors"
+        style={{
+          backgroundColor: appTheme.headerBg,
+          borderColor: appTheme.headerBorder,
+          color: appTheme.headerText,
+        }}
+      >
         {/* Left: Logo + Nav（桌機顯示完整 tab，手機只顯示 logo + 漢堡） */}
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <button
             onClick={() => setShowMobileMenu(true)}
-            className="md:hidden touch-target flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+            className="md:hidden touch-target flex items-center justify-center rounded-lg"
+            style={{ color: appTheme.headerMuted }}
             title="選單"
           >
             <Menu className="w-5 h-5" />
           </button>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <Atom className="w-4 h-4 text-blue-600" />
-            <span className="text-sm font-bold text-slate-800 tracking-tight">SciNotes</span>
+            <Atom className="w-4 h-4" style={{ color: appTheme.accent }} />
+            <span className="text-sm font-bold tracking-tight" style={{ color: appTheme.headerText }}>
+              SciNotes
+            </span>
           </div>
 
           {/* 桌機 / 平板：橫向 tab（可橫向捲動避免溢出） */}
-          <div className="hidden md:flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg overflow-x-auto no-scrollbar max-w-[52vw] lg:max-w-none">
+          <div
+            className="hidden md:flex items-center gap-0.5 p-0.5 rounded-lg overflow-x-auto no-scrollbar max-w-[52vw] lg:max-w-none"
+            style={{ backgroundColor: appTheme.tabBarBg }}
+          >
             {views.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
                 onClick={() => setActiveView(key)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-all whitespace-nowrap ${
-                  activeView === key
-                    ? "bg-white text-slate-900 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-all whitespace-nowrap"
+                style={{
+                  backgroundColor: activeView === key ? appTheme.tabActiveBg : "transparent",
+                  color: activeView === key ? appTheme.tabActiveText : appTheme.tabInactiveText,
+                  boxShadow: activeView === key ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+                }}
               >
                 <Icon className="w-3 h-3" />
                 <span>{label}</span>
@@ -440,7 +461,7 @@ export default function WorkbenchPage() {
         </div>
 
         {/* 手機：中央顯示當前視圖名稱 */}
-        <span className="md:hidden text-sm font-semibold text-slate-700">
+        <span className="md:hidden text-sm font-semibold" style={{ color: appTheme.headerText }}>
           {views.find((v) => v.key === activeView)?.label}
         </span>
 
@@ -448,38 +469,55 @@ export default function WorkbenchPage() {
         <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
           <button
             onClick={() => setShowManualV7(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-[11px] font-bold transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold transition-colors"
+            style={{
+              backgroundColor: `${appTheme.accent}14`,
+              color: appTheme.accent,
+              borderColor: `${appTheme.accent}40`,
+            }}
             title="理科筆記 · 使用手冊（樹狀圖版 · v7修正）——含讀法、問題×讀法表、橋、造、[衍生]邊與附錄B/C/D"
           >
-            <BookOpen className="w-3.5 h-3.5 text-sky-600" />
+            <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden lg:inline">v7 手冊 (讀法/附錄B·C·D)</span>
             <span className="lg:hidden">v7手冊</span>
           </button>
           <button
             onClick={() => setShowSearchModal(true)}
-            className="touch-target flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="搜尋 (⌘K)"
           >
             <Search className="w-4 h-4" />
           </button>
           <button
             onClick={() => setShowTutorial(true)}
-            className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="使用教學（重播）"
           >
             <GraduationCap className="w-4 h-4" />
           </button>
-          {/* 這些次要設定手機收進漢堡選單 */}
+          {/* 配色自訂 */}
           <button
-            onClick={() => setShowBackgroundCustomizer(true)}
-            className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            title="背景設定"
+            onClick={() => setShowAppThemeCustomizer(true)}
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="頂部工具列配色設定"
           >
             <Palette className="w-4 h-4" />
           </button>
           <button
+            onClick={() => setShowBackgroundCustomizer(true)}
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="畫布背景設定"
+          >
+            <Grid className="w-4 h-4" />
+          </button>
+          <button
             onClick={() => setShowFieldCustomizer(true)}
-            className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="欄位設定"
           >
             <Settings className="w-4 h-4" />
@@ -489,33 +527,37 @@ export default function WorkbenchPage() {
             <FontSelector currentFont={selectedFont} onSelect={setSelectedFont} />
           </div>
 
-          <div className="hidden sm:block w-px h-5 bg-slate-200 mx-1" />
+          <div className="hidden sm:block w-px h-5 mx-1" style={{ backgroundColor: appTheme.headerBorder }} />
 
           {/* 資料管理：匯出 / 匯入 / 重置（純前端靜態檔案） */}
           <button
             onClick={handleExport}
-            className="touch-target flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="匯出工作區為 JSON 檔案"
           >
             <Download className="w-4 h-4" />
           </button>
           <button
             onClick={handleImportClick}
-            className="touch-target flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="從 JSON 檔案匯入工作區"
           >
             <Upload className="w-4 h-4" />
           </button>
           <button
             onClick={handleCopyExport}
-            className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="下載／分享無效時：複製 JSON 備份到剪貼簿"
           >
             <ClipboardCopy className="w-4 h-4" />
           </button>
           <button
             onClick={handleReset}
-            className="hidden sm:flex touch-target items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
             title="重置為初始範例資料"
           >
             <RotateCcw className="w-4 h-4" />
@@ -523,7 +565,11 @@ export default function WorkbenchPage() {
 
           <button
             onClick={() => setShowTemplateModal(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors touch-target"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors touch-target shadow-2xs"
+            style={{
+              backgroundColor: appTheme.accent,
+              color: appTheme.accentText,
+            }}
           >
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">新增</span>
@@ -612,11 +658,18 @@ export default function WorkbenchPage() {
                 <span>使用教學</span>
               </button>
               <button
+                onClick={() => { setShowAppThemeCustomizer(true); setShowMobileMenu(false); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
+              >
+                <Palette className="w-4 h-4 text-purple-600" />
+                <span>工具列配色設定</span>
+              </button>
+              <button
                 onClick={() => { setShowBackgroundCustomizer(true); setShowMobileMenu(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
               >
-                <Palette className="w-4 h-4" />
-                <span>背景設定</span>
+                <Grid className="w-4 h-4" />
+                <span>畫布背景設定</span>
               </button>
               <button
                 onClick={() => { setShowFieldCustomizer(true); setShowMobileMenu(false); }}
@@ -920,6 +973,16 @@ export default function WorkbenchPage() {
           window.localStorage.setItem("scinotes-tutorial-seen", "1");
         }}
       />
+
+      {/* App Theme Customizer Modal */}
+      {showAppThemeCustomizer && (
+        <AppThemeCustomizer
+          currentTheme={appTheme}
+          onUpdateTheme={setAppTheme}
+          onResetTheme={resetAppTheme}
+          onClose={() => setShowAppThemeCustomizer(false)}
+        />
+      )}
 
       {/* Background Customizer Modal */}
       {showBackgroundCustomizer && (

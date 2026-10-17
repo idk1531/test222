@@ -24,10 +24,11 @@ import {
   getGridPaperStyle,
   FourPointCheckPanel,
 } from "./CardPaperSections";
+import { CardEditContext } from "./CardPaperEditor";
 import {
   X, Sparkles, Save, Trash2, Lock, Eye, Edit3, FileText, Files, Type,
   ChevronLeft, ChevronRight, Sigma, AlertCircle, CheckCircle, AlertTriangle, ShieldCheck, KeyRound,
-  Palette, Printer,
+  Palette, Printer, Sliders, RotateCcw,
 } from "lucide-react";
 
 interface CardDetailModalProps {
@@ -37,7 +38,7 @@ interface CardDetailModalProps {
   onRunAudit: (card: CardData) => void;
   onExpansionTest: (card: CardData) => void;
   fontFamily?: string;
-  initialMode?: "preview" | "edit";
+  initialMode?: "preview" | "edit" | "paper-edit" | "paper-preview" | "form";
 }
 
 const UI = "'Varela Round', sans-serif";
@@ -49,16 +50,22 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   onRunAudit,
   onExpansionTest,
   fontFamily = "quicksand",
-  initialMode = "preview",
+  initialMode = "paper-edit",
 }) => {
   const [formData, setFormData] = useState<CardData>(JSON.parse(JSON.stringify(card)));
-  const [mode, setMode] = useState<"preview" | "edit">(initialMode);
+  const [mode, setMode] = useState<"paper-edit" | "paper-preview" | "form">(() => {
+    if (initialMode === "form") return "form";
+    if (initialMode === "preview" || initialMode === "paper-preview") return "paper-preview";
+    return "paper-edit";
+  });
   const [pageMode, setPageMode] = useState<"single" | "paged">(card.pageMode || "single");
   const [activePage, setActivePage] = useState(0);
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "basic" | "what" | "why" | "how" | "origin" | "epistemology" | "diagnostics"
   >("basic");
+
+  const isDirty = JSON.stringify(formData) !== JSON.stringify(card);
 
   // v6 主題配色與自由自訂（紙張背景色、字體顏色、格線樣式等）
   const [cardTheme, setCardTheme] = useState<CardPaperTheme>(() => {
@@ -346,27 +353,47 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 flex-shrink-0" style={{ fontFamily: UI }}>
           {formData.granularity}
         </span>
+        {isDirty && (
+          <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold" style={{ fontFamily: UI }}>
+            已修改
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 order-2 flex-wrap justify-end">
-        {/* 預覽 / 編輯 */}
-        <div className="flex items-center bg-slate-100 rounded-lg p-0.5" style={{ fontFamily: UI }}>
+        {/* 紙上編輯 / 紙上預覽 / 進階表單 三態切換 */}
+        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200" style={{ fontFamily: UI }}>
           <button
-            onClick={() => setMode("preview")}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-medium transition-all ${mode === "preview" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+            onClick={() => setMode("paper-edit")}
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+              mode === "paper-edit" ? "bg-white text-blue-700 shadow-xs ring-1 ring-blue-500/20" : "text-slate-600 hover:text-slate-900"
+            }`}
+            title="紙上編輯：點擊文字或公式直接在方格紙上修改 (WYSIWYG)"
           >
-            <Eye className="w-3.5 h-3.5" /> <span className="hidden sm:inline">預覽</span>
+            <Edit3 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">紙上編輯</span>
           </button>
           <button
-            onClick={() => setMode("edit")}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-medium transition-all ${mode === "edit" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+            onClick={() => setMode("paper-preview")}
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+              mode === "paper-preview" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+            }`}
+            title="紙上預覽：純閱讀視圖"
           >
-            <Edit3 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">編輯</span>
+            <Eye className="w-3.5 h-3.5" /> <span className="hidden sm:inline">紙上預覽</span>
+          </button>
+          <button
+            onClick={() => setMode("form")}
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+              mode === "form" ? "bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-500/20" : "text-slate-600 hover:text-slate-900"
+            }`}
+            title="進階表單：分頁欄位工程表"
+          >
+            <Sliders className="w-3.5 h-3.5" /> <span className="hidden sm:inline">進階表單</span>
           </button>
         </div>
 
-        {/* 一頁式 / 分頁 A4（僅預覽模式） */}
-        {mode === "preview" && (
+        {/* 一頁式 / 分頁 A4（紙上模式可用） */}
+        {mode !== "form" && (
           <div className="flex items-center bg-slate-100 rounded-lg p-0.5" style={{ fontFamily: UI }}>
             <button
               onClick={() => setPageMode("single")}
@@ -386,7 +413,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         )}
 
         {/* 主題與配色自訂按鈕 */}
-        {mode === "preview" && (
+        {mode !== "form" && (
           <div className="relative">
             <button
               onClick={() => setShowThemeMenu(!showThemeMenu)}
@@ -409,8 +436,28 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
           </div>
         )}
 
+        {/* 復原初始按鈕 */}
+        <button
+          onClick={() => {
+            if (window.confirm("確定要復原至本次開啟時的初始狀態嗎？未儲存的修改將會遺失。")) {
+              setFormData(JSON.parse(JSON.stringify(card)));
+            }
+          }}
+          disabled={!isDirty}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs transition-colors ${
+            isDirty
+              ? "text-amber-700 hover:text-amber-900 hover:bg-amber-50"
+              : "text-slate-300 cursor-not-allowed"
+          }`}
+          title={isDirty ? "復原至初始狀態" : "尚未有未儲存的修改"}
+          style={{ fontFamily: UI }}
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">復原初始</span>
+        </button>
+
         {/* 一鍵列印 / 匯出 PDF */}
-        {mode === "preview" && (
+        {mode !== "form" && (
           <button
             onClick={() => window.print()}
             className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-xs transition-colors"
@@ -487,134 +534,155 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     </div>
   );
 
-  // ============ 預覽模式 ============
-  if (mode === "preview") {
+  // ============ 紙上模式（WYSIWYG 編輯或預覽，單一元件樹） ============
+  if (mode === "paper-edit" || mode === "paper-preview") {
     const gridStyle = getGridPaperStyle(cardTheme);
     const activeSectionKey = PAGES[activePage]?.key || "header";
+    const isEditable = mode === "paper-edit";
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4">
-        <div className="modal-frame bg-slate-100 sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-5xl sm:max-h-[96vh] flex flex-col overflow-hidden safe-top safe-bottom">
-          {Toolbar}
+      <CardEditContext.Provider value={{ editable: isEditable, patch, card: formData }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4">
+          <div className="modal-frame bg-slate-100 sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-5xl sm:max-h-[96vh] flex flex-col overflow-hidden safe-top safe-bottom">
+            {Toolbar}
 
-          {/* 分頁導覽列（手機可橫向捲動） */}
-          {pageMode === "paged" && (
-            <div className="px-2 sm:px-4 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2 overflow-x-auto no-scrollbar" style={{ fontFamily: UI }}>
-              <button
-                onClick={() => setActivePage(Math.max(0, activePage - 1))}
-                disabled={activePage === 0}
-                className="p-1 rounded hover:bg-slate-200 text-slate-500 disabled:opacity-30 flex-shrink-0"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="flex items-center gap-1.5 mx-auto">
-                {PAGES.map((p, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setActivePage(i)}
-                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap ${
-                      activePage === i
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    <span className="hidden sm:inline">P{i + 1} · {p.title.split(" · ")[0]}</span>
-                    <span className="sm:hidden">P{i + 1}</span>
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => setActivePage(Math.min(PAGES.length - 1, activePage + 1))}
-                disabled={activePage === PAGES.length - 1}
-                className="p-1 rounded hover:bg-slate-200 text-slate-500 disabled:opacity-30 flex-shrink-0"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {/* 紙張預覽區 */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-6 bg-slate-200/60">
-            {pageMode === "single" ? (
-              // —— 一頁式：連續長紙，附帶左側導軌里程尺 ——
-              <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
-                <div className="sticky top-4 hidden sm:block">
-                  <MilestoneRuler
-                    activeKey="header"
-                    theme={cardTheme}
-                    onSelectSection={(sec) => {
-                      const el = document.getElementById(`section-${sec}`);
-                      if (el) el.scrollIntoView({ behavior: "smooth" });
-                    }}
-                  />
+            {/* 編輯態貼心提示小橫條 */}
+            {isEditable && (
+              <div className="px-3 py-1 bg-blue-50 border-b border-blue-200 text-blue-900 text-[11px] flex items-center justify-between font-medium" style={{ fontFamily: UI }}>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                  <span>
+                    <b>紙上 WYSIWYG 編輯模式：</b>直接在方格紙上點擊文字、公式、評分、清單以進行編輯／新增／排序／刪除。
+                  </span>
                 </div>
-                <div
-                  className="flex-1 w-full max-w-[794px] shadow-xl rounded-sm px-4 py-6 sm:px-12 sm:py-10 transition-all border"
-                  style={{
-                    ...gridStyle,
-                    fontFamily: ff,
-                    borderColor: cardTheme.borderColor,
-                  }}
+                <button
+                  onClick={() => setMode("paper-preview")}
+                  className="text-[10px] text-blue-700 hover:underline hover:text-blue-900"
                 >
-                  <V6ContinuousPaper
-                    card={formData}
-                    font={ff}
-                    relations={wsRelations}
-                    cardTitles={wsTitles}
-                    processLogs={wsLogs}
-                    theme={cardTheme}
-                    onNavigateSection={(p) => {
-                      setPageMode("paged");
-                      setActivePage(p);
-                    }}
-                  />
-                  <div className="text-center text-[10px] pt-4 mt-8 border-t" style={{ borderColor: cardTheme.borderColor, color: cardTheme.mutedTextColor, fontFamily: UI }}>
-                    一頁式 · 全部內容連續方格排版
-                  </div>
-                </div>
-              </div>
-            ) : (
-              // —— 分頁：B5/A4 紙張（7 頁完整指南），附帶左側貫穿里程尺 ——
-              <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
-                <div className="sticky top-4 hidden sm:block">
-                  <MilestoneRuler
-                    activeKey={activeSectionKey}
-                    theme={cardTheme}
-                    onSelectSection={(sec) => {
-                      const idxMap: Record<string, number> = {
-                        background: 1,
-                        construction: 2,
-                        why: 3,
-                        what: 4,
-                        apply: 5,
-                      };
-                      if (idxMap[sec] !== undefined) setActivePage(idxMap[sec]);
-                    }}
-                  />
-                </div>
-
-                <div
-                  id={`v6-page-${activePage}`}
-                  className="w-full max-w-[794px] min-h-[820px] sm:min-h-[960px] shadow-xl rounded-sm px-4 py-5 sm:px-12 sm:py-8 flex flex-col justify-between transition-all border"
-                  style={{
-                    ...gridStyle,
-                    fontFamily: ff,
-                    borderColor: cardTheme.borderColor,
-                  }}
-                >
-                  <div className="flex-1">
-                    {PAGES[activePage].render()}
-                  </div>
-                </div>
+                  切換至純預覽 →
+                </button>
               </div>
             )}
+
+            {/* 分頁導覽列（手機可橫向捲動） */}
+            {pageMode === "paged" && (
+              <div className="px-2 sm:px-4 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2 overflow-x-auto no-scrollbar" style={{ fontFamily: UI }}>
+                <button
+                  onClick={() => setActivePage(Math.max(0, activePage - 1))}
+                  disabled={activePage === 0}
+                  className="p-1 rounded hover:bg-slate-200 text-slate-500 disabled:opacity-30 flex-shrink-0"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="flex items-center gap-1.5 mx-auto">
+                  {PAGES.map((p, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setActivePage(i)}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap ${
+                        activePage === i
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      <span className="hidden sm:inline">P{i + 1} · {p.title.split(" · ")[0]}</span>
+                      <span className="sm:hidden">P{i + 1}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setActivePage(Math.min(PAGES.length - 1, activePage + 1))}
+                  disabled={activePage === PAGES.length - 1}
+                  className="p-1 rounded hover:bg-slate-200 text-slate-500 disabled:opacity-30 flex-shrink-0"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* 紙張渲染區 */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-6 bg-slate-200/60">
+              {pageMode === "single" ? (
+                // —— 一頁式：連續長紙，附帶左側導軌里程尺 ——
+                <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
+                  <div className="sticky top-4 hidden sm:block">
+                    <MilestoneRuler
+                      activeKey="header"
+                      theme={cardTheme}
+                      onSelectSection={(sec) => {
+                        const el = document.getElementById(`section-${sec}`);
+                        if (el) el.scrollIntoView({ behavior: "smooth" });
+                      }}
+                    />
+                  </div>
+                  <div
+                    className="flex-1 w-full max-w-[794px] shadow-xl rounded-sm px-4 py-6 sm:px-12 sm:py-10 transition-all border"
+                    style={{
+                      ...gridStyle,
+                      fontFamily: ff,
+                      borderColor: cardTheme.borderColor,
+                    }}
+                  >
+                    <V6ContinuousPaper
+                      card={formData}
+                      font={ff}
+                      relations={wsRelations}
+                      cardTitles={wsTitles}
+                      processLogs={wsLogs}
+                      theme={cardTheme}
+                      onNavigateSection={(p) => {
+                        setPageMode("paged");
+                        setActivePage(p);
+                      }}
+                    />
+                    <div className="text-center text-[10px] pt-4 mt-8 border-t" style={{ borderColor: cardTheme.borderColor, color: cardTheme.mutedTextColor, fontFamily: UI }}>
+                      一頁式 · 全部內容連續方格排版
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                // —— 分頁：B5/A4 紙張（7 頁完整指南），附帶左側貫穿里程尺 ——
+                <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
+                  <div className="sticky top-4 hidden sm:block">
+                    <MilestoneRuler
+                      activeKey={activeSectionKey}
+                      theme={cardTheme}
+                      onSelectSection={(sec) => {
+                        const idxMap: Record<string, number> = {
+                          background: 1,
+                          construction: 2,
+                          why: 3,
+                          what: 4,
+                          apply: 5,
+                        };
+                        if (idxMap[sec] !== undefined) setActivePage(idxMap[sec]);
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    id={`v6-page-${activePage}`}
+                    className="w-full max-w-[794px] min-h-[820px] sm:min-h-[960px] shadow-xl rounded-sm px-4 py-5 sm:px-12 sm:py-8 flex flex-col justify-between transition-all border"
+                    style={{
+                      ...gridStyle,
+                      fontFamily: ff,
+                      borderColor: cardTheme.borderColor,
+                    }}
+                  >
+                    <div className="flex-1">
+                      {PAGES[activePage].render()}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      </CardEditContext.Provider>
     );
   }
 
-  // ============ 編輯模式 ============
+  // ============ 進階表單模式 ============
   const TABS = [
     { key: "basic", label: "基本 · 背景 · 判型" },
     { key: "what", label: "WHAT" },

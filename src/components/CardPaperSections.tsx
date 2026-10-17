@@ -27,6 +27,7 @@ import {
   Printer,
   Palette,
   Sliders,
+  Trash2,
 } from "lucide-react";
 import {
   epistemicLabel,
@@ -38,7 +39,27 @@ import {
 } from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
 import type { CheckResult, FourPointReport } from "@/lib/inspect";
-import { SOLO_LEVELS } from "./SoloAssessmentPanel";
+import { SOLO_LEVELS, SoloAssessmentPanel } from "./SoloAssessmentPanel";
+import { ShapeClassifier } from "./ShapeClassifier";
+import {
+  CardEditContext,
+  useCardEdit,
+  EditableText,
+  EditableRating,
+  EditableToggle,
+  EditableSelect,
+  EditableListItemControls,
+  EditableListAddButton,
+  listMove,
+  listRemove,
+  listInsert,
+  updateBranchDeep,
+  removeBranchDeep,
+  addBranchDeep,
+  HowBranchItem,
+} from "./CardPaperEditor";
+
+export { CardEditContext, useCardEdit } from "./CardPaperEditor";
 
 const UI_FONT = "'Varela Round', sans-serif";
 
@@ -308,6 +329,7 @@ export function V6Page1HeaderOverview({
   theme?: CardPaperTheme;
   onNavigatePage?: (pageIdx: number) => void;
 }) {
+  const ed = useCardEdit();
   const shapeDef = SHAPE_DEFS[card.reasoningShape] || SHAPE_DEFS.A;
   const isComposite = card.reasoningShape === "COMPOSITE";
 
@@ -343,17 +365,27 @@ export function V6Page1HeaderOverview({
             <span className="text-[11px] font-bold" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
               名稱：
             </span>
-            <span className="text-xl font-bold ml-1" style={{ color: theme.headingColor, fontFamily: font }}>
-              <MathText text={card.title} />
-            </span>
+            <EditableText
+              value={card.title}
+              onChange={(v) => ed?.patch({ title: v })}
+              className="text-xl font-bold ml-1"
+              font={font}
+              style={{ color: theme.headingColor }}
+              placeholder="（輸入知識點名稱）"
+            />
           </div>
           <div>
             <span className="text-[11px] font-bold" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
               領域：
             </span>
-            <span className="text-base font-semibold ml-1" style={{ color: theme.textColor, fontFamily: font }}>
-              {card.domain || "未指定領域"}
-            </span>
+            <EditableText
+              value={card.domain || ""}
+              onChange={(v) => ed?.patch({ domain: v })}
+              placeholder="未指定領域"
+              className="text-base font-semibold ml-1"
+              font={font}
+              style={{ color: theme.textColor }}
+            />
           </div>
         </div>
 
@@ -361,18 +393,34 @@ export function V6Page1HeaderOverview({
           <span className="text-[11px] font-bold" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             顆粒度：
           </span>
-          <label className="flex items-center gap-1 text-xs cursor-default" style={{ fontFamily: UI_FONT }}>
-            <span className="w-3.5 h-3.5 border rounded-xs inline-flex items-center justify-center text-[10px] bg-white font-mono" style={{ borderColor: theme.borderColor }}>
-              {card.granularity?.startsWith("L1") || card.granularity?.startsWith("L2") ? "✓" : ""}
-            </span>
-            核心卡 ({card.granularity || "L2"})
-          </label>
-          <label className="flex items-center gap-1 text-xs cursor-default" style={{ fontFamily: UI_FONT }}>
-            <span className="w-3.5 h-3.5 border rounded-xs inline-flex items-center justify-center text-[10px] bg-white font-mono" style={{ borderColor: theme.borderColor }}>
-              {card.granularity?.startsWith("L3") || card.granularity?.startsWith("L4") ? "✓" : ""}
-            </span>
-            簡單標籤
-          </label>
+          {ed?.editable ? (
+            <EditableSelect
+              value={card.granularity || "L2"}
+              options={[
+                { value: "L1", label: "L1 · 核心卡" },
+                { value: "L2", label: "L2 · 核心卡" },
+                { value: "L3", label: "L3 · 簡單標籤" },
+                { value: "L4", label: "L4 · 簡單標籤" },
+              ]}
+              onChange={(v) => ed.patch({ granularity: v })}
+            />
+          ) : (
+            <>
+              <label className="flex items-center gap-1 text-xs cursor-default" style={{ fontFamily: UI_FONT }}>
+                <span className="w-3.5 h-3.5 border rounded-xs inline-flex items-center justify-center text-[10px] bg-white font-mono" style={{ borderColor: theme.borderColor }}>
+                  {card.granularity?.startsWith("L1") || card.granularity?.startsWith("L2") ? "✓" : ""}
+                </span>
+                核心卡 ({card.granularity || "L2"})
+              </label>
+              <label className="flex items-center gap-1 text-xs cursor-default" style={{ fontFamily: UI_FONT }}>
+                <span className="w-3.5 h-3.5 border rounded-xs inline-flex items-center justify-center text-[10px] bg-white font-mono" style={{ borderColor: theme.borderColor }}>
+                  {card.granularity?.startsWith("L3") || card.granularity?.startsWith("L4") ? "✓" : ""}
+                </span>
+                簡單標籤
+              </label>
+            </>
+          )}
+
           <span
             className="text-[10px] px-2 py-0.5 rounded text-white font-medium ml-auto"
             style={{ backgroundColor: theme.accentColor }}
@@ -382,6 +430,22 @@ export function V6Page1HeaderOverview({
               : `${card.reasoningShape} ${shapeDef.name}`}
           </span>
         </div>
+
+        {/* 編輯態下的形狀選擇器 */}
+        {ed?.editable && (
+          <div className="pt-2 border-t border-slate-200">
+            <ShapeClassifier
+              reasoningShape={card.reasoningShape}
+              compositeShapes={card.compositeShapes}
+              compositeNote={card.compositeNote}
+              shapeRationale={card.shapeRationale}
+              shapeConfidence={card.shapeConfidence}
+              shapeAccepted={card.shapeAccepted}
+              editable={true}
+              onChange={(p) => ed.patch(p)}
+            />
+          </div>
+        )}
       </div>
 
       {/* 卡片標籤（可複選） & 互斥二選一 */}
@@ -426,6 +490,58 @@ export function V6Page1HeaderOverview({
             [一次性結論]（WHAT可省需註明原因）
           </span>
         </div>
+
+        {/* 省略聲明清單 */}
+        {ed?.editable && (
+          <div className="pt-2 border-t space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-[11px] text-slate-700">省略聲明：</span>
+              <select
+                value=""
+                onChange={(e) => {
+                  const slot = e.target.value;
+                  if (!slot) return;
+                  ed.patch({
+                    omittedSlots: [...(card.omittedSlots || []), { slot, reason: "" }],
+                  });
+                }}
+                className="text-[10px] px-1 py-0.5 rounded border border-slate-300 bg-white"
+              >
+                <option value="">+ 宣告省略某格…</option>
+                {["WHAT", "WHY", "HOW", "ORIGIN"].map((sl) => (
+                  <option key={sl} value={sl}>省略 {sl}</option>
+                ))}
+              </select>
+            </div>
+            {(card.omittedSlots || []).map((o, oi) => (
+              <div key={oi} className="flex items-center gap-1.5 text-xs bg-white/80 p-1 rounded border border-slate-200">
+                <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-amber-100 text-amber-800">
+                  省略 {o.slot}
+                </span>
+                <EditableText
+                  value={o.reason}
+                  onChange={(v) => {
+                    const next = [...(card.omittedSlots || [])];
+                    next[oi] = { ...next[oi], reason: v };
+                    ed.patch({ omittedSlots: next });
+                  }}
+                  placeholder="省略理由…"
+                  className="flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = (card.omittedSlots || []).filter((_, idx) => idx !== oi);
+                    ed.patch({ omittedSlots: next });
+                  }}
+                  className="p-1 text-rose-500 hover:text-rose-700"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 摘要 · WHY / WHAT / APPLY（各一行） */}
@@ -551,7 +667,15 @@ export function V6Page1HeaderOverview({
                 const isActive = lvl === card.bloomLevel || idx === activeBloomIdx;
                 const heightPercent = 20 + idx * 16;
                 return (
-                  <div key={lvl} className="flex-1 flex flex-col items-center justify-end h-full">
+                  <button
+                    key={lvl}
+                    type="button"
+                    disabled={!ed?.editable}
+                    onClick={() => ed?.patch({ bloomLevel: lvl })}
+                    className={`flex-1 flex flex-col items-center justify-end h-full ${
+                      ed?.editable ? "cursor-pointer hover:opacity-80" : "cursor-default"
+                    }`}
+                  >
                     <div
                       className="w-full rounded-t-xs transition-all"
                       style={{
@@ -565,7 +689,7 @@ export function V6Page1HeaderOverview({
                     >
                       {lvl}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -587,6 +711,25 @@ export function V6Page1HeaderOverview({
             </p>
           </div>
         </div>
+
+        {/* 編輯態下的 SOLO 評估面板 */}
+        {ed?.editable && (
+          <div className="pt-2 border-t border-slate-200">
+            <SoloAssessmentPanel
+              cardId={card.id}
+              soloData={card.soloData}
+              soloLevel={card.soloLevel || "多點結構"}
+              bloomLevel={card.bloomLevel || "分析"}
+              editable={true}
+              onChange={(nextLevel, nextData) =>
+                ed.patch({
+                  soloData: nextData,
+                  soloLevel: nextLevel || nextData.declaredLevel,
+                })
+              }
+            />
+          </div>
+        )}
       </div>
 
       {/* 頁數索引 (Table of Contents) */}
@@ -642,6 +785,7 @@ export function V6Page2Background({
   font: string;
   theme?: CardPaperTheme;
 }) {
+  const ed = useCardEdit();
   const bgData = card.backgroundData || {};
   const calib = card.constructionCalibration;
 
@@ -663,40 +807,37 @@ export function V6Page2Background({
           <span className="font-bold" style={{ color: theme.headingColor }}>
             理解問題信心分（動筆前）：
           </span>
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((num) => (
-              <span
-                key={num}
-                className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-bold border ${
-                  (calib?.confidenceBefore || 3) >= num
-                    ? "bg-amber-400 text-amber-950 border-amber-500 shadow-xs"
-                    : "bg-white text-slate-400 border-slate-300"
-                }`}
-              >
-                {num}
-              </span>
-            ))}
-          </div>
+          <EditableRating
+            value={calib?.confidenceBefore ?? 3}
+            onChange={(v) =>
+              ed?.patch({
+                constructionCalibration: {
+                  confidenceBefore: v,
+                  confidenceAfter: calib?.confidenceAfter ?? 4,
+                  blindSpotNote: calib?.blindSpotNote,
+                },
+              })
+            }
+          />
         </div>
 
         <div className="flex items-center gap-2">
           <span className="font-bold" style={{ color: theme.headingColor }}>
             寫完後重打一次：
           </span>
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((num) => (
-              <span
-                key={num}
-                className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-bold border ${
-                  (calib?.confidenceAfter || 4) >= num
-                    ? "bg-emerald-500 text-white border-emerald-600 shadow-xs"
-                    : "bg-white text-slate-400 border-slate-300"
-                }`}
-              >
-                {num}
-              </span>
-            ))}
-          </div>
+          <EditableRating
+            value={calib?.confidenceAfter ?? 4}
+            activeColor="bg-emerald-500 text-white border-emerald-600"
+            onChange={(v) =>
+              ed?.patch({
+                constructionCalibration: {
+                  confidenceBefore: calib?.confidenceBefore ?? 3,
+                  confidenceAfter: v,
+                  blindSpotNote: calib?.blindSpotNote,
+                },
+              })
+            }
+          />
         </div>
       </div>
 
@@ -716,7 +857,19 @@ export function V6Page2Background({
             給 1~2 個引出問題的具體情境。若給 2 個，第二個最好共用第一個的具體對象、只換一個變數對照。須選同一領域的對象，不牽扯出需要額外背景知識的領域。
           </p>
           <div className="text-sm leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
-            <MathText text={bgData.situation || card.backgroundDescription || "（尚未填寫情境）"} />
+            <EditableText
+              multiline
+              rows={4}
+              value={bgData.situation || card.backgroundDescription || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  backgroundData: { ...bgData, situation: v },
+                  backgroundDescription: v,
+                })
+              }
+              placeholder="第一段 · 情境（同領域對象，例如兩個可對照的具體例子）"
+              font={font}
+            />
           </div>
         </div>
 
@@ -734,7 +887,18 @@ export function V6Page2Background({
             寫成精確的數學對象/式子；一般化之後不能脫離情境語言。可精確寫出的形式，先給形式、再給動機。
           </p>
           <div className="text-sm leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
-            <MathText text={bgData.preciseObject || "（尚未填寫精確對象）"} />
+            <EditableText
+              multiline
+              rows={3}
+              value={bgData.preciseObject || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  backgroundData: { ...bgData, preciseObject: v },
+                })
+              }
+              placeholder="第二段 · 精確對象 + 式子符號，一般化後仍貼著情境語言講"
+              font={font}
+            />
           </div>
         </div>
 
@@ -752,7 +916,18 @@ export function V6Page2Background({
             必須精確對應回第一段的具體對象，不能寫成脫離情境的泛問句。
           </p>
           <div className="text-sm leading-relaxed font-medium" style={{ color: theme.textColor, fontFamily: font }}>
-            <MathText text={bgData.preciseQuestion || "（尚未填寫精確問題）"} />
+            <EditableText
+              multiline
+              rows={3}
+              value={bgData.preciseQuestion || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  backgroundData: { ...bgData, preciseQuestion: v },
+                })
+              }
+              placeholder="第三段 · 精確對應的問題（對應第一段的具體對象）"
+              font={font}
+            />
           </div>
         </div>
       </div>
@@ -770,22 +945,41 @@ export function V6Page2Background({
         <p className="text-[10px] mb-2 leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
           歷史線：具體到當時是誰、什麼年代、卡在哪個矛盾，標 [歷史起源]。聯繫：歷史事件跟第一段情境是不是同一困境的一次具體發生——挖不到有意義的聯繫就不寫，不用硬湊。
         </p>
-        <div className="text-xs space-y-1.5 leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
-          {card.originData?.historicalContext && (
-            <p>
-              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[歷史起源] </b>
-              <MathText text={card.originData.historicalContext} />
-            </p>
-          )}
-          {card.originData?.conflict && (
-            <p>
-              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[矛盾焦點] </b>
-              <MathText text={card.originData.conflict} />
-            </p>
-          )}
-          {!card.originData?.historicalContext && !card.originData?.conflict && (
-            <p className="italic" style={{ color: theme.mutedTextColor }}>（尚未填寫歷史起源與矛盾）</p>
-          )}
+        <div className="text-xs space-y-2 leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
+          <div>
+            <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[歷史起源] </b>
+            <EditableText
+              value={card.originData?.historicalContext || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  originData: {
+                    conflict: card.originData?.conflict || "",
+                    historicalContext: v,
+                  },
+                })
+              }
+              placeholder="歷史脈絡（人事時地、當時卡在什麼困境）"
+              font={font}
+            />
+          </div>
+          <div>
+            <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[矛盾焦點] </b>
+            <EditableText
+              multiline
+              rows={3}
+              value={card.originData?.conflict || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  originData: {
+                    conflict: v,
+                    historicalContext: card.originData?.historicalContext,
+                  },
+                })
+              }
+              placeholder="矛盾焦點（當初是哪個問題/矛盾逼出了這個概念？）"
+              font={font}
+            />
+          </div>
         </div>
       </div>
 
@@ -818,12 +1012,16 @@ export function V6Page3ConstructionThinking({
   font: string;
   theme?: CardPaperTheme;
 }) {
+  const ed = useCardEdit();
   const candidate = card.candidate || {};
   const plan = card.plan || {};
 
   // 構造思路追問點
   const constructionProbes = (card.thoughtPoints || []).filter(
     (t) => t.placement === "construction" || !t.placement
+  );
+  const otherProbes = (card.thoughtPoints || []).filter(
+    (t) => t.placement && t.placement !== "construction"
   );
   const probe1 = constructionProbes[0];
   const probe2 = constructionProbes[1];
@@ -862,28 +1060,46 @@ export function V6Page3ConstructionThinking({
         <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
           提出候選工具，交代「為什麼會想到測試它」，明確不下結論。必須往回追溯到已經確立的「要求」，說明怎麼摸索到這個具體候選形式的——不能讓候選人像是憑空被選中的。
         </p>
-        <div className="text-sm space-y-1 leading-relaxed pt-1" style={{ color: theme.textColor, fontFamily: font }}>
-          {candidate.requirement && (
-            <p>
-              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[已確立要求] </b>
-              <MathText text={candidate.requirement} />
-            </p>
-          )}
-          {candidate.candidateForm && (
-            <p>
-              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[候選工具形式] </b>
-              <MathText text={candidate.candidateForm} />
-            </p>
-          )}
-          {candidate.motivation && (
-            <p>
-              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[摸索動機] </b>
-              <MathText text={candidate.motivation} />
-            </p>
-          )}
-          {!candidate.requirement && !candidate.candidateForm && !candidate.motivation && (
-            <p className="italic" style={{ color: theme.mutedTextColor }}>（尚未填寫候選登場摸索）</p>
-          )}
+        <div className="text-sm space-y-2 leading-relaxed pt-1" style={{ color: theme.textColor, fontFamily: font }}>
+          <div>
+            <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[已確立要求] </b>
+            <EditableText
+              value={candidate.requirement || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  candidate: { ...candidate, requirement: v },
+                })
+              }
+              placeholder="已確立要求（往回追溯已確立的要求）"
+              font={font}
+            />
+          </div>
+          <div>
+            <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[候選工具形式] </b>
+            <EditableText
+              value={candidate.candidateForm || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  candidate: { ...candidate, candidateForm: v },
+                })
+              }
+              placeholder="候選工具形式（具體候選工具或式子）"
+              font={font}
+            />
+          </div>
+          <div>
+            <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[摸索動機] </b>
+            <EditableText
+              value={candidate.motivation || ""}
+              onChange={(v) =>
+                ed?.patch({
+                  candidate: { ...candidate, motivation: v },
+                })
+              }
+              placeholder="摸索動機（為什麼會想到測試它）"
+              font={font}
+            />
+          </div>
         </div>
       </div>
 
@@ -891,12 +1107,29 @@ export function V6Page3ConstructionThinking({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {/* 左欄：追問① */}
         <div
-          className="p-3.5 rounded-sm border space-y-2 flex flex-col"
+          className="group p-3.5 rounded-sm border space-y-2 flex flex-col relative"
           style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
         >
-          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-            ② 路徑 · 追問①
-          </span>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+              ② 路徑 · 追問①
+            </span>
+            {probe1 && (
+              <EditableToggle
+                checked={!!probe1.passed}
+                onChange={(chk) => {
+                  const all = [...(card.thoughtPoints || [])];
+                  const idx = all.findIndex((t) => t.id === probe1.id);
+                  if (idx >= 0) {
+                    all[idx] = { ...all[idx], passed: chk };
+                    ed?.patch({ thoughtPoints: all });
+                  }
+                }}
+                label={probe1.passed ? "已推出" : "未推出"}
+                activeClass="bg-emerald-600 text-white border-emerald-600"
+              />
+            )}
+          </div>
           <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             主動自問的啟發式問句，只記錄問過什麼、指向什麼方向，不放完整推導（推導挪去 WHY）
           </p>
@@ -905,9 +1138,38 @@ export function V6Page3ConstructionThinking({
               className="p-2 rounded border bg-amber-50/60 text-xs font-semibold"
               style={{ borderColor: theme.borderColor, color: theme.headingColor, fontFamily: font }}
             >
-              【追問 · {probe1?.modeName || "啟發式問句"}】
+              【追問 · <EditableText
+                value={probe1?.modeName || "啟發式問句"}
+                onChange={(v) => {
+                  const all = [...(card.thoughtPoints || [])];
+                  if (probe1) {
+                    const idx = all.findIndex((t) => t.id === probe1.id);
+                    if (idx >= 0) all[idx] = { ...all[idx], modeName: v };
+                  } else {
+                    all.push({ id: `tp-${Date.now()}`, modeName: v, question: "", answer: "", passed: false, placement: "construction" });
+                  }
+                  ed?.patch({ thoughtPoints: all });
+                }}
+                font={font}
+              />】
               <div className="mt-1 font-normal text-slate-800">
-                <MathText text={probe1?.question || "（自問核心思考障礙是什麼？）"} />
+                <EditableText
+                  multiline
+                  rows={2}
+                  value={probe1?.question || ""}
+                  onChange={(v) => {
+                    const all = [...(card.thoughtPoints || [])];
+                    if (probe1) {
+                      const idx = all.findIndex((t) => t.id === probe1.id);
+                      if (idx >= 0) all[idx] = { ...all[idx], question: v };
+                    } else {
+                      all.push({ id: `tp-${Date.now()}`, modeName: "啟發式問句", question: v, answer: "", passed: false, placement: "construction" });
+                    }
+                    ed?.patch({ thoughtPoints: all });
+                  }}
+                  placeholder="自問核心思考障礙是什麼？"
+                  font={font}
+                />
               </div>
             </div>
 
@@ -920,12 +1182,28 @@ export function V6Page3ConstructionThinking({
               {openAnswer1 ? "收合答案" : "→ (點擊揭曉答案，完整推導見 WHY)"}
             </button>
 
-            {openAnswer1 && (
+            {(openAnswer1 || ed?.editable) && (
               <div
                 className="p-2 rounded bg-white/90 border text-xs leading-relaxed"
                 style={{ borderColor: theme.borderColor, color: theme.textColor, fontFamily: font }}
               >
-                <MathText text={probe1?.answer || "（此追問指引了最終的收斂計畫）"} />
+                <EditableText
+                  multiline
+                  rows={2}
+                  value={probe1?.answer || ""}
+                  onChange={(v) => {
+                    const all = [...(card.thoughtPoints || [])];
+                    if (probe1) {
+                      const idx = all.findIndex((t) => t.id === probe1.id);
+                      if (idx >= 0) all[idx] = { ...all[idx], answer: v };
+                    } else {
+                      all.push({ id: `tp-${Date.now()}`, modeName: "啟發式問句", question: "", answer: v, passed: false, placement: "construction" });
+                    }
+                    ed?.patch({ thoughtPoints: all });
+                  }}
+                  placeholder="（此追問指引了最終的收斂計畫）"
+                  font={font}
+                />
               </div>
             )}
           </div>
@@ -933,25 +1211,71 @@ export function V6Page3ConstructionThinking({
 
         {/* 右欄：追問②（若有） */}
         <div
-          className="p-3.5 rounded-sm border space-y-2 flex flex-col"
+          className="group p-3.5 rounded-sm border space-y-2 flex flex-col relative"
           style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
         >
-          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-            ② 路徑 · 追問②（若有）
-          </span>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+              ② 路徑 · 追問②（若有）
+            </span>
+            {probe2 && (
+              <EditableToggle
+                checked={!!probe2.passed}
+                onChange={(chk) => {
+                  const all = [...(card.thoughtPoints || [])];
+                  const idx = all.findIndex((t) => t.id === probe2.id);
+                  if (idx >= 0) {
+                    all[idx] = { ...all[idx], passed: chk };
+                    ed?.patch({ thoughtPoints: all });
+                  }
+                }}
+                label={probe2.passed ? "已推出" : "未推出"}
+                activeClass="bg-emerald-600 text-white border-emerald-600"
+              />
+            )}
+          </div>
           <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             同一份「要求」下摸索出的另一條問句，不是重複——不同問題指向同一個計畫
           </p>
           <div className="flex-1 space-y-2 pt-1">
-            {probe2 ? (
+            {probe2 || ed?.editable ? (
               <>
                 <div
                   className="p-2 rounded border bg-amber-50/60 text-xs font-semibold"
                   style={{ borderColor: theme.borderColor, color: theme.headingColor, fontFamily: font }}
                 >
-                  【追問 · {probe2.modeName || "思維模式"}】
+                  【追問 · <EditableText
+                    value={probe2?.modeName || "思維模式"}
+                    onChange={(v) => {
+                      const all = [...(card.thoughtPoints || [])];
+                      if (probe2) {
+                        const idx = all.findIndex((t) => t.id === probe2.id);
+                        if (idx >= 0) all[idx] = { ...all[idx], modeName: v };
+                      } else {
+                        all.push({ id: `tp-${Date.now()}`, modeName: v, question: "", answer: "", passed: false, placement: "construction" });
+                      }
+                      ed?.patch({ thoughtPoints: all });
+                    }}
+                    font={font}
+                  />】
                   <div className="mt-1 font-normal text-slate-800">
-                    <MathText text={probe2.question} />
+                    <EditableText
+                      multiline
+                      rows={2}
+                      value={probe2?.question || ""}
+                      onChange={(v) => {
+                        const all = [...(card.thoughtPoints || [])];
+                        if (probe2) {
+                          const idx = all.findIndex((t) => t.id === probe2.id);
+                          if (idx >= 0) all[idx] = { ...all[idx], question: v };
+                        } else {
+                          all.push({ id: `tp-${Date.now()}`, modeName: "思維模式", question: v, answer: "", passed: false, placement: "construction" });
+                        }
+                        ed?.patch({ thoughtPoints: all });
+                      }}
+                      placeholder="第二條追問路徑核心問句…"
+                      font={font}
+                    />
                   </div>
                 </div>
 
@@ -964,12 +1288,28 @@ export function V6Page3ConstructionThinking({
                   {openAnswer2 ? "收合答案" : "→ (點擊揭曉答案，完整推導見 WHY)"}
                 </button>
 
-                {openAnswer2 && (
+                {(openAnswer2 || ed?.editable) && (
                   <div
                     className="p-2 rounded bg-white/90 border text-xs leading-relaxed"
                     style={{ borderColor: theme.borderColor, color: theme.textColor, fontFamily: font }}
                   >
-                    <MathText text={probe2.answer} />
+                    <EditableText
+                      multiline
+                      rows={2}
+                      value={probe2?.answer || ""}
+                      onChange={(v) => {
+                        const all = [...(card.thoughtPoints || [])];
+                        if (probe2) {
+                          const idx = all.findIndex((t) => t.id === probe2.id);
+                          if (idx >= 0) all[idx] = { ...all[idx], answer: v };
+                        } else {
+                          all.push({ id: `tp-${Date.now()}`, modeName: "思維模式", question: "", answer: v, passed: false, placement: "construction" });
+                        }
+                        ed?.patch({ thoughtPoints: all });
+                      }}
+                      placeholder="追問②答案指引…"
+                      font={font}
+                    />
                   </div>
                 )}
               </>
@@ -1007,20 +1347,65 @@ export function V6Page3ConstructionThinking({
           {plan.steps && plan.steps.length > 0 ? (
             <div className="space-y-1.5">
               {plan.steps.map((st, si) => (
-                <div key={st.id || si} className="flex items-start gap-2 bg-white/70 p-2 rounded border" style={{ borderColor: theme.borderColor }}>
+                <div
+                  key={st.id || si}
+                  className="group flex items-start gap-2 bg-white/70 p-2 rounded border relative"
+                  style={{ borderColor: theme.borderColor }}
+                >
                   <span className="w-5 h-5 rounded-full bg-slate-800 text-white flex items-center justify-center text-[10px] font-mono flex-shrink-0">
                     {si + 1}
                   </span>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="font-bold text-slate-900">
-                      <MathText text={st.label} />
+                      <EditableText
+                        value={st.label}
+                        onChange={(v) => {
+                          const steps = [...(plan.steps || [])];
+                          steps[si] = { ...steps[si], label: v };
+                          ed?.patch({ plan: { ...plan, steps } });
+                        }}
+                        placeholder="步驟名稱與內容…"
+                        font={font}
+                      />
                     </div>
-                    {st.rationale && (
-                      <div className="text-[11px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
-                        ↳ 順序依賴：<MathText text={st.rationale} />
-                      </div>
-                    )}
+                    <div className="text-[11px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
+                      ↳ 順序依賴：
+                      <EditableText
+                        value={st.rationale || ""}
+                        onChange={(v) => {
+                          const steps = [...(plan.steps || [])];
+                          steps[si] = { ...steps[si], rationale: v };
+                          ed?.patch({ plan: { ...plan, steps } });
+                        }}
+                        placeholder="為什麼這一步要排在這邊（順序依賴理由）"
+                        font={font}
+                      />
+                    </div>
                   </div>
+                  <EditableListItemControls
+                    canMoveUp={si > 0}
+                    canMoveDown={si < (plan.steps || []).length - 1}
+                    onMoveUp={() => {
+                      const steps = listMove(plan.steps || [], si, -1);
+                      ed?.patch({ plan: { ...plan, steps } });
+                    }}
+                    onMoveDown={() => {
+                      const steps = listMove(plan.steps || [], si, 1);
+                      ed?.patch({ plan: { ...plan, steps } });
+                    }}
+                    onAddBelow={() => {
+                      const steps = listInsert(plan.steps || [], si, {
+                        id: `st-${Date.now()}`,
+                        label: "",
+                        rationale: "",
+                      });
+                      ed?.patch({ plan: { ...plan, steps } });
+                    }}
+                    onRemove={() => {
+                      const steps = listRemove(plan.steps || [], si);
+                      ed?.patch({ plan: { ...plan, steps } });
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -1028,12 +1413,150 @@ export function V6Page3ConstructionThinking({
             <p className="italic text-slate-400">（尚未填寫收斂計畫）</p>
           )}
 
-          {plan.ranges && (
-            <div className="text-[11px] p-2 rounded bg-amber-50/70 border border-amber-200 text-amber-900" style={{ fontFamily: UI_FONT }}>
-              <b>範圍劃定（誠實標註）：</b>
-              <MathText text={plan.ranges} />
-            </div>
+          <EditableListAddButton
+            onClick={() => {
+              const steps = [
+                ...(plan.steps || []),
+                { id: `st-${Date.now()}`, label: "", rationale: "" },
+              ];
+              ed?.patch({ plan: { ...plan, steps } });
+            }}
+            label="+ 新增步驟"
+          />
+
+          <div className="text-[11px] p-2 rounded bg-amber-50/70 border border-amber-200 text-amber-900" style={{ fontFamily: UI_FONT }}>
+            <b>範圍劃定（誠實標註）：</b>
+            <EditableText
+              value={plan.ranges || ""}
+              onChange={(v) => ed?.patch({ plan: { ...plan, ranges: v } })}
+              placeholder="範圍劃定說明…"
+              font={font}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 直覺陷阱 (Intuition Traps) */}
+      <div
+        className="p-3.5 rounded-sm border space-y-2"
+        style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+            直覺陷阱（常見誤判、為什麼走偏、正確理解）
+          </span>
+        </div>
+        <div className="space-y-2 text-xs" style={{ fontFamily: font }}>
+          {(card.intuitionTraps || []).length > 0 ? (
+            (card.intuitionTraps || []).map((it, idx) => (
+              <div
+                key={it.id || idx}
+                className="group p-2.5 rounded bg-purple-50/60 border border-purple-200 space-y-1.5 relative"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-purple-900 text-[11px]" style={{ fontFamily: UI_FONT }}>
+                    陷阱 {idx + 1}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <EditableToggle
+                      checked={!!it.passed}
+                      onChange={(chk) => {
+                        const list = [...(card.intuitionTraps || [])];
+                        list[idx] = { ...list[idx], passed: chk };
+                        ed?.patch({ intuitionTraps: list });
+                      }}
+                      label={it.passed ? "已推出" : "未推出"}
+                      activeClass="bg-emerald-600 text-white border-emerald-600"
+                    />
+                    <EditableListItemControls
+                      canMoveUp={idx > 0}
+                      canMoveDown={idx < (card.intuitionTraps || []).length - 1}
+                      onMoveUp={() => {
+                        const list = listMove(card.intuitionTraps || [], idx, -1);
+                        ed?.patch({ intuitionTraps: list });
+                      }}
+                      onMoveDown={() => {
+                        const list = listMove(card.intuitionTraps || [], idx, 1);
+                        ed?.patch({ intuitionTraps: list });
+                      }}
+                      onAddBelow={() => {
+                        const list = listInsert(card.intuitionTraps || [], idx, {
+                          id: `it-${Date.now()}`,
+                          description: "",
+                          whyMisleading: "",
+                          correctUnderstanding: "",
+                        });
+                        ed?.patch({ intuitionTraps: list });
+                      }}
+                      onRemove={() => {
+                        const list = listRemove(card.intuitionTraps || [], idx);
+                        ed?.patch({ intuitionTraps: list });
+                      }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700 text-[11px]" style={{ fontFamily: UI_FONT }}>常見誤判：</span>
+                  <EditableText
+                    value={it.description}
+                    onChange={(v) => {
+                      const list = [...(card.intuitionTraps || [])];
+                      list[idx] = { ...list[idx], description: v };
+                      ed?.patch({ intuitionTraps: list });
+                    }}
+                    placeholder="大家通常會把它誤會成…"
+                    font={font}
+                  />
+                </div>
+                <div>
+                  <span className="font-bold text-slate-700 text-[11px]" style={{ fontFamily: UI_FONT }}>錯在哪裡：</span>
+                  <EditableText
+                    value={it.whyMisleading}
+                    onChange={(v) => {
+                      const list = [...(card.intuitionTraps || [])];
+                      list[idx] = { ...list[idx], whyMisleading: v };
+                      ed?.patch({ intuitionTraps: list });
+                    }}
+                    placeholder="為什麼直覺會這樣走偏…"
+                    font={font}
+                  />
+                </div>
+                <div>
+                  <span className="font-bold text-emerald-800 text-[11px]" style={{ fontFamily: UI_FONT }}>正確理解：</span>
+                  <EditableText
+                    multiline
+                    rows={2}
+                    value={it.correctUnderstanding}
+                    onChange={(v) => {
+                      const list = [...(card.intuitionTraps || [])];
+                      list[idx] = { ...list[idx], correctUnderstanding: v };
+                      ed?.patch({ intuitionTraps: list });
+                    }}
+                    placeholder="正確理解（支援 LaTeX）"
+                    font={font}
+                  />
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="italic text-slate-400">（尚未建立直覺陷阱）</p>
           )}
+
+          <EditableListAddButton
+            onClick={() => {
+              const list = [
+                ...(card.intuitionTraps || []),
+                {
+                  id: `it-${Date.now()}`,
+                  description: "",
+                  whyMisleading: "",
+                  correctUnderstanding: "",
+                },
+              ];
+              ed?.patch({ intuitionTraps: list });
+            }}
+            label="+ 新增直覺陷阱"
+          />
         </div>
       </div>
 
@@ -1058,6 +1581,7 @@ export function V6Page4Why({
   font: string;
   theme?: CardPaperTheme;
 }) {
+  const ed = useCardEdit();
   const whyData = card.whyData || { confidenceBefore: 3, confidenceAfter: 5, closedBookDraft: "", fullReasoning: "" };
   const claims = card.claims || [];
   const assumptions = card.assumptions || [];
@@ -1079,8 +1603,35 @@ export function V6Page4Why({
         className="p-2.5 rounded-sm border flex flex-wrap items-center justify-between gap-2 text-xs leading-tight"
         style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg, fontFamily: UI_FONT }}
       >
-        <p style={{ color: theme.mutedTextColor }}>
-          落筆/寫完各打一次理解信心分 (1-5)。至少兩個失效模式不同的正交視角——每個視角的失效模式，必須能在 APPLY·CHECK 裡找到對應檢查項。推理走到關鍵轉折點插入追問點：問題→讀者自己想過一次→答案。
+        <div className="flex items-center gap-2">
+          <span className="font-bold" style={{ color: theme.headingColor }}>
+            落筆前信心分：
+          </span>
+          <EditableRating
+            value={whyData.confidenceBefore ?? 3}
+            onChange={(v) =>
+              ed?.patch({
+                whyData: { ...whyData, confidenceBefore: v },
+              })
+            }
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-bold" style={{ color: theme.headingColor }}>
+            寫完後重打：
+          </span>
+          <EditableRating
+            value={whyData.confidenceAfter ?? 5}
+            activeColor="bg-emerald-500 text-white border-emerald-600"
+            onChange={(v) =>
+              ed?.patch({
+                whyData: { ...whyData, confidenceAfter: v },
+              })
+            }
+          />
+        </div>
+        <p className="w-full text-[10px]" style={{ color: theme.mutedTextColor }}>
+          至少兩個失效模式不同的正交視角——每個視角的失效模式，必須能在 APPLY·CHECK 裡找到對應檢查項。推理走到關鍵轉折點插入追問點。
         </p>
       </div>
 
@@ -1092,39 +1643,133 @@ export function V6Page4Why({
           style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
         >
           {/* 正交視角 1 & 2 */}
-          {(whyData.perspective1 || whyData.perspective2) && (
+          {(whyData.perspective1 || whyData.perspective2 || ed?.editable) && (
             <div className="space-y-2 pb-2 border-b" style={{ borderColor: theme.borderColor }}>
-              {whyData.perspective1 && (
-                <div className="p-2.5 rounded bg-white/70 border" style={{ borderColor: theme.borderColor }}>
-                  <div className="flex items-center justify-between text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
-                    <span>視角 1 · {whyData.perspective1.name || "視角一"}</span>
-                    {whyData.perspective1.failureMode && (
-                      <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                        失效模式: {whyData.perspective1.failureMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
-                    <MathText text={whyData.perspective1.content} />
-                  </div>
+              <div className="p-2.5 rounded bg-white/70 border space-y-1" style={{ borderColor: theme.borderColor }}>
+                <div className="flex items-center justify-between text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+                  <span>
+                    視角 1 · <EditableText
+                      value={whyData.perspective1?.name || "視角一"}
+                      onChange={(v) =>
+                        ed?.patch({
+                          whyData: {
+                            ...whyData,
+                            perspective1: {
+                              name: v,
+                              content: whyData.perspective1?.content || "",
+                              failureMode: whyData.perspective1?.failureMode || "",
+                            },
+                          },
+                        })
+                      }
+                      font={font}
+                    />
+                  </span>
+                  <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                    失效模式: <EditableText
+                      value={whyData.perspective1?.failureMode || ""}
+                      onChange={(v) =>
+                        ed?.patch({
+                          whyData: {
+                            ...whyData,
+                            perspective1: {
+                              name: whyData.perspective1?.name || "視角一",
+                              content: whyData.perspective1?.content || "",
+                              failureMode: v,
+                            },
+                          },
+                        })
+                      }
+                      placeholder="視角一的失效條件/邊界…"
+                      font={font}
+                    />
+                  </span>
                 </div>
-              )}
+                <div className="text-xs leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
+                  <EditableText
+                    multiline
+                    rows={3}
+                    value={whyData.perspective1?.content || ""}
+                    onChange={(v) =>
+                      ed?.patch({
+                        whyData: {
+                          ...whyData,
+                          perspective1: {
+                            name: whyData.perspective1?.name || "視角一",
+                            content: v,
+                            failureMode: whyData.perspective1?.failureMode || "",
+                          },
+                        },
+                      })
+                    }
+                    placeholder="視角一闡述內容（支援 LaTeX）"
+                    font={font}
+                  />
+                </div>
+              </div>
 
-              {whyData.perspective2 && (
-                <div className="p-2.5 rounded bg-white/70 border" style={{ borderColor: theme.borderColor }}>
-                  <div className="flex items-center justify-between text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
-                    <span>視角 2 · {whyData.perspective2.name || "視角二"}</span>
-                    {whyData.perspective2.failureMode && (
-                      <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                        失效模式: {whyData.perspective2.failureMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
-                    <MathText text={whyData.perspective2.content} />
-                  </div>
+              <div className="p-2.5 rounded bg-white/70 border space-y-1" style={{ borderColor: theme.borderColor }}>
+                <div className="flex items-center justify-between text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+                  <span>
+                    視角 2 · <EditableText
+                      value={whyData.perspective2?.name || "視角二"}
+                      onChange={(v) =>
+                        ed?.patch({
+                          whyData: {
+                            ...whyData,
+                            perspective2: {
+                              name: v,
+                              content: whyData.perspective2?.content || "",
+                              failureMode: whyData.perspective2?.failureMode || "",
+                            },
+                          },
+                        })
+                      }
+                      font={font}
+                    />
+                  </span>
+                  <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                    失效模式: <EditableText
+                      value={whyData.perspective2?.failureMode || ""}
+                      onChange={(v) =>
+                        ed?.patch({
+                          whyData: {
+                            ...whyData,
+                            perspective2: {
+                              name: whyData.perspective2?.name || "視角二",
+                              content: whyData.perspective2?.content || "",
+                              failureMode: v,
+                            },
+                          },
+                        })
+                      }
+                      placeholder="視角二的失效條件/邊界…"
+                      font={font}
+                    />
+                  </span>
                 </div>
-              )}
+                <div className="text-xs leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
+                  <EditableText
+                    multiline
+                    rows={3}
+                    value={whyData.perspective2?.content || ""}
+                    onChange={(v) =>
+                      ed?.patch({
+                        whyData: {
+                          ...whyData,
+                          perspective2: {
+                            name: whyData.perspective2?.name || "視角二",
+                            content: v,
+                            failureMode: whyData.perspective2?.failureMode || "",
+                          },
+                        },
+                      })
+                    }
+                    placeholder="視角二闡述內容（支援 LaTeX）"
+                    font={font}
+                  />
+                </div>
+              </div>
             </div>
           )}
 
@@ -1134,25 +1779,103 @@ export function V6Page4Why({
               完整論證與推導教學稿
             </span>
             <div className="text-sm leading-relaxed space-y-2" style={{ color: theme.textColor, fontFamily: font }}>
-              <MathText text={whyData.fullReasoning || whyData.closedBookDraft || "（尚未填寫 WHY 完整論證）"} />
+              <EditableText
+                multiline
+                rows={10}
+                value={whyData.fullReasoning || whyData.closedBookDraft || ""}
+                onChange={(v) =>
+                  ed?.patch({
+                    whyData: { ...whyData, fullReasoning: v },
+                  })
+                }
+                placeholder="完整論證教學稿（支援 LaTeX 公式，詳細步步演繹）"
+                font={font}
+              />
             </div>
           </div>
 
           {/* 關鍵轉折追問點 */}
-          {whyProbes.length > 0 && (
+          {(whyProbes.length > 0 || ed?.editable) && (
             <div className="pt-2 border-t space-y-2" style={{ borderColor: theme.borderColor }}>
               <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 關鍵轉折追問點（Slamecka 測試效應）
               </span>
-              {whyProbes.map((pr) => {
+              {whyProbes.map((pr, pIdx) => {
                 const isOpen = openWhyAnswer[pr.id] || false;
+                const allTP = card.thoughtPoints || [];
+                const globalIdx = allTP.findIndex((t) => t.id === pr.id);
+
                 return (
-                  <div key={pr.id} className="p-2 rounded bg-amber-50/70 border border-amber-200 text-xs">
-                    <div className="font-bold text-amber-900" style={{ fontFamily: UI_FONT }}>
-                      【追問 · {pr.modeName}】
+                  <div key={pr.id || pIdx} className="group p-2 rounded bg-amber-50/70 border border-amber-200 text-xs relative">
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-amber-900" style={{ fontFamily: UI_FONT }}>
+                        【追問 · <EditableText
+                          value={pr.modeName}
+                          onChange={(v) => {
+                            const list = [...allTP];
+                            if (globalIdx >= 0) list[globalIdx] = { ...list[globalIdx], modeName: v };
+                            ed?.patch({ thoughtPoints: list });
+                          }}
+                          font={font}
+                        />】
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <EditableToggle
+                          checked={!!pr.passed}
+                          onChange={(chk) => {
+                            const list = [...allTP];
+                            if (globalIdx >= 0) list[globalIdx] = { ...list[globalIdx], passed: chk };
+                            ed?.patch({ thoughtPoints: list });
+                          }}
+                          label={pr.passed ? "已推出" : "未推出"}
+                          activeClass="bg-emerald-600 text-white border-emerald-600"
+                        />
+                        <EditableListItemControls
+                          canMoveUp={pIdx > 0}
+                          canMoveDown={pIdx < whyProbes.length - 1}
+                          onMoveUp={() => {
+                            if (globalIdx > 0) {
+                              const list = listMove(allTP, globalIdx, -1);
+                              ed?.patch({ thoughtPoints: list });
+                            }
+                          }}
+                          onMoveDown={() => {
+                            if (globalIdx < allTP.length - 1) {
+                              const list = listMove(allTP, globalIdx, 1);
+                              ed?.patch({ thoughtPoints: list });
+                            }
+                          }}
+                          onAddBelow={() => {
+                            const list = listInsert(allTP, globalIdx, {
+                              id: `tp-${Date.now()}`,
+                              modeName: "關鍵轉折",
+                              question: "",
+                              answer: "",
+                              passed: false,
+                              placement: "why",
+                            });
+                            ed?.patch({ thoughtPoints: list });
+                          }}
+                          onRemove={() => {
+                            const list = listRemove(allTP, globalIdx);
+                            ed?.patch({ thoughtPoints: list });
+                          }}
+                        />
+                      </div>
                     </div>
-                    <div className="mt-0.5 font-normal" style={{ color: theme.textColor, fontFamily: font }}>
-                      <MathText text={pr.question} />
+                    <div className="mt-1 font-normal" style={{ color: theme.textColor, fontFamily: font }}>
+                      <EditableText
+                        multiline
+                        rows={2}
+                        value={pr.question}
+                        onChange={(v) => {
+                          const list = [...allTP];
+                          if (globalIdx >= 0) list[globalIdx] = { ...list[globalIdx], question: v };
+                          ed?.patch({ thoughtPoints: list });
+                        }}
+                        placeholder="關鍵轉折問句…"
+                        font={font}
+                      />
                     </div>
                     <button
                       onClick={() => setOpenWhyAnswer({ ...openWhyAnswer, [pr.id]: !isOpen })}
@@ -1161,33 +1884,152 @@ export function V6Page4Why({
                     >
                       {isOpen ? "收合答案" : "→ (讀者先想一次再點此揭曉答案)"}
                     </button>
-                    {isOpen && (
+                    {(isOpen || ed?.editable) && (
                       <div className="mt-1 pt-1 border-t border-amber-200 text-xs text-slate-800" style={{ fontFamily: font }}>
-                        <MathText text={pr.answer} />
+                        <EditableText
+                          multiline
+                          rows={2}
+                          value={pr.answer}
+                          onChange={(v) => {
+                            const list = [...allTP];
+                            if (globalIdx >= 0) list[globalIdx] = { ...list[globalIdx], answer: v };
+                            ed?.patch({ thoughtPoints: list });
+                          }}
+                          placeholder="追問答案（完整推導）…"
+                          font={font}
+                        />
                       </div>
                     )}
                   </div>
                 );
               })}
+
+              <EditableListAddButton
+                onClick={() => {
+                  const list = [
+                    ...(card.thoughtPoints || []),
+                    {
+                      id: `tp-${Date.now()}`,
+                      modeName: "關鍵轉折",
+                      question: "",
+                      answer: "",
+                      passed: false,
+                      placement: "why" as const,
+                    },
+                  ];
+                  ed?.patch({ thoughtPoints: list });
+                }}
+                label="+ 新增 WHY 追問點"
+              />
             </div>
           )}
 
           {/* 子目標聲明 */}
-          {whyData.subGoals && whyData.subGoals.length > 0 && (
+          {(whyData.subGoals?.length || ed?.editable) && (
             <div className="pt-2 border-t space-y-1.5" style={{ borderColor: theme.borderColor }}>
               <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 子目標聲明（必要性與充分性）
               </span>
-              <div className="space-y-1">
-                {whyData.subGoals.map((sg, sgi) => (
-                  <div key={sg.id || sgi} className="p-2 rounded bg-white/60 border text-xs" style={{ borderColor: theme.borderColor }}>
-                    <div className="font-bold text-slate-900">{sg.goal}</div>
-                    <div className="text-[10px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
-                      必要性：{sg.whyNecessary} ｜ 充分性：{sg.whySufficient}
+              <div className="space-y-1.5">
+                {(whyData.subGoals || []).map((sg, sgi) => (
+                  <div
+                    key={sg.id || sgi}
+                    className="group p-2 rounded bg-white/60 border text-xs relative space-y-1"
+                    style={{ borderColor: theme.borderColor }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 flex-1 flex items-center gap-1">
+                        <span>子目標 {sgi + 1}：</span>
+                        <EditableText
+                          value={sg.goal}
+                          onChange={(v) => {
+                            const subGoals = [...(whyData.subGoals || [])];
+                            subGoals[sgi] = { ...subGoals[sgi], goal: v };
+                            ed?.patch({ whyData: { ...whyData, subGoals } });
+                          }}
+                          placeholder="子目標名稱…"
+                          font={font}
+                        />
+                      </span>
+                      <EditableListItemControls
+                        canMoveUp={sgi > 0}
+                        canMoveDown={sgi < (whyData.subGoals || []).length - 1}
+                        onMoveUp={() => {
+                          const subGoals = listMove(whyData.subGoals || [], sgi, -1);
+                          ed?.patch({ whyData: { ...whyData, subGoals } });
+                        }}
+                        onMoveDown={() => {
+                          const subGoals = listMove(whyData.subGoals || [], sgi, 1);
+                          ed?.patch({ whyData: { ...whyData, subGoals } });
+                        }}
+                        onAddBelow={() => {
+                          const subGoals = listInsert(whyData.subGoals || [], sgi, {
+                            id: `sg-${Date.now()}`,
+                            goal: "",
+                            requiredParts: [],
+                            whyNecessary: "",
+                            whySufficient: "",
+                          });
+                          ed?.patch({ whyData: { ...whyData, subGoals } });
+                        }}
+                        onRemove={() => {
+                          const subGoals = listRemove(whyData.subGoals || [], sgi);
+                          ed?.patch({ whyData: { ...whyData, subGoals } });
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-0.5 text-[11px]" style={{ color: theme.textColor, fontFamily: font }}>
+                      <span className="block">
+                        <b style={{ fontFamily: UI_FONT }} className="text-amber-800">必要性：</b>
+                        <EditableText
+                          multiline
+                          rows={2}
+                          value={sg.whyNecessary}
+                          onChange={(v) => {
+                            const subGoals = [...(whyData.subGoals || [])];
+                            subGoals[sgi] = { ...subGoals[sgi], whyNecessary: v };
+                            ed?.patch({ whyData: { ...whyData, subGoals } });
+                          }}
+                          placeholder="為什麼必要…"
+                          font={font}
+                        />
+                      </span>
+                      <span className="block">
+                        <b style={{ fontFamily: UI_FONT }} className="text-emerald-800">充分性：</b>
+                        <EditableText
+                          multiline
+                          rows={2}
+                          value={sg.whySufficient}
+                          onChange={(v) => {
+                            const subGoals = [...(whyData.subGoals || [])];
+                            subGoals[sgi] = { ...subGoals[sgi], whySufficient: v };
+                            ed?.patch({ whyData: { ...whyData, subGoals } });
+                          }}
+                          placeholder="為什麼充分…"
+                          font={font}
+                        />
+                      </span>
                     </div>
                   </div>
                 ))}
               </div>
+
+              <EditableListAddButton
+                onClick={() => {
+                  const subGoals = [
+                    ...(whyData.subGoals || []),
+                    {
+                      id: `sg-${Date.now()}`,
+                      goal: "",
+                      requiredParts: [],
+                      whyNecessary: "",
+                      whySufficient: "",
+                    },
+                  ];
+                  ed?.patch({ whyData: { ...whyData, subGoals } });
+                }}
+                label="+ 新增子目標"
+              />
             </div>
           )}
         </div>
@@ -1206,18 +2048,99 @@ export function V6Page4Why({
               <p>[地位:證明/歸納/近似(框架)/約定/公設(框架)]</p>
               <p>[見WHY視角＿]</p>
             </div>
-            {claims.length > 0 && (
-              <div className="pt-1.5 border-t space-y-1" style={{ borderColor: theme.borderColor }}>
+            {(claims.length > 0 || ed?.editable) && (
+              <div className="pt-1.5 border-t space-y-1.5" style={{ borderColor: theme.borderColor }}>
                 <span className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                   本卡認識論聲明：
                 </span>
-                {claims.map((cl) => (
-                  <div key={cl.id} className="p-1.5 rounded bg-white/80 border text-[10px]" style={{ borderColor: theme.borderColor }}>
-                    <span className="font-bold text-blue-800">[{cl.epistemicMark}] </span>
-                    <span style={{ fontFamily: font }}>{cl.text}</span>
-                    {cl.anchor && <div className="text-[9px] text-slate-500 mt-0.5">{cl.anchor}</div>}
+                {claims.map((cl, ci) => (
+                  <div key={cl.id || ci} className="group text-[10px] p-1.5 rounded bg-white/80 border space-y-1 relative" style={{ borderColor: theme.borderColor }}>
+                    <div className="flex items-center justify-between">
+                      <EditableSelect
+                        value={cl.epistemicMark || "⊢證"}
+                        options={[
+                          { value: "⊢證", label: "⊢證 (邏輯演繹)" },
+                          { value: "⊢歸", label: "⊢歸 (經驗歸納)" },
+                          { value: "⊢近", label: "⊢近 (框架近似)" },
+                          { value: "⊢約", label: "⊢約 (定義約定)" },
+                          { value: "⊢公設", label: "⊢公設 (出發公設)" },
+                        ]}
+                        onChange={(v) => {
+                          const next = [...claims];
+                          next[ci] = { ...next[ci], epistemicMark: v as "⊢證" | "⊢歸" | "⊢近" | "⊢約" | "⊢公設" };
+                          ed?.patch({ claims: next });
+                        }}
+                        className="text-[10px] font-mono font-bold"
+                      />
+                      <EditableListItemControls
+                        canMoveUp={ci > 0}
+                        canMoveDown={ci < claims.length - 1}
+                        onMoveUp={() => {
+                          const next = listMove(claims, ci, -1);
+                          ed?.patch({ claims: next });
+                        }}
+                        onMoveDown={() => {
+                          const next = listMove(claims, ci, 1);
+                          ed?.patch({ claims: next });
+                        }}
+                        onAddBelow={() => {
+                          const next = listInsert(claims, ci, {
+                            id: `cl-${Date.now()}`,
+                            text: "",
+                            epistemicMark: "⊢證" as const,
+                          });
+                          ed?.patch({ claims: next });
+                        }}
+                        onRemove={() => {
+                          const next = listRemove(claims, ci);
+                          ed?.patch({ claims: next });
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontFamily: font }}>
+                      <EditableText
+                        value={cl.text}
+                        onChange={(v) => {
+                          const next = [...claims];
+                          next[ci] = { ...next[ci], text: v };
+                          ed?.patch({ claims: next });
+                        }}
+                        placeholder="核心聲明內容…"
+                        font={font}
+                      />
+                    </div>
+                    {cl.frameworkNote && (
+                      <div className="text-[9px] text-amber-800" style={{ fontFamily: UI_FONT }}>
+                        框架註記：
+                        <EditableText
+                          value={cl.frameworkNote}
+                          onChange={(v) => {
+                            const next = [...claims];
+                            next[ci] = { ...next[ci], frameworkNote: v };
+                            ed?.patch({ claims: next });
+                          }}
+                          placeholder="框架約束…"
+                          font={font}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
+
+                <EditableListAddButton
+                  onClick={() => {
+                    const next = [
+                      ...claims,
+                      {
+                        id: `cl-${Date.now()}`,
+                        text: "",
+                        epistemicMark: "⊢證" as const,
+                      },
+                    ];
+                    ed?.patch({ claims: next });
+                  }}
+                  label="+ 新增聲明"
+                />
               </div>
             )}
           </div>
@@ -1259,20 +2182,74 @@ export function V6Page4Why({
           </div>
 
           {/* 假設鎖定清單 */}
-          {assumptions.length > 0 && (
+          {(assumptions.length > 0 || ed?.editable) && (
             <div
-              className="p-2.5 rounded-sm border space-y-1"
+              className="p-2.5 rounded-sm border space-y-1.5"
               style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
             >
               <div className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 假設鎖定清單
               </div>
-              {assumptions.map((as) => (
-                <div key={as.id} className="text-[10px] p-1 rounded bg-white/80 border" style={{ borderColor: theme.borderColor }}>
-                  <span className="font-bold text-purple-800">[{as.kind || "假設"}] </span>
-                  <span style={{ fontFamily: font }}>{as.name}</span>
+              {assumptions.map((as, ai) => (
+                <div key={as.id || ai} className="group text-[10px] p-1.5 rounded bg-white/80 border flex items-center justify-between gap-1 relative" style={{ borderColor: theme.borderColor }}>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-bold text-purple-800">[{as.kind || "situation"}] </span>
+                    <EditableText
+                      value={as.name}
+                      onChange={(v) => {
+                        const next = [...assumptions];
+                        next[ai] = { ...next[ai], name: v };
+                        ed?.patch({ assumptions: next });
+                      }}
+                      placeholder="假設內容…"
+                      font={font}
+                    />
+                  </div>
+                  <EditableListItemControls
+                    canMoveUp={ai > 0}
+                    canMoveDown={ai < assumptions.length - 1}
+                    onMoveUp={() => {
+                      const next = listMove(assumptions, ai, -1);
+                      ed?.patch({ assumptions: next });
+                    }}
+                    onMoveDown={() => {
+                      const next = listMove(assumptions, ai, 1);
+                      ed?.patch({ assumptions: next });
+                    }}
+                    onAddBelow={() => {
+                      const next = listInsert(assumptions, ai, {
+                        id: `as-${Date.now()}`,
+                        name: "",
+                        status: "locked" as const,
+                        description: "",
+                        kind: "situation" as const,
+                      });
+                      ed?.patch({ assumptions: next });
+                    }}
+                    onRemove={() => {
+                      const next = listRemove(assumptions, ai);
+                      ed?.patch({ assumptions: next });
+                    }}
+                  />
                 </div>
               ))}
+
+              <EditableListAddButton
+                onClick={() => {
+                  const next = [
+                    ...assumptions,
+                    {
+                      id: `as-${Date.now()}`,
+                      name: "",
+                      status: "locked" as const,
+                      description: "",
+                      kind: "situation" as const,
+                    },
+                  ];
+                  ed?.patch({ assumptions: next });
+                }}
+                label="+ 新增假設"
+              />
             </div>
           )}
         </div>
@@ -1307,6 +2284,7 @@ export function V6Page5What({
   font: string;
   theme?: CardPaperTheme;
 }) {
+  const ed = useCardEdit();
   const whatData = card.whatData || { summary: "", perspectives: [], distinctionFromHow: "" };
   const readings = whatData.readings || [];
   const readingQuestions = whatData.readingQuestions || [];
@@ -1369,29 +2347,88 @@ export function V6Page5What({
               {readings.map((r, rIdx) => (
                 <div
                   key={r.id || rIdx}
-                  className="p-2.5 rounded bg-white/80 border space-y-1 flex flex-col justify-between"
+                  className="group p-2.5 rounded bg-white/80 border space-y-1 flex flex-col justify-between relative"
                   style={{ borderColor: theme.borderColor }}
                 >
                   <div>
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-[11px] font-bold text-slate-900" style={{ fontFamily: UI_FONT }}>
-                        {r.name || `讀法${rIdx + 1}`}
+                      <span className="text-[11px] font-bold text-slate-900 flex-1 min-w-0" style={{ fontFamily: UI_FONT }}>
+                        <EditableText
+                          value={r.name}
+                          onChange={(v) => {
+                            const list = [...readings];
+                            list[rIdx] = { ...list[rIdx], name: v };
+                            ed?.patch({ whatData: { ...whatData, readings: list } });
+                          }}
+                          placeholder={`讀法${rIdx + 1}名稱`}
+                          font={font}
+                        />
                       </span>
-                      {r.onlyForUnderstanding && (
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 text-[9px]" style={{ fontFamily: UI_FONT }}>
-                          僅理解用
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1">
+                        <EditableToggle
+                          checked={!!r.onlyForUnderstanding}
+                          onChange={(chk) => {
+                            const list = [...readings];
+                            list[rIdx] = { ...list[rIdx], onlyForUnderstanding: chk };
+                            ed?.patch({ whatData: { ...whatData, readings: list } });
+                          }}
+                          label="僅理解用"
+                          activeClass="bg-slate-200 text-slate-700 border-slate-300"
+                        />
+                        <EditableListItemControls
+                          canMoveUp={rIdx > 0}
+                          canMoveDown={rIdx < readings.length - 1}
+                          onMoveUp={() => {
+                            const list = listMove(readings, rIdx, -1);
+                            ed?.patch({ whatData: { ...whatData, readings: list } });
+                          }}
+                          onMoveDown={() => {
+                            const list = listMove(readings, rIdx, 1);
+                            ed?.patch({ whatData: { ...whatData, readings: list } });
+                          }}
+                          onAddBelow={() => {
+                            const list = listInsert(readings, rIdx, {
+                              id: `rd-${Date.now()}`,
+                              name: `讀法${readings.length + 1}`,
+                              description: "",
+                            });
+                            ed?.patch({ whatData: { ...whatData, readings: list } });
+                          }}
+                          onRemove={() => {
+                            const list = listRemove(readings, rIdx);
+                            ed?.patch({ whatData: { ...whatData, readings: list } });
+                          }}
+                        />
+                      </div>
                     </div>
                     <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
-                      <MathText text={r.description} />
+                      <EditableText
+                        multiline
+                        rows={3}
+                        value={r.description}
+                        onChange={(v) => {
+                          const list = [...readings];
+                          list[rIdx] = { ...list[rIdx], description: v };
+                          ed?.patch({ whatData: { ...whatData, readings: list } });
+                        }}
+                        placeholder="讀法具體表述…"
+                        font={font}
+                      />
                     </div>
                   </div>
-                  {r.linkedPerspective && (
-                    <div className="text-[9px] text-indigo-700 font-medium pt-1 border-t border-dotted" style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}>
-                      🔗 {r.linkedPerspective}
-                    </div>
-                  )}
+                  <div className="text-[9px] text-indigo-700 font-medium pt-1 border-t border-dotted flex items-center gap-1" style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}>
+                    <span>🔗</span>
+                    <EditableText
+                      value={r.linkedPerspective || ""}
+                      onChange={(v) => {
+                        const list = [...readings];
+                        list[rIdx] = { ...list[rIdx], linkedPerspective: v };
+                        ed?.patch({ whatData: { ...whatData, readings: list } });
+                      }}
+                      placeholder="配對視角（選填）"
+                      font={font}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -1401,8 +2438,23 @@ export function V6Page5What({
             </div>
           )}
 
+          <EditableListAddButton
+            onClick={() => {
+              const list = [
+                ...readings,
+                {
+                  id: `rd-${Date.now()}`,
+                  name: `讀法${readings.length + 1}`,
+                  description: "",
+                },
+              ];
+              ed?.patch({ whatData: { ...whatData, readings: list } });
+            }}
+            label="+ 新增讀法"
+          />
+
           {/* 問題 × 讀法表 */}
-          {readings.length > 0 && readingQuestions.length > 0 && (
+          {(readings.length > 0 || ed?.editable) && (
             <div className="space-y-1.5 pt-1">
               <div className="flex flex-wrap items-center justify-between gap-1">
                 <span className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
@@ -1428,14 +2480,44 @@ export function V6Page5What({
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: theme.borderColor }}>
                     {readingQuestions.map((rq, qIdx) => (
-                      <tr key={rq.id || qIdx} className="bg-white/75">
+                      <tr key={rq.id || qIdx} className="group bg-white/75">
                         <td className="p-2 border-r font-semibold text-slate-900 align-top" style={{ borderColor: theme.borderColor, fontFamily: font }}>
-                          <MathText text={rq.question} />
+                          <div className="flex items-start justify-between gap-1">
+                            <EditableText
+                              multiline
+                              rows={2}
+                              value={rq.question}
+                              onChange={(v) => {
+                                const list = [...readingQuestions];
+                                list[qIdx] = { ...list[qIdx], question: v };
+                                ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                              }}
+                              placeholder="問題陳述…"
+                              font={font}
+                              className="flex-1"
+                            />
+                            <EditableListItemControls
+                              canMoveUp={qIdx > 0}
+                              canMoveDown={qIdx < readingQuestions.length - 1}
+                              onMoveUp={() => {
+                                const list = listMove(readingQuestions, qIdx, -1);
+                                ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                              }}
+                              onMoveDown={() => {
+                                const list = listMove(readingQuestions, qIdx, 1);
+                                ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                              }}
+                              onRemove={() => {
+                                const list = listRemove(readingQuestions, qIdx);
+                                ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                              }}
+                            />
+                          </div>
                         </td>
                         {readings.map((r) => {
-                          const cell = rq.cells?.[r.id];
-                          const isCheap = cell?.isCheapest;
-                          const isInv = cell?.isInvisible || /看不見|看不见/.test(cell?.text || "");
+                          const cell = rq.cells?.[r.id] || { text: "" };
+                          const isCheap = cell.isCheapest;
+                          const isInv = cell.isInvisible || /看不見|看不见/.test(cell.text || "");
                           return (
                             <td
                               key={r.id}
@@ -1448,25 +2530,66 @@ export function V6Page5What({
                               }`}
                               style={{ borderColor: theme.borderColor, fontFamily: font }}
                             >
-                              <div className="flex flex-wrap items-center gap-1 mb-0.5" style={{ fontFamily: UI_FONT }}>
-                                {isCheap && (
-                                  <span className="px-1 py-0.2 rounded bg-emerald-600 text-white text-[9px] font-bold">
-                                    ★ 最便宜
-                                  </span>
-                                )}
-                                {isInv && (
-                                  <span className="px-1 py-0.2 rounded bg-rose-200 text-rose-900 text-[9px] font-bold">
-                                    看不見
-                                  </span>
-                                )}
-                                {isInv && cell?.pointsToReadingId && readingNameMap[cell.pointsToReadingId] && (
-                                  <span className="text-[9px] text-rose-700 font-medium">
-                                    → 見 {readingNameMap[cell.pointsToReadingId]}
-                                  </span>
+                              <div className="flex flex-wrap items-center gap-1 mb-1" style={{ fontFamily: UI_FONT }}>
+                                <EditableToggle
+                                  checked={!!isCheap}
+                                  onChange={(chk) => {
+                                    const list = [...readingQuestions];
+                                    const curCells = { ...(list[qIdx].cells || {}) };
+                                    curCells[r.id] = { ...cell, isCheapest: chk };
+                                    list[qIdx] = { ...list[qIdx], cells: curCells };
+                                    ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                                  }}
+                                  label="最便宜"
+                                  activeClass="bg-emerald-600 text-white border-emerald-600"
+                                />
+                                <EditableToggle
+                                  checked={!!isInv}
+                                  onChange={(chk) => {
+                                    const list = [...readingQuestions];
+                                    const curCells = { ...(list[qIdx].cells || {}) };
+                                    curCells[r.id] = { ...cell, isInvisible: chk };
+                                    list[qIdx] = { ...list[qIdx], cells: curCells };
+                                    ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                                  }}
+                                  label="看不見"
+                                  activeClass="bg-rose-600 text-white border-rose-600"
+                                />
+                                {isInv && ed?.editable && (
+                                  <EditableSelect
+                                    value={cell.pointsToReadingId || ""}
+                                    options={[
+                                      { value: "", label: "指派看得見的讀法…" },
+                                      ...readings
+                                        .filter((other) => other.id !== r.id)
+                                        .map((other) => ({ value: other.id, label: `見 ${other.name}` })),
+                                    ]}
+                                    onChange={(v) => {
+                                      const list = [...readingQuestions];
+                                      const curCells = { ...(list[qIdx].cells || {}) };
+                                      curCells[r.id] = { ...cell, pointsToReadingId: v };
+                                      list[qIdx] = { ...list[qIdx], cells: curCells };
+                                      ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                                    }}
+                                    className="text-[9px]"
+                                  />
                                 )}
                               </div>
                               <div>
-                                <MathText text={cell?.text || "—"} />
+                                <EditableText
+                                  multiline
+                                  rows={2}
+                                  value={cell.text || ""}
+                                  onChange={(v) => {
+                                    const list = [...readingQuestions];
+                                    const curCells = { ...(list[qIdx].cells || {}) };
+                                    curCells[r.id] = { ...cell, text: v };
+                                    list[qIdx] = { ...list[qIdx], cells: curCells };
+                                    ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                                  }}
+                                  placeholder="格內解題步數說明…"
+                                  font={font}
+                                />
                               </div>
                             </td>
                           );
@@ -1476,11 +2599,26 @@ export function V6Page5What({
                   </tbody>
                 </table>
               </div>
+
+              <EditableListAddButton
+                onClick={() => {
+                  const list = [
+                    ...readingQuestions,
+                    {
+                      id: `rq-${Date.now()}`,
+                      question: "新問題",
+                      cells: {},
+                    },
+                  ];
+                  ed?.patch({ whatData: { ...whatData, readingQuestions: list } });
+                }}
+                label="+ 新增問題列"
+              />
             </div>
           )}
 
           {/* 橋（讀法之間的關係，4 種：互通 / 單向 / 限定範圍 / 走不通） */}
-          {readingBridges.length > 0 && (
+          {(readingBridges.length > 0 || ed?.editable) && (
             <div className="space-y-1.5 pt-1">
               <div className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 橋 · 讀法之間的關係（四種：互通〔雙向推導〕／單向〔推導＋反向反例〕／限定範圍〔推導＋範圍條件＋範圍外反例〕／走不通〔理由＋[已證無橋]或[未找到橋]〕）
@@ -1502,60 +2640,187 @@ export function V6Page5What({
                   return (
                     <div
                       key={br.id || bIdx}
-                      className="p-2.5 rounded bg-white/80 border text-xs space-y-1"
+                      className="group p-2.5 rounded bg-white/80 border text-xs space-y-1 relative"
                       style={{ borderColor: theme.borderColor }}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-1" style={{ fontFamily: UI_FONT }}>
-                        <span className="font-bold text-slate-900 text-[11px]">
-                          {fromName} {arrow} {toName}
-                        </span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
-                            br.type === "互通"
-                              ? "bg-emerald-100 text-emerald-900 border-emerald-300"
-                              : br.type === "單向"
-                              ? "bg-blue-100 text-blue-900 border-blue-300"
-                              : br.type === "限定範圍"
-                              ? "bg-amber-100 text-amber-900 border-amber-300"
-                              : br.type === "走不通"
-                              ? "bg-rose-100 text-rose-900 border-rose-300"
-                              : "bg-slate-100 text-slate-700 border-slate-300"
-                          }`}
-                        >
-                          橋類型：{br.type} {br.blockedMark ? `· ${br.blockedMark}` : ""}
-                        </span>
+                        <div className="flex items-center gap-1.5 font-bold text-slate-900 text-[11px]">
+                          {ed?.editable ? (
+                            <>
+                              <EditableSelect
+                                value={br.fromReadingId || ""}
+                                options={readings.map((r) => ({ value: r.id, label: r.name }))}
+                                onChange={(v) => {
+                                  const list = [...readingBridges];
+                                  list[bIdx] = { ...list[bIdx], fromReadingId: v };
+                                  ed.patch({ whatData: { ...whatData, readingBridges: list } });
+                                }}
+                              />
+                              <span>{arrow}</span>
+                              <EditableSelect
+                                value={br.toReadingId || ""}
+                                options={readings.map((r) => ({ value: r.id, label: r.name }))}
+                                onChange={(v) => {
+                                  const list = [...readingBridges];
+                                  list[bIdx] = { ...list[bIdx], toReadingId: v };
+                                  ed.patch({ whatData: { ...whatData, readingBridges: list } });
+                                }}
+                              />
+                            </>
+                          ) : (
+                            <span>{fromName} {arrow} {toName}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {ed?.editable ? (
+                            <EditableSelect
+                              value={br.type || "互通"}
+                              options={[
+                                { value: "互通", label: "互通" },
+                                { value: "單向", label: "單向" },
+                                { value: "限定範圍", label: "限定範圍" },
+                                { value: "走不通", label: "走不通" },
+                              ]}
+                              onChange={(v) => {
+                                const list = [...readingBridges];
+                                list[bIdx] = { ...list[bIdx], type: v as any };
+                                ed.patch({ whatData: { ...whatData, readingBridges: list } });
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                br.type === "互通"
+                                  ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                                  : br.type === "單向"
+                                  ? "bg-blue-100 text-blue-900 border-blue-300"
+                                  : br.type === "限定範圍"
+                                  ? "bg-amber-100 text-amber-900 border-amber-300"
+                                  : br.type === "走不通"
+                                  ? "bg-rose-100 text-rose-900 border-rose-300"
+                                  : "bg-slate-100 text-slate-700 border-slate-300"
+                              }`}
+                            >
+                              橋類型：{br.type} {br.blockedMark ? `· ${br.blockedMark}` : ""}
+                            </span>
+                          )}
+                          <EditableListItemControls
+                            canMoveUp={bIdx > 0}
+                            canMoveDown={bIdx < readingBridges.length - 1}
+                            onMoveUp={() => {
+                              const list = listMove(readingBridges, bIdx, -1);
+                              ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                            }}
+                            onMoveDown={() => {
+                              const list = listMove(readingBridges, bIdx, 1);
+                              ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                            }}
+                            onRemove={() => {
+                              const list = listRemove(readingBridges, bIdx);
+                              ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-0.5 text-[11px] leading-relaxed" style={{ fontFamily: font, color: theme.textColor }}>
-                        {br.forwardProof && (
+                      <div className="space-y-1 text-[11px] leading-relaxed" style={{ fontFamily: font, color: theme.textColor }}>
+                        {(br.type === "互通" || br.type === "單向" || br.type === "限定範圍" || ed?.editable) && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-slate-700">
                               {br.type === "互通" ? "正向推導：" : "推導："}
                             </b>
-                            <MathText text={br.forwardProof} />
+                            <EditableText
+                              multiline
+                              rows={2}
+                              value={br.forwardProof || ""}
+                              onChange={(v) => {
+                                const list = [...readingBridges];
+                                list[bIdx] = { ...list[bIdx], forwardProof: v };
+                                ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                              }}
+                              placeholder="正向推導步驟…"
+                              font={font}
+                            />
                           </div>
                         )}
-                        {br.backwardProof && (
+                        {(br.type === "互通" || ed?.editable) && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-slate-700">反向推導：</b>
-                            <MathText text={br.backwardProof} />
+                            <EditableText
+                              multiline
+                              rows={2}
+                              value={br.backwardProof || ""}
+                              onChange={(v) => {
+                                const list = [...readingBridges];
+                                list[bIdx] = { ...list[bIdx], backwardProof: v };
+                                ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                              }}
+                              placeholder="反向推導步驟…"
+                              font={font}
+                            />
                           </div>
                         )}
-                        {br.scopeCondition && (
+                        {(br.type === "限定範圍" || ed?.editable) && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-amber-800">範圍條件：</b>
-                            <MathText text={br.scopeCondition} />
+                            <EditableText
+                              value={br.scopeCondition || ""}
+                              onChange={(v) => {
+                                const list = [...readingBridges];
+                                list[bIdx] = { ...list[bIdx], scopeCondition: v };
+                                ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                              }}
+                              placeholder="限定適用範圍條件…"
+                              font={font}
+                            />
                           </div>
                         )}
-                        {br.counterExample && (
+                        {(br.type === "單向" || br.type === "限定範圍" || ed?.editable) && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-rose-800">反例：</b>
-                            <MathText text={br.counterExample} />
+                            <EditableText
+                              value={br.counterExample || ""}
+                              onChange={(v) => {
+                                const list = [...readingBridges];
+                                list[bIdx] = { ...list[bIdx], counterExample: v };
+                                ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                              }}
+                              placeholder="反向反例說明…"
+                              font={font}
+                            />
                           </div>
                         )}
-                        {br.blockedReason && (
+                        {(br.type === "走不通" || ed?.editable) && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-rose-800">走不通理由：</b>
-                            <MathText text={br.blockedReason} />
+                            <EditableText
+                              multiline
+                              rows={2}
+                              value={br.blockedReason || ""}
+                              onChange={(v) => {
+                                const list = [...readingBridges];
+                                list[bIdx] = { ...list[bIdx], blockedReason: v };
+                                ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                              }}
+                              placeholder="走不通的本質理由…"
+                              font={font}
+                            />
+                            {ed?.editable && (
+                              <div className="mt-1 flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500 font-sans">標記狀態：</span>
+                                <EditableSelect
+                                  value={br.blockedMark || "[已證無橋]"}
+                                  options={[
+                                    { value: "[已證無橋]", label: "[已證無橋]" },
+                                    { value: "[未找到橋]", label: "[未找到橋]" },
+                                  ]}
+                                  onChange={(v) => {
+                                    const list = [...readingBridges];
+                                    list[bIdx] = { ...list[bIdx], blockedMark: v as any };
+                                    ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                                  }}
+                                />
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1563,6 +2828,24 @@ export function V6Page5What({
                   );
                 })}
               </div>
+
+              <EditableListAddButton
+                onClick={() => {
+                  const list = [
+                    ...readingBridges,
+                    {
+                      id: `br-${Date.now()}`,
+                      fromReadingId: readings[0]?.id || "",
+                      toReadingId: readings[1]?.id || "",
+                      type: "互通" as const,
+                      forwardProof: "",
+                      backwardProof: "",
+                    },
+                  ];
+                  ed?.patch({ whatData: { ...whatData, readingBridges: list } });
+                }}
+                label="+ 新增橋"
+              />
             </div>
           )}
         </div>
@@ -1581,58 +2864,166 @@ export function V6Page5What({
 
       {/* 平行欄位：視角①、②、③... */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {perspectives.length > 0 ? (
+        {(perspectives.length > 0 || ed?.editable) &&
           perspectives.map((p, idx) => {
             const isMirror = p.kind === "mirror" || /借鏡視角|借镜视角/.test(`${p.code || ""} ${p.label || ""}`);
             return (
               <div
                 key={p.code || idx}
-                className="p-3 rounded-sm border space-y-2 flex flex-col shadow-xs"
+                className="group p-3 rounded-sm border space-y-2 flex flex-col shadow-xs relative"
                 style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
               >
                 <div className="flex items-center justify-between border-b pb-1 gap-1" style={{ borderColor: theme.borderColor }}>
-                  <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-                    視角 {idx + 1} · {p.label || p.code}
+                  <span className="text-[11px] font-bold flex-1 min-w-0" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+                    視角 {idx + 1} · <EditableText
+                      value={p.label || p.code}
+                      onChange={(v) => {
+                        const list = [...perspectives];
+                        list[idx] = { ...list[idx], label: v };
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                      placeholder="視角名稱"
+                      font={font}
+                    />
                   </span>
-                  {p.isAlsoReading && (
-                    <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 border border-sky-300 text-[9px] font-bold" style={{ fontFamily: UI_FONT }}>
-                      同時為讀法
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    <EditableToggle
+                      checked={!!p.isAlsoReading}
+                      onChange={(chk) => {
+                        const list = [...perspectives];
+                        list[idx] = { ...list[idx], isAlsoReading: chk };
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                      label="同時為讀法"
+                      activeClass="bg-sky-100 text-sky-900 border-sky-300"
+                    />
+                    <EditableListItemControls
+                      canMoveUp={idx > 0}
+                      canMoveDown={idx < perspectives.length - 1}
+                      onMoveUp={() => {
+                        const list = listMove(perspectives, idx, -1);
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                      onMoveDown={() => {
+                        const list = listMove(perspectives, idx, 1);
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                      onRemove={() => {
+                        const list = listRemove(perspectives, idx);
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                    />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-                  <span className={!isMirror ? "font-bold text-slate-900" : ""}>{!isMirror ? "☑" : "□"} 視角</span>
-                  <span className={isMirror ? "font-bold text-indigo-800" : ""}>{isMirror ? "☑" : "□"} 借鏡視角</span>
+                  {ed?.editable ? (
+                    <EditableSelect
+                      value={p.kind || "perspective"}
+                      options={[
+                        { value: "perspective", label: "☑ 視角" },
+                        { value: "mirror", label: "☑ 借鏡視角" },
+                      ]}
+                      onChange={(v) => {
+                        const list = [...perspectives];
+                        list[idx] = { ...list[idx], kind: v as any };
+                        ed.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className={!isMirror ? "font-bold text-slate-900" : ""}>{!isMirror ? "☑" : "□"} 視角</span>
+                      <span className={isMirror ? "font-bold text-indigo-800" : ""}>{isMirror ? "☑" : "□"} 借鏡視角</span>
+                    </>
+                  )}
                 </div>
                 <div className="text-[10px] font-mono p-1.5 rounded bg-white/75 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
                   <div className="font-bold text-slate-800" style={{ fontFamily: UI_FONT }}>
                     (1) 對應表：
                   </div>
                   <div style={{ fontFamily: font, color: theme.textColor }}>
-                    <MathText text={p.mappingTable || `${p.code} ↔ ${p.label}`} />
+                    <EditableText
+                      value={p.mappingTable || ""}
+                      onChange={(v) => {
+                        const list = [...perspectives];
+                        list[idx] = { ...list[idx], mappingTable: v };
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                      placeholder="例：對象A ↔ 對象B；變數x ↔ 變數y"
+                      font={font}
+                    />
                   </div>
                 </div>
                 <div className="text-xs leading-relaxed flex-1" style={{ color: theme.textColor, fontFamily: font }}>
-                  <MathText text={p.content || "（視角闡述內容）"} />
+                  <EditableText
+                    multiline
+                    rows={4}
+                    value={p.content || ""}
+                    onChange={(v) => {
+                      const list = [...perspectives];
+                      list[idx] = { ...list[idx], content: v };
+                      ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                    }}
+                    placeholder="視角闡述內容（支援 LaTeX）"
+                    font={font}
+                  />
                 </div>
-                {p.derivedFact && (
-                  <div className="text-[10px] p-1.5 rounded bg-emerald-50/80 border border-emerald-200 text-emerald-950 space-y-0.5">
-                    <div className="font-bold text-emerald-800" style={{ fontFamily: UI_FONT }}>
-                      (2) 導出可獨立核對的具體事實：
-                    </div>
-                    <div style={{ fontFamily: font }}>
-                      <MathText text={p.derivedFact} />
-                    </div>
+                <div className="text-[10px] p-1.5 rounded bg-emerald-50/80 border border-emerald-200 text-emerald-950 space-y-0.5">
+                  <div className="font-bold text-emerald-800" style={{ fontFamily: UI_FONT }}>
+                    (2) 導出可獨立核對的具體事實：
                   </div>
-                )}
+                  <div style={{ fontFamily: font }}>
+                    <EditableText
+                      value={p.derivedFact || ""}
+                      onChange={(v) => {
+                        const list = [...perspectives];
+                        list[idx] = { ...list[idx], derivedFact: v };
+                        ed?.patch({ whatData: { ...whatData, perspectives: list } });
+                      }}
+                      placeholder="導出可獨立核對的具體事實…"
+                      font={font}
+                    />
+                  </div>
+                </div>
               </div>
             );
-          })
-        ) : (
-          <div className="col-span-3 p-4 rounded border text-center text-xs italic" style={{ borderColor: theme.borderColor, color: theme.mutedTextColor }}>
-            （尚未建立視角，建議至少撰寫 3 個不同視角）
-          </div>
-        )}
+          })}
+      </div>
+
+      <div className="flex justify-center gap-2">
+        <EditableListAddButton
+          onClick={() => {
+            const list = [
+              ...perspectives,
+              {
+                code: `視角${perspectives.length + 1}`,
+                label: `視角${perspectives.length + 1}`,
+                content: "",
+                kind: "perspective" as const,
+                mappingTable: "",
+                derivedFact: "",
+              },
+            ];
+            ed?.patch({ whatData: { ...whatData, perspectives: list } });
+          }}
+          label="+ 新增視角"
+        />
+        <EditableListAddButton
+          onClick={() => {
+            const list = [
+              ...perspectives,
+              {
+                code: `[借鏡視角:標題]`,
+                label: `借鏡視角`,
+                content: "",
+                kind: "mirror" as const,
+                mappingTable: "",
+                derivedFact: "",
+              },
+            ];
+            ed?.patch({ whatData: { ...whatData, perspectives: list } });
+          }}
+          label="+ 新增借鏡視角"
+        />
       </div>
 
       {whatData.mirrorPerspectiveTriedNote && (
@@ -1640,7 +3031,16 @@ export function V6Page5What({
           className="p-2 rounded border text-[11px] bg-slate-50 text-slate-700"
           style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}
         >
-          <b>借鏡視角誠實標註：</b>{whatData.mirrorPerspectiveTriedNote}
+          <b>借鏡視角誠實標註：</b>
+          <EditableText
+            value={whatData.mirrorPerspectiveTriedNote}
+            onChange={(v) =>
+              ed?.patch({
+                whatData: { ...whatData, mirrorPerspectiveTriedNote: v },
+              })
+            }
+            font={font}
+          />
         </div>
       )}
 
@@ -1682,7 +3082,7 @@ export function V6Page5What({
             { key: "generalize", label: "3. 推廣 (Generalize)", val: extensions.generalize, q: extQuestions.generalize, desc: "放寬條件／範疇會變成什麼" },
             { key: "specialize", label: "4. 推窄 (Specialize)", val: extensions.specialize, q: extQuestions.specialize, desc: "收緊條件會成什麼特例（無則從缺）" },
             { key: "translate", label: "5. 翻譯 (Translate)", val: extensions.translate, q: extQuestions.translate, desc: "用本概念語言重講別的現象（結構不完全貼合/對外部理解變多）" },
-            ...(!whatData.v6DemoPreservedNote || extensions.construct
+            ...(!whatData.v6DemoPreservedNote || extensions.construct || ed?.editable
               ? [{ key: "construct", label: "6. 造 (Construct · v7新增)", val: extensions.construct, q: extQuestions.construct, desc: "用此概念當零件，經邏輯未強迫的選擇造出新量/對象/操作" }]
               : []),
           ].map((ext) => (
@@ -1701,50 +3101,148 @@ export function V6Page5What({
                   {ext.desc}
                 </div>
                 <div className="text-xs leading-relaxed pt-0.5" style={{ color: theme.textColor, fontFamily: font }}>
-                  {ext.val ? <MathText text={ext.val} /> : <span className="text-slate-300 italic text-[10px]">（從缺）</span>}
+                  <EditableText
+                    multiline
+                    rows={2}
+                    value={ext.val || ""}
+                    onChange={(v) => {
+                      ed?.patch({
+                        whatData: {
+                          ...whatData,
+                          extensions: {
+                            ...extensions,
+                            [ext.key]: v,
+                          },
+                        },
+                      });
+                    }}
+                    placeholder="（從缺，點擊輸入內容）"
+                    font={font}
+                  />
                 </div>
 
                 {/* 若為第 6 方向「造」，顯示必寫的三件事 */}
-                {ext.key === "construct" && (constructDetails.choice || constructDetails.alternative || constructDetails.linkBack) && (
+                {ext.key === "construct" && (
                   <div className="mt-1.5 pt-1.5 border-t border-teal-200 space-y-1 text-[10px]" style={{ fontFamily: font }}>
-                    {constructDetails.name && (
-                      <div className="font-bold text-teal-900" style={{ fontFamily: UI_FONT }}>
-                        造出新對象：<MathText text={constructDetails.name} />
-                      </div>
-                    )}
-                    {constructDetails.choice && (
-                      <div>
-                        <b className="text-teal-800" style={{ fontFamily: UI_FONT }}>① 選了什麼：</b>
-                        <MathText text={constructDetails.choice} />
-                      </div>
-                    )}
-                    {constructDetails.alternative && (
-                      <div>
-                        <b className="text-amber-800" style={{ fontFamily: UI_FONT }}>② 換一個選擇會怎樣：</b>
-                        <MathText text={constructDetails.alternative} />
-                      </div>
-                    )}
-                    {constructDetails.linkBack && (
-                      <div>
-                        <b className="text-indigo-800" style={{ fontFamily: UI_FONT }}>③ 連回對象（可核對式子）：</b>
-                        <MathText text={constructDetails.linkBack} />
-                      </div>
-                    )}
+                    <div className="font-bold text-teal-900" style={{ fontFamily: UI_FONT }}>
+                      造出新對象：
+                      <EditableText
+                        value={constructDetails.name || ""}
+                        onChange={(v) => {
+                          ed?.patch({
+                            whatData: {
+                              ...whatData,
+                              extensions: {
+                                ...extensions,
+                                constructDetails: {
+                                  ...constructDetails,
+                                  name: v,
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        placeholder="新對象名稱"
+                        font={font}
+                      />
+                    </div>
+                    <div>
+                      <b className="text-teal-800" style={{ fontFamily: UI_FONT }}>① 選了什麼：</b>
+                      <EditableText
+                        value={constructDetails.choice || ""}
+                        onChange={(v) => {
+                          ed?.patch({
+                            whatData: {
+                              ...whatData,
+                              extensions: {
+                                ...extensions,
+                                constructDetails: {
+                                  ...constructDetails,
+                                  choice: v,
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        placeholder="邏輯未強迫的選擇…"
+                        font={font}
+                      />
+                    </div>
+                    <div>
+                      <b className="text-amber-800" style={{ fontFamily: UI_FONT }}>② 換一個選擇會怎樣：</b>
+                      <EditableText
+                        value={constructDetails.alternative || ""}
+                        onChange={(v) => {
+                          ed?.patch({
+                            whatData: {
+                              ...whatData,
+                              extensions: {
+                                ...extensions,
+                                constructDetails: {
+                                  ...constructDetails,
+                                  alternative: v,
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        placeholder="換一個選擇後的效果…"
+                        font={font}
+                      />
+                    </div>
+                    <div>
+                      <b className="text-indigo-800" style={{ fontFamily: UI_FONT }}>③ 連回對象（可核對式子）：</b>
+                      <EditableText
+                        value={constructDetails.linkBack || ""}
+                        onChange={(v) => {
+                          ed?.patch({
+                            whatData: {
+                              ...whatData,
+                              extensions: {
+                                ...extensions,
+                                constructDetails: {
+                                  ...constructDetails,
+                                  linkBack: v,
+                                },
+                              },
+                            },
+                          });
+                        }}
+                        placeholder="可核對式子…"
+                        font={font}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
 
               {/* v7 功能判準洞見檢查題 */}
-              {ext.q && (
-                <div className="p-1.5 rounded bg-indigo-50/80 border border-indigo-200 text-[10px] text-indigo-950">
-                  <span className="font-bold text-indigo-800" style={{ fontFamily: UI_FONT }}>
-                    [功能判準題]{" "}
-                  </span>
-                  <span style={{ fontFamily: font }}>
-                    <MathText text={ext.q} />
-                  </span>
-                </div>
-              )}
+              <div className="p-1.5 rounded bg-indigo-50/80 border border-indigo-200 text-[10px] text-indigo-950">
+                <span className="font-bold text-indigo-800" style={{ fontFamily: UI_FONT }}>
+                  [功能判準題]{" "}
+                </span>
+                <span style={{ fontFamily: font }}>
+                  <EditableText
+                    value={ext.q || ""}
+                    onChange={(v) => {
+                      ed?.patch({
+                        whatData: {
+                          ...whatData,
+                          extensions: {
+                            ...extensions,
+                            questions: {
+                              ...extQuestions,
+                              [ext.key]: v,
+                            },
+                          },
+                        },
+                      });
+                    }}
+                    placeholder="拿掉這句就會做錯的題…"
+                    font={font}
+                  />
+                </span>
+              </div>
             </div>
           ))}
         </div>
@@ -1771,10 +3269,11 @@ export function V6Page6Apply({
   font: string;
   theme?: CardPaperTheme;
 }) {
-  const howData = card.howData;
-  const checks = howData?.checks || [];
-  const branches = howData?.branches || [];
-  const cans = howData?.can || [];
+  const ed = useCardEdit();
+  const howData = card.howData || { checks: [], branches: [], can: [], status: "compiled" as const };
+  const checks = howData.checks || [];
+  const branches = howData.branches || [];
+  const cans = howData.can || [];
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -1823,30 +3322,113 @@ export function V6Page6Apply({
           <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             不管走哪條分支都要先過的前置關卡。判準：眾多分歧裡多一種→歸分支；不管走哪條現在全都不能選→歸CHECK。允許兩段式：看到原始情境X→做變換/識別動作→變成能判斷的Y→檢查Y→結論
           </p>
-          <div className="flex-1 space-y-1.5 pt-1 text-xs">
+          <div className="flex-1 space-y-2 pt-1 text-xs">
             {checks.length > 0 ? (
               checks.map((c, ci) => (
-                <div key={c.id || ci} className="p-2 rounded bg-white/70 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
-                  <div className="font-bold text-blue-900">
-                    看到：<MathText text={c.cue} />
-                  </div>
-                  {c.twoStageTransform && (
-                    <div className="text-[11px] text-amber-900 bg-amber-50/80 px-1.5 py-0.5 rounded border border-amber-200">
-                      <b>→ 兩段式變換／識別：</b>
-                      <MathText text={c.twoStageTransform} />
+                <div key={c.id || ci} className="group p-2.5 rounded bg-white/80 border space-y-1 relative" style={{ borderColor: theme.borderColor }}>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="font-bold text-blue-900 flex-1 flex items-center gap-1">
+                      <span>看到：</span>
+                      <EditableText
+                        value={c.cue}
+                        onChange={(v) => {
+                          const list = [...checks];
+                          list[ci] = { ...list[ci], cue: v };
+                          ed?.patch({ howData: { ...howData, checks: list } });
+                        }}
+                        placeholder="看到特徵 / 觸發線索"
+                        font={font}
+                      />
                     </div>
-                  )}
-                  <div className="font-bold text-emerald-900">
-                    → 檢查：<MathText text={c.check} />
+                    <EditableListItemControls
+                      canMoveUp={ci > 0}
+                      canMoveDown={ci < checks.length - 1}
+                      onMoveUp={() => {
+                        const list = listMove(checks, ci, -1);
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                      onMoveDown={() => {
+                        const list = listMove(checks, ci, 1);
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                      onAddBelow={() => {
+                        const list = listInsert(checks, ci, {
+                          id: `chk-${Date.now()}`,
+                          cue: "",
+                          check: "",
+                          source: "[源:定義/前置]",
+                        });
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                      onRemove={() => {
+                        const list = listRemove(checks, ci);
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                    />
                   </div>
-                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
-                    {c.source || "[源:定義/前置]"}
+
+                  <div className="text-[11px] text-amber-900 bg-amber-50/80 px-2 py-1 rounded border border-amber-200">
+                    <b style={{ fontFamily: UI_FONT }}>→ 兩段式變換／識別：</b>
+                    <EditableText
+                      value={c.twoStageTransform || ""}
+                      onChange={(v) => {
+                        const list = [...checks];
+                        list[ci] = { ...list[ci], twoStageTransform: v };
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                      placeholder="做變換/識別動作（選填）"
+                      font={font}
+                    />
+                  </div>
+
+                  <div className="font-bold text-emerald-900 flex items-center gap-1">
+                    <span>→ 檢查：</span>
+                    <EditableText
+                      value={c.check}
+                      onChange={(v) => {
+                        const list = [...checks];
+                        list[ci] = { ...list[ci], check: v };
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                      placeholder="前置條件檢查式 / 判定標格"
+                      font={font}
+                    />
+                  </div>
+
+                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5 flex items-center gap-1" style={{ fontFamily: UI_FONT }}>
+                    <span>來源：</span>
+                    <EditableText
+                      value={c.source || "[源:定義/前置]"}
+                      onChange={(v) => {
+                        const list = [...checks];
+                        list[ci] = { ...list[ci], source: v };
+                        ed?.patch({ howData: { ...howData, checks: list } });
+                      }}
+                      placeholder="[源:定義/前置]"
+                      font={font}
+                    />
                   </div>
                 </div>
               ))
             ) : (
               <p className="italic text-slate-400 text-xs">（尚未建立 CHECK 關卡）</p>
             )}
+
+            <EditableListAddButton
+              onClick={() => {
+                const list = [
+                  ...checks,
+                  {
+                    id: `chk-${Date.now()}`,
+                    cue: "",
+                    check: "",
+                    source: "[源:定義/前置]",
+                  },
+                ];
+                ed?.patch({ howData: { ...howData, checks: list } });
+              }}
+              label="+ 新增 CHECK 關卡"
+            />
           </div>
         </div>
 
@@ -1863,21 +3445,95 @@ export function V6Page6Apply({
           <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             只問「下游解鎖了什麼原本做不到的具體問題」，跟卡片類型無關，挖不到不用硬湊。某能力只有特定分支才有，寫在該分支末端，不進CAN。
           </p>
-          <div className="flex-1 space-y-1.5 pt-1 text-xs">
+          <div className="flex-1 space-y-2 pt-1 text-xs">
             {cans.length > 0 ? (
               cans.map((cn, cni) => (
-                <div key={cn.id || cni} className="p-2 rounded bg-white/70 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
-                  <div className="font-bold text-purple-900">
-                    看到 <MathText text={cn.trigger} /> → 就能 <MathText text={cn.capability} />
+                <div key={cn.id || cni} className="group p-2.5 rounded bg-white/80 border space-y-1 relative" style={{ borderColor: theme.borderColor }}>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="font-bold text-purple-900 flex-1 flex flex-wrap items-center gap-1">
+                      <span>看到</span>
+                      <EditableText
+                        value={cn.trigger}
+                        onChange={(v) => {
+                          const list = [...cans];
+                          list[cni] = { ...list[cni], trigger: v };
+                          ed?.patch({ howData: { ...howData, can: list } });
+                        }}
+                        placeholder="觸發情境"
+                        font={font}
+                      />
+                      <span>→ 就能</span>
+                      <EditableText
+                        value={cn.capability}
+                        onChange={(v) => {
+                          const list = [...cans];
+                          list[cni] = { ...list[cni], capability: v };
+                          ed?.patch({ howData: { ...howData, can: list } });
+                        }}
+                        placeholder="解鎖新能力"
+                        font={font}
+                      />
+                    </div>
+                    <EditableListItemControls
+                      canMoveUp={cni > 0}
+                      canMoveDown={cni < cans.length - 1}
+                      onMoveUp={() => {
+                        const list = listMove(cans, cni, -1);
+                        ed?.patch({ howData: { ...howData, can: list } });
+                      }}
+                      onMoveDown={() => {
+                        const list = listMove(cans, cni, 1);
+                        ed?.patch({ howData: { ...howData, can: list } });
+                      }}
+                      onAddBelow={() => {
+                        const list = listInsert(cans, cni, {
+                          id: `can-${Date.now()}`,
+                          trigger: "",
+                          capability: "",
+                          source: "[源:HOW解鎖]",
+                        });
+                        ed?.patch({ howData: { ...howData, can: list } });
+                      }}
+                      onRemove={() => {
+                        const list = listRemove(cans, cni);
+                        ed?.patch({ howData: { ...howData, can: list } });
+                      }}
+                    />
                   </div>
-                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
-                    {cn.source || "[源:HOW解鎖]"}
+                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5 flex items-center gap-1" style={{ fontFamily: UI_FONT }}>
+                    <span>來源：</span>
+                    <EditableText
+                      value={cn.source || "[源:HOW解鎖]"}
+                      onChange={(v) => {
+                        const list = [...cans];
+                        list[cni] = { ...list[cni], source: v };
+                        ed?.patch({ howData: { ...howData, can: list } });
+                      }}
+                      placeholder="[源:HOW解鎖]"
+                      font={font}
+                    />
                   </div>
                 </div>
               ))
             ) : (
               <p className="italic text-slate-400 text-xs">（尚未填寫 CAN 下游解鎖）</p>
             )}
+
+            <EditableListAddButton
+              onClick={() => {
+                const list = [
+                  ...cans,
+                  {
+                    id: `can-${Date.now()}`,
+                    trigger: "",
+                    capability: "",
+                    source: "[源:HOW解鎖]",
+                  },
+                ];
+                ed?.patch({ howData: { ...howData, can: list } });
+              }}
+              label="+ 新增 CAN 下游解鎖"
+            />
           </div>
         </div>
       </div>
@@ -1911,44 +3567,175 @@ export function V6Page6Apply({
             {branches.length > 0 ? (
               branches.map((b, bi) => (
                 <React.Fragment key={b.id || bi}>
-                  <div className="grid grid-cols-12 py-2 px-2 items-start text-xs bg-white/60">
+                  <div className="group grid grid-cols-12 py-2 px-2 items-start text-xs bg-white/70 relative">
                     <div className="col-span-4 font-bold text-slate-900 pr-2 space-y-1">
-                      <div>
-                        【看到 {b.title || `分支 ${bi + 1}`}】
-                        {b.isCompiled ? (
-                          <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>
-                        ) : (
-                          <span className="ml-1 text-[9px] text-amber-600 font-normal">[未編譯]</span>
-                        )}
+                      <div className="flex items-center gap-1">
+                        <span>【看到</span>
+                        <EditableText
+                          value={b.title || `分支 ${bi + 1}`}
+                          onChange={(v) => {
+                            const list = updateBranchDeep(branches, [bi], (node) => ({ ...node, title: v }));
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          placeholder={`分支 ${bi + 1}`}
+                          font={font}
+                          className="flex-1"
+                        />
+                        <span>】</span>
+                        <EditableToggle
+                          checked={!!b.isCompiled}
+                          onChange={(chk) => {
+                            const list = updateBranchDeep(branches, [bi], (node) => ({ ...node, isCompiled: chk }));
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          label={b.isCompiled ? "✓編譯" : "未編譯"}
+                          activeClass="bg-emerald-600 text-white border-emerald-600"
+                        />
+                        <EditableListItemControls
+                          canMoveUp={bi > 0}
+                          canMoveDown={bi < branches.length - 1}
+                          onMoveUp={() => {
+                            const list = listMove(branches, bi, -1);
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          onMoveDown={() => {
+                            const list = listMove(branches, bi, 1);
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          onAddBelow={() => {
+                            const list = listInsert(branches, bi, {
+                              id: `brn-${Date.now()}`,
+                              title: `分支 ${branches.length + 1}`,
+                              action: "",
+                              isCompiled: true,
+                              source: "[源:WHY/分支]",
+                            });
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          onRemove={() => {
+                            const list = removeBranchDeep(branches, [bi]);
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                        />
                       </div>
-                      {b.constructionAction && (
-                        <div className="text-[10px] font-normal text-amber-900 bg-amber-50 p-1 rounded border border-amber-200">
-                          <b>兩段式構造：</b>
-                          <MathText text={b.constructionAction} />
-                        </div>
-                      )}
+                      <div className="text-[10px] font-normal text-amber-900 bg-amber-50 p-1 rounded border border-amber-200">
+                        <b style={{ fontFamily: UI_FONT }}>兩段式構造：</b>
+                        <EditableText
+                          value={b.constructionAction || ""}
+                          onChange={(v) => {
+                            const list = updateBranchDeep(branches, [bi], (node) => ({ ...node, constructionAction: v }));
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          placeholder="無固定程序的構造動作…"
+                          font={font}
+                        />
+                      </div>
                     </div>
                     <div className="col-span-6 leading-relaxed pr-2 space-y-1.5" style={{ fontFamily: font }}>
                       <div>
-                        <MathText text={b.action || "（執行步驟）"} />
+                        <EditableText
+                          multiline
+                          rows={2}
+                          value={b.action || ""}
+                          onChange={(v) => {
+                            const list = updateBranchDeep(branches, [bi], (node) => ({ ...node, action: v }));
+                            ed?.patch({ howData: { ...howData, branches: list } });
+                          }}
+                          placeholder="分支執行步驟與流程…"
+                          font={font}
+                        />
                       </div>
                       {/* 分支內的區域性 CHECK */}
-                      {b.checks && b.checks.length > 0 && (
+                      {((b.checks && b.checks.length > 0) || ed?.editable) && (
                         <div className="space-y-1 pt-1">
-                          {b.checks.map((rc: any, rci: number) => (
-                            <div key={rc.id || rci} className="p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px]" style={{ fontFamily: UI_FONT }}>
-                              <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
-                              看到「<MathText text={rc.cue} />」
-                              {rc.twoStageTransform && <> → 變換：<MathText text={rc.twoStageTransform} /></>}
-                              {" "}→ 檢查：<MathText text={rc.check} />{" "}
-                              {rc.source && <span className="text-indigo-700 font-mono">{rc.source}</span>}
+                          {(b.checks || []).map((rc: any, rci: number) => (
+                            <div key={rc.id || rci} className="group p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px] space-y-0.5" style={{ fontFamily: UI_FONT }}>
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
+                                <EditableListItemControls
+                                  canMoveUp={rci > 0}
+                                  canMoveDown={rci < (b.checks || []).length - 1}
+                                  onMoveUp={() => {
+                                    const list = updateBranchDeep(branches, [bi], (node) => ({
+                                      ...node,
+                                      checks: listMove(node.checks || [], rci, -1),
+                                    }));
+                                    ed?.patch({ howData: { ...howData, branches: list } });
+                                  }}
+                                  onMoveDown={() => {
+                                    const list = updateBranchDeep(branches, [bi], (node) => ({
+                                      ...node,
+                                      checks: listMove(node.checks || [], rci, 1),
+                                    }));
+                                    ed?.patch({ howData: { ...howData, branches: list } });
+                                  }}
+                                  onRemove={() => {
+                                    const list = updateBranchDeep(branches, [bi], (node) => ({
+                                      ...node,
+                                      checks: listRemove(node.checks || [], rci),
+                                    }));
+                                    ed?.patch({ howData: { ...howData, branches: list } });
+                                  }}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span>看到：</span>
+                                <EditableText
+                                  value={rc.cue}
+                                  onChange={(v) => {
+                                    const list = updateBranchDeep(branches, [bi], (node) => {
+                                      const nChecks = [...(node.checks || [])];
+                                      nChecks[rci] = { ...nChecks[rci], cue: v };
+                                      return { ...node, checks: nChecks };
+                                    });
+                                    ed?.patch({ howData: { ...howData, branches: list } });
+                                  }}
+                                  placeholder="區域看到"
+                                  font={font}
+                                />
+                                <span>→ 檢查：</span>
+                                <EditableText
+                                  value={rc.check}
+                                  onChange={(v) => {
+                                    const list = updateBranchDeep(branches, [bi], (node) => {
+                                      const nChecks = [...(node.checks || [])];
+                                      nChecks[rci] = { ...nChecks[rci], check: v };
+                                      return { ...node, checks: nChecks };
+                                    });
+                                    ed?.patch({ howData: { ...howData, branches: list } });
+                                  }}
+                                  placeholder="區域檢查"
+                                  font={font}
+                                />
+                              </div>
                             </div>
                           ))}
+                          <EditableListAddButton
+                            onClick={() => {
+                              const list = updateBranchDeep(branches, [bi], (node) => ({
+                                ...node,
+                                checks: [
+                                  ...(node.checks || []),
+                                  { id: `rchk-${Date.now()}`, cue: "", check: "", source: "[源:區域CHECK]" },
+                                ],
+                              }));
+                              ed?.patch({ howData: { ...howData, branches: list } });
+                            }}
+                            label="+ 區域 CHECK"
+                          />
                         </div>
                       )}
                     </div>
                     <div className="col-span-2 text-right text-[10px] text-indigo-700 font-mono">
-                      {b.source || "[源:WHY/分支]"}
+                      <EditableText
+                        value={b.source || "[源:WHY/分支]"}
+                        onChange={(v) => {
+                          const list = updateBranchDeep(branches, [bi], (node) => ({ ...node, source: v }));
+                          ed?.patch({ howData: { ...howData, branches: list } });
+                        }}
+                        placeholder="[源:WHAT-讀法n]"
+                        font={font}
+                      />
                     </div>
                   </div>
                   {/* 巢狀子分支 */}
@@ -1956,41 +3743,105 @@ export function V6Page6Apply({
                     b.branches.map((sb: any, sbi: number) => (
                       <div
                         key={sb.id || `${bi}-${sbi}`}
-                        className="grid grid-cols-12 py-2 px-2 pl-6 items-start text-xs bg-slate-50/80 border-t border-dashed"
+                        className="group grid grid-cols-12 py-2 px-2 pl-6 items-start text-xs bg-slate-50/80 border-t border-dashed"
                         style={{ borderColor: theme.borderColor }}
                       >
-                        <div className="col-span-4 font-bold text-slate-800 pr-2">
-                          ↳ 【{sb.title || `子分支 ${sbi + 1}`}】
-                          {sb.isCompiled ? (
-                            <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>
-                          ) : (
-                            <span className="ml-1 text-[9px] text-amber-600 font-normal">[未編譯]</span>
-                          )}
+                        <div className="col-span-4 font-bold text-slate-800 pr-2 space-y-1">
+                          <div className="flex items-center gap-1">
+                            <span>↳ 【</span>
+                            <EditableText
+                              value={sb.title || `子分支 ${sbi + 1}`}
+                              onChange={(v) => {
+                                const list = updateBranchDeep(branches, [bi, sbi], (node) => ({ ...node, title: v }));
+                                ed?.patch({ howData: { ...howData, branches: list } });
+                              }}
+                              placeholder={`子分支 ${sbi + 1}`}
+                              font={font}
+                              className="flex-1"
+                            />
+                            <span>】</span>
+                            <EditableToggle
+                              checked={!!sb.isCompiled}
+                              onChange={(chk) => {
+                                const list = updateBranchDeep(branches, [bi, sbi], (node) => ({ ...node, isCompiled: chk }));
+                                ed?.patch({ howData: { ...howData, branches: list } });
+                              }}
+                              label={sb.isCompiled ? "✓編譯" : "未編譯"}
+                              activeClass="bg-emerald-600 text-white border-emerald-600"
+                            />
+                            <EditableListItemControls
+                              canMoveUp={sbi > 0}
+                              canMoveDown={sbi < (b.branches || []).length - 1}
+                              onMoveUp={() => {
+                                const list = updateBranchDeep(branches, [bi], (node) => ({
+                                  ...node,
+                                  branches: listMove(node.branches || [], sbi, -1),
+                                }));
+                                ed?.patch({ howData: { ...howData, branches: list } });
+                              }}
+                              onMoveDown={() => {
+                                const list = updateBranchDeep(branches, [bi], (node) => ({
+                                  ...node,
+                                  branches: listMove(node.branches || [], sbi, 1),
+                                }));
+                                ed?.patch({ howData: { ...howData, branches: list } });
+                              }}
+                              onRemove={() => {
+                                const list = removeBranchDeep(branches, [bi, sbi]);
+                                ed?.patch({ howData: { ...howData, branches: list } });
+                              }}
+                            />
+                          </div>
                         </div>
                         <div className="col-span-6 leading-relaxed pr-2 space-y-1" style={{ fontFamily: font }}>
                           <div>
-                            <MathText text={sb.action || ""} />
+                            <EditableText
+                              multiline
+                              rows={2}
+                              value={sb.action || ""}
+                              onChange={(v) => {
+                                const list = updateBranchDeep(branches, [bi, sbi], (node) => ({ ...node, action: v }));
+                                ed?.patch({ howData: { ...howData, branches: list } });
+                              }}
+                              placeholder="子分支流程步驟…"
+                              font={font}
+                            />
                           </div>
-                          {sb.checks &&
-                            sb.checks.map((srcChk: any, sci: number) => (
-                              <div
-                                key={srcChk.id || sci}
-                                className="p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px]"
-                                style={{ fontFamily: UI_FONT }}
-                              >
-                                <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
-                                看到「<MathText text={srcChk.cue} />」
-                                {srcChk.twoStageTransform && <> → 變換：<MathText text={srcChk.twoStageTransform} /></>}
-                                {" "}→ 檢查：<MathText text={srcChk.check} />{" "}
-                                {srcChk.source && <span className="text-indigo-700 font-mono">{srcChk.source}</span>}
-                              </div>
-                            ))}
                         </div>
                         <div className="col-span-2 text-right text-[10px] text-indigo-700 font-mono">
-                          {sb.source || b.source || "[源:WHY/子分支]"}
+                          <EditableText
+                            value={sb.source || b.source || "[源:WHY/子分支]"}
+                            onChange={(v) => {
+                              const list = updateBranchDeep(branches, [bi, sbi], (node) => ({ ...node, source: v }));
+                              ed?.patch({ howData: { ...howData, branches: list } });
+                            }}
+                            placeholder="[源:...]"
+                            font={font}
+                          />
                         </div>
                       </div>
                     ))}
+
+                  {/* 子分支新增按鈕 */}
+                  {ed?.editable && (
+                    <div className="p-1 pl-6 bg-slate-50/50 border-t border-dotted flex justify-start" style={{ borderColor: theme.borderColor }}>
+                      <button
+                        onClick={() => {
+                          const list = addBranchDeep(branches, [bi], {
+                            id: `sbr-${Date.now()}`,
+                            title: `子分支 ${(b.branches || []).length + 1}`,
+                            action: "",
+                            isCompiled: true,
+                            source: b.source || "[源:WHY/子分支]",
+                          });
+                          ed?.patch({ howData: { ...howData, branches: list } });
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 font-sans transition-all"
+                      >
+                        + 為此分支新增子分支
+                      </button>
+                    </div>
+                  )}
                 </React.Fragment>
               ))
             ) : (
@@ -2000,6 +3851,23 @@ export function V6Page6Apply({
             )}
           </div>
         </div>
+
+        <EditableListAddButton
+          onClick={() => {
+            const list = [
+              ...branches,
+              {
+                id: `brn-${Date.now()}`,
+                title: `分支 ${branches.length + 1}`,
+                action: "",
+                isCompiled: true,
+                source: "[源:WHY/分支]",
+              },
+            ];
+            ed?.patch({ howData: { ...howData, branches: list } });
+          }}
+          label="+ 新增分支"
+        />
       </div>
 
       {/* 底部來源標籤規範 */}
@@ -2033,6 +3901,7 @@ export function V6Page7ProcessLogs({
   processLogs?: Array<any>;
   theme?: CardPaperTheme;
 }) {
+  const ed = useCardEdit();
   const logs = (processLogs || []).filter((l) => !l.cardId || l.cardId === card.id);
 
   return (

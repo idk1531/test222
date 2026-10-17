@@ -4,13 +4,13 @@ import React from "react";
 import { Layers, Check, Sparkles } from "lucide-react";
 import { MathText } from "./MathText";
 
-export const SHAPE_DEFS: Record<string, { name: string; short: string; color: string; text: string; desc: string }> = {
-  A: { name: "推導鏈型", short: "A", color: "bg-blue-500", text: "text-blue-700", desc: "由前提出發，步步演繹到結論的連鎖推理" },
-  B: { name: "存在性+技法型", short: "B", color: "bg-emerald-500", text: "text-emerald-700", desc: "先保證對象存在，再給出構造/求解的專用技法" },
-  C: { name: "判別程序型", short: "C", color: "bg-amber-500", text: "text-amber-700", desc: "輸入狀態 → 條件分支 → 輸出判定的決策流程" },
-  D: { name: "前提/框架型", short: "D", color: "bg-purple-500", text: "text-purple-700", desc: "體系不可內部證明的出發公設或適用框架" },
-  E: { name: "定義/約定型", short: "E", color: "bg-rose-500", text: "text-rose-700", desc: "概念的嚴格定義、符號約定或表象變換" },
-  COMPOSITE: { name: "複合型", short: "複", color: "bg-slate-800", text: "text-slate-800", desc: "同一知識點內含兩種以上推理形狀，需標明各段歸屬" },
+export const SHAPE_DEFS: Record<string, { name: string; short: string; color: string; hex: string; text: string; desc: string }> = {
+  A: { name: "推導鏈型", short: "A", color: "bg-blue-500", hex: "#3b82f6", text: "text-blue-700", desc: "由前提出發，步步演繹到結論的連鎖推理" },
+  B: { name: "存在性+技法型", short: "B", color: "bg-emerald-500", hex: "#10b981", text: "text-emerald-700", desc: "先保證對象存在，再給出構造/求解的專用技法" },
+  C: { name: "判別程序型", short: "C", color: "bg-amber-500", hex: "#f59e0b", text: "text-amber-700", desc: "輸入狀態 → 條件分支 → 輸出判定的決策流程" },
+  D: { name: "前提/框架型", short: "D", color: "bg-purple-500", hex: "#a855f7", text: "text-purple-700", desc: "體系不可內部證明的出發公設或適用框架" },
+  E: { name: "定義/約定型", short: "E", color: "bg-rose-500", hex: "#f43f5e", text: "text-rose-700", desc: "概念的嚴格定義、符號約定或表象變換" },
+  COMPOSITE: { name: "複合型", short: "複", color: "bg-slate-800", hex: "#1e293b", text: "text-slate-800", desc: "同一知識點內含兩種以上推理形狀，需標明各段歸屬" },
 };
 
 interface ShapeClassifierProps {

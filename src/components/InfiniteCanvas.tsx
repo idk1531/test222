@@ -722,6 +722,13 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
                   <KnowledgeCardNode
                     card={card}
                     isSelected={isSelected}
+                    accentColor={obj.style?.accentColor}
+                    onUpdateAccentColor={(color) =>
+                      onUpdateObjects(
+                        [{ id: obj.id, style: { ...obj.style, accentColor: color } }],
+                        { final: true }
+                      )
+                    }
                     onSelect={() => { if (!movedObjectRef.current) onSelectCard(card); movedObjectRef.current = false; }}
                     onOpenPreview={() => onOpenPreview(card)}
                     onOpenDetail={() => onOpenCardDetail(card)}

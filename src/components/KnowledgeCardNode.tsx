@@ -1,8 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { MathText } from "./MathText";
-import { Maximize2, Eye } from "lucide-react";
+import { Maximize2, Eye, Palette } from "lucide-react";
 import { resolveFont } from "@/lib/fonts";
 import { runFourPointCheckOnCard, STATUS_COMPILED, STATUS_UNCOMPILED } from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
@@ -285,6 +285,8 @@ export interface CardData {
 interface KnowledgeCardNodeProps {
   card: CardData;
   isSelected?: boolean;
+  accentColor?: string;
+  onUpdateAccentColor?: (color?: string) => void;
   onSelect?: () => void;
   onOpenPreview?: (card: CardData) => void;
   onOpenDetail?: (card: CardData) => void;
@@ -305,6 +307,8 @@ const GRANULARITY_STYLE: Record<string, string> = {
 export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
   card,
   isSelected = false,
+  accentColor,
+  onUpdateAccentColor,
   onSelect,
   onOpenPreview,
   onOpenDetail,
@@ -312,6 +316,8 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
 }) => {
   // 每張卡片可獨立指定字體，未指定才用全域字體
   const ff = resolveFont(card.cardFont || fontFamily);
+
+  const [showColorPicker, setShowColorPicker] = useState(false);
 
   // v4：追問點與直覺陷阱共用同一套「[已推出]」計數
   const probeTotal = (card.thoughtPoints?.length || 0) + (card.intuitionTraps?.length || 0);
@@ -323,6 +329,21 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
 
   const shapeDef = SHAPE_DEFS[card.reasoningShape] || SHAPE_DEFS.A;
   const isComposite = card.reasoningShape === "COMPOSITE";
+
+  // v7.2：卡片節點色（預設為該卡推理形狀的預設 hex 色）
+  const effectiveAccentColor = accentColor || shapeDef.hex || "#3b82f6";
+
+  const COLOR_PRESETS = [
+    { name: "預設 (形狀色)", color: shapeDef.hex || "#3b82f6" },
+    { name: "曜石藍", color: "#3b82f6" },
+    { name: "翡翠綠", color: "#10b981" },
+    { name: "暖琥珀", color: "#f59e0b" },
+    { name: "紫羅蘭", color: "#a855f7" },
+    { name: "玫瑰紅", color: "#f43f5e" },
+    { name: "天空藍", color: "#0284c7" },
+    { name: "靛藍", color: "#4f46e5" },
+    { name: "深鐵灰", color: "#1e293b" },
+  ];
 
   // v4 八點自我檢查＋符號綁定（構造思路＋WHY正文）彙總，僅供快速掃描
   const reports = runFourPointCheckOnCard(card);
@@ -340,11 +361,11 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
       }`}
       style={{
         fontFamily: ff,
-        border: isSelected ? "2px solid #3b82f6" : "1px solid #e2e8f0",
+        border: isSelected ? `2px solid ${effectiveAccentColor}` : "1px solid #e2e8f0",
       }}
     >
       {/* 顆粒度色帶 */}
-      <div className={`h-1 w-full ${shapeDef.color}`} />
+      <div className="h-1 w-full" style={{ backgroundColor: effectiveAccentColor }} />
 
       <div className="flex-1 flex flex-col p-3.5 min-h-0">
         {/* 第一行：顆粒度 + 推理形狀 + 操作 */}
@@ -354,7 +375,8 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
               {card.granularity}
             </span>
             <span
-              className={`text-[9px] font-bold px-1.5 py-0.5 rounded text-white ${shapeDef.color}`}
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white"
+              style={{ backgroundColor: effectiveAccentColor }}
               title={shapeDef.name}
             >
               {isComposite && card.compositeShapes?.length
@@ -363,7 +385,19 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity relative">
+            {onUpdateAccentColor && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowColorPicker(!showColorPicker);
+                }}
+                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                title="自訂卡片節點色"
+              >
+                <Palette className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); onOpenPreview?.(card); }}
               className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
@@ -378,6 +412,69 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
+
+            {/* 色彩選擇選單 Popover */}
+            {showColorPicker && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-full right-0 mt-1 z-30 p-2.5 bg-white rounded-lg shadow-xl border border-slate-200 w-48 space-y-2 text-xs"
+              >
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                  <span>卡片節點顏色</span>
+                  <button
+                    onClick={() => setShowColorPicker(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  {COLOR_PRESETS.map((preset, idx) => {
+                    const isCur = effectiveAccentColor.toLowerCase() === preset.color.toLowerCase();
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          onUpdateAccentColor?.(idx === 0 ? undefined : preset.color);
+                          setShowColorPicker(false);
+                        }}
+                        className="h-6 rounded border transition-transform hover:scale-105 flex items-center justify-center shadow-2xs text-[10px] text-white font-bold"
+                        style={{
+                          backgroundColor: preset.color,
+                          borderColor: isCur ? "#000000" : "transparent",
+                        }}
+                        title={preset.name}
+                      >
+                        {isCur && "✓"}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[11px]">
+                  <span className="text-slate-500">自訂色彩</span>
+                  <input
+                    type="color"
+                    value={effectiveAccentColor.startsWith("#") ? effectiveAccentColor : "#3b82f6"}
+                    onChange={(e) => onUpdateAccentColor?.(e.target.value)}
+                    className="w-7 h-5 rounded cursor-pointer border border-slate-300"
+                  />
+                </div>
+
+                {accentColor && (
+                  <button
+                    onClick={() => {
+                      onUpdateAccentColor?.(undefined);
+                      setShowColorPicker(false);
+                    }}
+                    className="w-full text-center text-[10px] text-slate-500 hover:text-blue-600 pt-1"
+                  >
+                    還原為形狀預設色
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
