@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useImperativeHandle } from "react";
 import { KnowledgeCardNode, CardData } from "./KnowledgeCardNode";
 import { KaTeXRenderer } from "./KaTeXRenderer";
 import { FunctionPlotCanvas } from "./FunctionPlotCanvas";
@@ -56,7 +56,7 @@ export interface RelationData {
   notes?: string;
 }
 
-interface InfiniteCanvasProps {
+export interface InfiniteCanvasProps {
   objects: CanvasObjectData[];
   cards: CardData[];
   relations: RelationData[];
@@ -70,6 +70,11 @@ interface InfiniteCanvasProps {
   onImageTextIndependenceTest: (text: string) => void;
   onOpenCardDetail: (card: CardData) => void;
   fontFamily?: string;
+  /**
+   * v8.0 書房「在畫布定位」：外部（書脊預覽）呼叫 apiRef.current.focusCard(cardId)，
+   * 把該卡的畫布物件置中並選取。只新增定位入口，不改變畫布任何手勢邏輯。
+   */
+  apiRef?: React.RefObject<{ focusCard: (cardId: string) => void } | null>;
   backgroundConfig?: {
     type: "solid" | "gradient" | "pattern" | "custom";
     solidColor?: string;
@@ -143,6 +148,7 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   onImageTextIndependenceTest,
   onOpenCardDetail,
   fontFamily,
+  apiRef,
 }) => {
   // ---- view state ----
   const [zoom, setZoom] = useState(0.85);
@@ -183,6 +189,28 @@ export const InfiniteCanvas: React.FC<InfiniteCanvasProps> = ({
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  // v8.0：書房「在畫布定位」——置中指定卡片物件並選取（數值全部讀 ref，handle 維持穩定）
+  useImperativeHandle(
+    apiRef,
+    () => ({
+      focusCard: (cardId: string) => {
+        const obj = objectsRef.current.find((o) => o.cardId === cardId);
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!obj || !rect) return;
+        const z = zoomRef.current;
+        const nextPan = {
+          x: rect.width / 2 - (obj.x + obj.width / 2) * z,
+          y: rect.height / 2 - (obj.y + obj.height / 2) * z,
+        };
+        panRef.current = nextPan;
+        setPan(nextPan);
+        selectedIdsRef.current = [obj.id];
+        setSelectedIds([obj.id]);
+      },
+    }),
+    []
+  );
 
   const toCanvas = (clientX: number, clientY: number): PointerPoint => {
     const rect = containerRef.current?.getBoundingClientRect();

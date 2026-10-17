@@ -22,6 +22,7 @@ import { FieldCustomizer, CustomField } from "@/components/FieldCustomizer";
 import { FontSelector } from "@/components/FontSelector";
 import { ManualV7Modal } from "@/components/ManualV7Modal";
 import { AppThemeCustomizer } from "@/components/AppThemeCustomizer";
+import { StudyRoomView } from "@/components/StudyRoomView";
 import { useAppTheme } from "@/lib/appTheme";
 import {
   Sparkles,
@@ -48,6 +49,7 @@ import {
   RotateCcw,
   ClipboardCopy,
   GraduationCap,
+  Library,
 } from "lucide-react";
 
 interface BackgroundConfig {
@@ -66,10 +68,10 @@ interface BackgroundConfig {
 }
 
 export default function WorkbenchPage() {
-  // Main view state
+  // Main view state（v8.0：書房為預設；純畫布 view 保留可切回）
   const [activeView, setActiveView] = useState<
-    "canvas" | "network" | "cards" | "logs" | "blindspots" | "motifs"
-  >("canvas");
+    "study" | "canvas" | "network" | "cards" | "logs" | "blindspots" | "motifs"
+  >("study");
 
   // 資料改為純前端狀態倉庫（本機快取 + 檔案匯入/匯出，無資料庫、無 Node.js 後端）
   const workspaceState = useWorkspaceState();
@@ -206,7 +208,10 @@ export default function WorkbenchPage() {
   };
 
   const handleDeleteCard = async (id: string) => {
-    actions.deleteCard(id);
+    // v8.0：刪卡時書本一起移除，先確認
+    if (window.confirm("確定刪除此卡片嗎？對應書架上的書本也會一起移除。")) {
+      actions.deleteCard(id);
+    }
   };
 
   // Create new card from template or scratch（純前端）
@@ -400,6 +405,7 @@ export default function WorkbenchPage() {
   }
 
   const views = [
+    { key: "study", label: "書房", icon: Library },
     { key: "canvas", label: "畫布", icon: Grid },
     { key: "network", label: "知識網", icon: Share2 },
     { key: "cards", label: "卡片", icon: BookOpen },
@@ -769,6 +775,24 @@ export default function WorkbenchPage() {
               : undefined,
         }}
       >
+        {activeView === "study" && (
+          <StudyRoomView
+            objects={canvasObjects}
+            cards={cards}
+            relations={relations}
+            onUpdateObjects={handleUpdateCanvasObjects}
+            onDeleteObject={handleDeleteCanvasObject}
+            onSelectCard={(c) => setDetailCard(c)}
+            onOpenPreview={(c) => setPreviewCard(c)}
+            onRunAudit={(c) => setAuditCard(c)}
+            onExpansionTest={(c) => setExpansionCard(c)}
+            onOpenEditRelation={(rel) => setEditingRelation(rel)}
+            onImageTextIndependenceTest={(caption) => setImageCheckCaption(caption)}
+            onOpenCardDetail={(c) => setDetailCard(c)}
+            fontFamily={selectedFont}
+          />
+        )}
+
         {activeView === "canvas" && (
           <InfiniteCanvas
             objects={canvasObjects}

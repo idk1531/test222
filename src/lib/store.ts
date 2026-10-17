@@ -11,9 +11,19 @@ import {
   SEED_MOTHER_TOPICS,
 } from "./seedData";
 import { normalizeLogType } from "./inspect";
+import {
+  ensureStudyState,
+  makeBookForCard,
+  makeCategory,
+  genStudyId,
+  UNCATEGORIZED_ID,
+} from "./study";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
-const STORAGE_KEY = "scinotes-workspace-v7.1";
+// v8.0：虛擬書房資料結構（分類/書本/視角）隨工作區一起保存。
+// 讀取時先找新 key，找不到再讀舊 key 遷移；舊 key 保留不刪（舊資料不能掉）。
+const STORAGE_KEY = "scinotes-workspace-v8.0";
+const LEGACY_STORAGE_KEYS = ["scinotes-workspace-v7.1"];
 
 /** v7.2：各推理形狀的預設節點主色（與 SHAPE_DEFS.hex 一致；避免 lib → component 相依） */
 const SHAPE_ACCENT_HEX: Record<string, string> = {
@@ -30,7 +40,7 @@ function clone<T>(x: T): T {
 }
 
 function buildSeedState(): WorkspaceState {
-  return {
+  return ensureStudyState({
     workspace: clone(SEED_WORKSPACE),
     cards: clone(SEED_CARDS),
     canvasObjects: clone(SEED_CANVAS_OBJECTS),
@@ -40,7 +50,7 @@ function buildSeedState(): WorkspaceState {
     motherTopics: clone(SEED_MOTHER_TOPICS),
     versions: [],
     savedAt: new Date().toISOString(),
-  };
+  } as unknown as WorkspaceState);
 }
 
 /** v4：舊本機資料的過程日誌符號（⟲⚡⇹⋯）轉為文字標籤 */
@@ -93,17 +103,19 @@ function migrateCardToV5(card: any): any {
 /** v5：整套 state 的結構遷移（本機載入與 JSON 匯入共用；export 供測試與外部工具使用） */
 export function applySchemaMigrations(s: WorkspaceState): WorkspaceState {
   const next = normalizeState(s);
-  return { ...next, cards: (next.cards || []).map(migrateCardToV5) };
+  // v5：WHEN 併入 HOW；v8：補齊書房分類/書本/視角（舊檔匯入自動補齊，舊資料不掉）
+  return ensureStudyState({ ...next, cards: (next.cards || []).map(migrateCardToV5) });
 }
 
 function loadInitialState(): WorkspaceState {
   if (typeof window === "undefined") return buildSeedState();
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
+    // 先讀 v8.0 key；沒有再讀舊 key（讀到後會寫入新 key，舊 key 保留備份）
+    for (const key of [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
       const parsed = JSON.parse(raw) as ExportFilePayload;
       if (parsed?.state?.workspace?.id) {
-        // v5：WHEN 併入 HOW——載入時自動遷移舊（v4 以下）結構
         return applySchemaMigrations({ ...parsed.state, savedAt: new Date().toISOString() });
       }
     }
@@ -155,6 +167,17 @@ function setState(recipe: (s: WorkspaceState) => WorkspaceState, options: { defe
     persist(state);
   }
   listeners.forEach((l) => l());
+}
+
+/**
+ * v8.0：純函式的狀態更新入口（不碰 I/O、不碰時間戳）。
+ * 下一輪接傳輸層（op log / WebRTC）時，遠端操作可統一以 patch 形式套用：
+ *   state = applyPatch(state, patch)
+ * 內容變更（cards 等）與空間/佈置變更（canvasObjects、studyBooks 等）分欄存放，
+ * patch 可依欄位分流。
+ */
+export function applyPatch(state: WorkspaceState, patch: Partial<WorkspaceState>): WorkspaceState {
+  return { ...state, ...patch };
 }
 
 export function subscribe(l: () => void) {
@@ -304,6 +327,8 @@ export const actions = {
           updatedAt: new Date().toISOString(),
         },
       ],
+      // v8.0：新卡同時建立對應書本（1:1），預設進未分類櫃板
+      studyBooks: [...s.studyBooks, makeBookForCard(id)],
     }));
     return id;
   },
@@ -340,6 +365,8 @@ export const actions = {
       cards: s.cards.filter((c) => c.id !== id),
       canvasObjects: s.canvasObjects.filter((o) => o.cardId !== id),
       relations: s.relations.filter((r) => r.fromCardId !== id && r.toCardId !== id),
+      // v8.0：刪卡時書本一起移除（卡↔書 1:1）
+      studyBooks: s.studyBooks.filter((b) => b.cardId !== id),
     }));
   },
 
@@ -375,6 +402,175 @@ export const actions = {
     setState((s) => ({
       ...s,
       relations: s.relations.filter((r) => r.id !== id),
+    }));
+  },
+
+  // ================= v8.0 書房：分類 / 書本 / 佈局 =================
+  // 注意：書本與畫布座標是兩套獨立資料——以下 action 只改 studyBooks/studyCategories，
+  // 絕不改 canvasObjects.x/y（移動書本不得移動卡片；移動卡片也不得改 orderInShelf）。
+
+  /** 新增分類櫃板（插在保留「未分類」之前） */
+  addCategory(data: { name: string; color?: string }) {
+    const id = genStudyId("cat");
+    setState((s) => {
+      const userCats = s.studyCategories.filter((c) => c.id !== UNCATEGORIZED_ID);
+      const cat = makeCategory(data.name, userCats.length, data.color);
+      return {
+        ...s,
+        studyCategories: [...userCats, { ...cat, id }],
+      };
+    });
+    return id;
+  },
+
+  /** 改名／改色（關聯以 id 為準，改名不影響任何書本） */
+  updateCategory(id: string, updates: { name?: string; color?: string }) {
+    setState((s) => ({
+      ...s,
+      studyCategories: s.studyCategories.map((c) => {
+        if (c.id !== id) return c;
+        // 保留分類不可改名為空
+        const name =
+          updates.name !== undefined
+            ? updates.name.trim() || (id === UNCATEGORIZED_ID ? c.name : "新分類")
+            : c.name;
+        return { ...c, name, color: updates.color ?? c.color, updatedAt: new Date().toISOString() };
+      }),
+    }));
+  },
+
+  /** 刪除分類（保留分類不可刪）；該櫃板的書全部回未分類，不刪卡 */
+  deleteCategory(id: string) {
+    if (id === UNCATEGORIZED_ID) return;
+    setState((s) => ({
+      ...s,
+      studyCategories: s.studyCategories
+        .filter((c) => c.id !== id)
+        .map((c, i) => ({ ...c, order: i, updatedAt: new Date().toISOString() })),
+      studyBooks: s.studyBooks.map((b) =>
+        b.categoryId === id
+          ? { ...b, categoryId: null, updatedAt: new Date().toISOString() }
+          : b
+      ),
+    }));
+  },
+
+  /** 櫃板上下移動（保留分類恆在最後、不可移動） */
+  moveCategory(id: string, dir: -1 | 1) {
+    setState((s) => {
+      const userCats = s.studyCategories
+        .filter((c) => c.id !== UNCATEGORIZED_ID)
+        .sort((a, b) => a.order - b.order);
+      const idx = userCats.findIndex((c) => c.id === id);
+      const swap = idx + dir;
+      if (idx < 0 || swap < 0 || swap >= userCats.length) return s;
+      const next = [...userCats];
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      const renumbered = next.map((c, i) => ({ ...c, order: i, updatedAt: new Date().toISOString() }));
+      const reserved = s.studyCategories.find((c) => c.id === UNCATEGORIZED_ID);
+      return {
+        ...s,
+        studyCategories: reserved
+          ? [...renumbered, { ...reserved, order: renumbered.length }]
+          : renumbered,
+      };
+    });
+  },
+
+  /** 指派卡片到分類（null = 未分類）；移到櫃板尾端 */
+  assignCardCategory(cardId: string, categoryId: string | null) {
+    setState((s) => {
+      const targetKey = categoryId ?? UNCATEGORIZED_ID;
+      const targetBooks = s.studyBooks
+        .filter((b) => (b.categoryId ?? UNCATEGORIZED_ID) === targetKey && b.cardId !== cardId)
+        .sort((a, b) => a.orderInShelf - b.orderInShelf);
+      return {
+        ...s,
+        studyBooks: s.studyBooks.map((b) =>
+          b.cardId === cardId
+            ? {
+                ...b,
+                categoryId,
+                orderInShelf: targetBooks.length,
+                updatedAt: new Date().toISOString(),
+              }
+            : b
+        ),
+      };
+    });
+  },
+
+  /**
+   * 書本重新排列：移到指定櫃板（categoryId；null = 未分類）的第 index 個位置。
+   * 櫃板內排序與跨櫃板移動共用此入口；只動 orderInShelf / categoryId，不動畫布座標。
+   */
+  reorderBook(cardId: string, categoryId: string | null, index: number) {
+    setState((s) => {
+      const moving = s.studyBooks.find((b) => b.cardId === cardId);
+      if (!moving) return s;
+      const fromKey = moving.categoryId ?? UNCATEGORIZED_ID;
+      const toKey = categoryId ?? UNCATEGORIZED_ID;
+      const now = new Date().toISOString();
+
+      // 來源櫃板（不含移動中的書）重新編號
+      const fromBooks = s.studyBooks
+        .filter((b) => b.cardId !== cardId && (b.categoryId ?? UNCATEGORIZED_ID) === fromKey)
+        .sort((a, b) => a.orderInShelf - b.orderInShelf);
+      // 目標櫃板（不含移動中的書）插入指定位置
+      const toBooks =
+        fromKey === toKey
+          ? fromBooks
+          : s.studyBooks
+              .filter((b) => b.cardId !== cardId && (b.categoryId ?? UNCATEGORIZED_ID) === toKey)
+              .sort((a, b) => a.orderInShelf - b.orderInShelf);
+      const clamped = Math.max(0, Math.min(toBooks.length, Math.round(index)));
+      toBooks.splice(clamped, 0, { ...moving, categoryId, updatedAt: now });
+
+      const orderMap = new Map<string, { categoryId: string | null; orderInShelf: number }>();
+      fromBooks.forEach((b, i) => orderMap.set(b.cardId, { categoryId: b.categoryId, orderInShelf: i }));
+      if (fromKey !== toKey) {
+        toBooks.forEach((b, i) => orderMap.set(b.cardId, { categoryId, orderInShelf: i }));
+      } else {
+        toBooks.forEach((b, i) => orderMap.set(b.cardId, { categoryId, orderInShelf: i }));
+      }
+      return {
+        ...s,
+        studyBooks: s.studyBooks.map((b) => {
+          const next = orderMap.get(b.cardId);
+          return next ? { ...b, ...next, updatedAt: now } : b;
+        }),
+      };
+    });
+  },
+
+  /** 確保每張卡都有對應書本（缺則補建；1:1 檢查的安全網） */
+  ensureBookForCard(cardId: string) {
+    setState((s) => {
+      if (s.studyBooks.some((b) => b.cardId === cardId)) return s;
+      const card = s.cards.find((c) => c.id === cardId);
+      if (!card) return s;
+      const books = [...s.studyBooks, makeBookForCard(cardId)];
+      const targetKey = UNCATEGORIZED_ID;
+      const targetBooks = books
+        .filter((b) => (b.categoryId ?? UNCATEGORIZED_ID) === targetKey)
+        .sort((a, b) => a.orderInShelf - b.orderInShelf);
+      return {
+        ...s,
+        studyBooks: books.map((b) =>
+          b.cardId === cardId ? { ...b, orderInShelf: targetBooks.length } : b
+        ),
+      };
+    });
+  },
+
+  /** 書房佈局（視角記憶、書架層數）；與卡片內容無關 */
+  updateStudyLayout(updates: Partial<{ camera: { yaw: number; pitch: number }; shelfRows: number }>) {
+    setState((s) => ({
+      ...s,
+      studyLayout: {
+        camera: updates.camera ? { ...updates.camera } : s.studyLayout.camera,
+        shelfRows: updates.shelfRows ?? s.studyLayout.shelfRows,
+      },
     }));
   },
 
@@ -673,6 +869,10 @@ export function importFile(file: File): Promise<{ ok: boolean; error?: string }>
           blindSpots: parsed.state!.blindSpots || [],
           motherTopics: parsed.state!.motherTopics || [],
           versions: parsed.state!.versions || [],
+          // v8.0：書房資料；舊檔沒有這三欄時由 applySchemaMigrations → ensureStudyState 補齊
+          studyCategories: parsed.state!.studyCategories || [],
+          studyBooks: parsed.state!.studyBooks || [],
+          studyLayout: parsed.state!.studyLayout || { camera: { yaw: 0, pitch: 0 }, shelfRows: 1 },
           savedAt: new Date().toISOString(),
         }));
         resolve({ ok: true });
