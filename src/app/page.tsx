@@ -22,7 +22,7 @@ import { FieldCustomizer, CustomField } from "@/components/FieldCustomizer";
 import { FontSelector } from "@/components/FontSelector";
 import { ManualV7Modal } from "@/components/ManualV7Modal";
 import { AppThemeCustomizer } from "@/components/AppThemeCustomizer";
-import { AppTheme, useAppTheme } from "@/lib/appTheme";
+import { useAppTheme } from "@/lib/appTheme";
 import {
   Sparkles,
   Search,
@@ -65,71 +65,6 @@ interface BackgroundConfig {
   overlayOpacity?: number;
 }
 
-/** v7.2：header icon 按鈕——動態配色只能走 inline style（Tailwind class 無法 runtime 換色） */
-function ThemedIconButton({
-  theme,
-  title,
-  onClick,
-  children,
-  className = "",
-}: {
-  theme: AppTheme;
-  title: string;
-  onClick: () => void;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      title={title}
-      className={`touch-target flex items-center justify-center rounded-lg transition-colors ${className}`}
-      style={{
-        color: hovered ? theme.headerText : theme.headerMuted,
-        backgroundColor: hovered ? theme.hoverBg : "transparent",
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** v7.2：header 分頁按鈕（active / inactive / hover 全部由 AppTheme 決定） */
-function ThemedTabButton({
-  theme,
-  active,
-  onClick,
-  children,
-}: {
-  theme: AppTheme;
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-pressed={active}
-      className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-all whitespace-nowrap"
-      style={{
-        backgroundColor: active ? theme.tabActiveBg : hovered ? theme.hoverBg : "transparent",
-        color: active ? theme.tabActiveText : theme.tabInactiveText,
-        boxShadow: active ? "0 1px 2px rgba(15, 23, 42, 0.08)" : undefined,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
 export default function WorkbenchPage() {
   // Main view state
   const [activeView, setActiveView] = useState<
@@ -150,6 +85,8 @@ export default function WorkbenchPage() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [showCopyBackupAction, setShowCopyBackupAction] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [showTutorial, setShowTutorial] = useState(false);
 
   // 避免伺服器預渲染與瀏覽器本機快取的水合差異：
   // 等待客戶端掛載後才讀取本機快取狀態
@@ -185,12 +122,11 @@ export default function WorkbenchPage() {
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showBackgroundCustomizer, setShowBackgroundCustomizer] = useState(false);
   const [showFieldCustomizer, setShowFieldCustomizer] = useState(false);
+  const [showAppThemeCustomizer, setShowAppThemeCustomizer] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showManualV7, setShowManualV7] = useState(false);
-  const [showTutorial, setShowTutorial] = useState(false);
-  const [showAppThemeCustomizer, setShowAppThemeCustomizer] = useState(false);
 
-  // v7.2：頂部工具列配色（localStorage["scinotes-app-theme"]）
+  // v7.2 頂部工具列與介面配色自訂
   const { theme: appTheme, setTheme: setAppTheme, resetTheme: resetAppTheme } = useAppTheme();
 
   // 匯出資料為 JSON 檔案：Share → Download → 新頁另存 三層備援
@@ -474,21 +410,25 @@ export default function WorkbenchPage() {
 
   return (
     <div className="app-shell flex flex-col overflow-hidden bg-slate-50 text-slate-900">
-      {/* Header — responsive（v7.2：配色由 AppTheme 以 inline style 套用） */}
+      {/* Header — responsive */}
       <header
-        className="h-12 sm:h-11 border-b px-3 sm:px-4 flex items-center justify-between z-40 flex-shrink-0 safe-top"
-        style={{ backgroundColor: appTheme.headerBg, borderBottomColor: appTheme.headerBorder }}
+        className="h-12 sm:h-11 border-b px-3 sm:px-4 flex items-center justify-between z-40 flex-shrink-0 safe-top transition-colors"
+        style={{
+          backgroundColor: appTheme.headerBg,
+          borderColor: appTheme.headerBorder,
+          color: appTheme.headerText,
+        }}
       >
         {/* Left: Logo + Nav（桌機顯示完整 tab，手機只顯示 logo + 漢堡） */}
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-          <ThemedIconButton
-            theme={appTheme}
-            title="選單"
+          <button
             onClick={() => setShowMobileMenu(true)}
-            className="md:hidden"
+            className="md:hidden touch-target flex items-center justify-center rounded-lg"
+            style={{ color: appTheme.headerMuted }}
+            title="選單"
           >
             <Menu className="w-5 h-5" />
-          </ThemedIconButton>
+          </button>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <Atom className="w-4 h-4" style={{ color: appTheme.accent }} />
@@ -503,15 +443,19 @@ export default function WorkbenchPage() {
             style={{ backgroundColor: appTheme.tabBarBg }}
           >
             {views.map(({ key, label, icon: Icon }) => (
-              <ThemedTabButton
+              <button
                 key={key}
-                theme={appTheme}
-                active={activeView === key}
                 onClick={() => setActiveView(key)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-all whitespace-nowrap"
+                style={{
+                  backgroundColor: activeView === key ? appTheme.tabActiveBg : "transparent",
+                  color: activeView === key ? appTheme.tabActiveText : appTheme.tabInactiveText,
+                  boxShadow: activeView === key ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+                }}
               >
                 <Icon className="w-3 h-3" />
                 <span>{label}</span>
-              </ThemedTabButton>
+              </button>
             ))}
           </div>
         </div>
@@ -525,102 +469,107 @@ export default function WorkbenchPage() {
         <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
           <button
             onClick={() => setShowManualV7(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold transition-opacity hover:opacity-85"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold transition-colors"
             style={{
-              backgroundColor: appTheme.tabBarBg,
-              color: appTheme.headerText,
-              borderColor: appTheme.headerBorder,
+              backgroundColor: `${appTheme.accent}14`,
+              color: appTheme.accent,
+              borderColor: `${appTheme.accent}40`,
             }}
             title="理科筆記 · 使用手冊（樹狀圖版 · v7修正）——含讀法、問題×讀法表、橋、造、[衍生]邊與附錄B/C/D"
           >
-            <BookOpen className="w-3.5 h-3.5" style={{ color: appTheme.accent }} />
+            <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden lg:inline">v7 手冊 (讀法/附錄B·C·D)</span>
             <span className="lg:hidden">v7手冊</span>
           </button>
-          <ThemedIconButton theme={appTheme} title="搜尋 (⌘K)" onClick={() => setShowSearchModal(true)}>
+          <button
+            onClick={() => setShowSearchModal(true)}
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="搜尋 (⌘K)"
+          >
             <Search className="w-4 h-4" />
-          </ThemedIconButton>
-          <ThemedIconButton
-            theme={appTheme}
-            title="使用教學（重播）"
+          </button>
+          <button
             onClick={() => setShowTutorial(true)}
-            className="hidden sm:flex"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="使用教學（重播）"
           >
             <GraduationCap className="w-4 h-4" />
-          </ThemedIconButton>
-          {/* 這些次要設定手機收進漢堡選單 */}
-          <ThemedIconButton
-            theme={appTheme}
-            title="背景設定"
-            onClick={() => setShowBackgroundCustomizer(true)}
-            className="hidden sm:flex"
+          </button>
+          {/* 配色自訂 */}
+          <button
+            onClick={() => setShowAppThemeCustomizer(true)}
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="頂部工具列配色設定"
           >
             <Palette className="w-4 h-4" />
-          </ThemedIconButton>
-          <ThemedIconButton
-            theme={appTheme}
-            title="欄位設定"
+          </button>
+          <button
+            onClick={() => setShowBackgroundCustomizer(true)}
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="畫布背景設定"
+          >
+            <Grid className="w-4 h-4" />
+          </button>
+          <button
             onClick={() => setShowFieldCustomizer(true)}
-            className="hidden sm:flex"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="欄位設定"
           >
             <Settings className="w-4 h-4" />
-          </ThemedIconButton>
+          </button>
 
           <div className="hidden sm:block">
             <FontSelector currentFont={selectedFont} onSelect={setSelectedFont} />
           </div>
 
-          {/* v7.2：工具列配色自訂 */}
-          <div className="relative hidden sm:block">
-            <ThemedIconButton
-              theme={appTheme}
-              title="工具列配色自訂"
-              onClick={() => setShowAppThemeCustomizer((v) => !v)}
-            >
-              <Palette className="w-4 h-4" style={{ color: appTheme.accent }} />
-            </ThemedIconButton>
-            {showAppThemeCustomizer && (
-              <div className="fixed right-2 top-14 sm:absolute sm:right-0 sm:top-full sm:mt-1 z-[70]">
-                <AppThemeCustomizer
-                  currentTheme={appTheme}
-                  onUpdateTheme={setAppTheme}
-                  onResetTheme={resetAppTheme}
-                  onClose={() => setShowAppThemeCustomizer(false)}
-                />
-              </div>
-            )}
-          </div>
-
           <div className="hidden sm:block w-px h-5 mx-1" style={{ backgroundColor: appTheme.headerBorder }} />
 
           {/* 資料管理：匯出 / 匯入 / 重置（純前端靜態檔案） */}
-          <ThemedIconButton theme={appTheme} title="匯出工作區為 JSON 檔案" onClick={handleExport}>
+          <button
+            onClick={handleExport}
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="匯出工作區為 JSON 檔案"
+          >
             <Download className="w-4 h-4" />
-          </ThemedIconButton>
-          <ThemedIconButton theme={appTheme} title="從 JSON 檔案匯入工作區" onClick={handleImportClick}>
+          </button>
+          <button
+            onClick={handleImportClick}
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="從 JSON 檔案匯入工作區"
+          >
             <Upload className="w-4 h-4" />
-          </ThemedIconButton>
-          <ThemedIconButton
-            theme={appTheme}
-            title="下載／分享無效時：複製 JSON 備份到剪貼簿"
+          </button>
+          <button
             onClick={handleCopyExport}
-            className="hidden sm:flex"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="下載／分享無效時：複製 JSON 備份到剪貼簿"
           >
             <ClipboardCopy className="w-4 h-4" />
-          </ThemedIconButton>
-          <ThemedIconButton
-            theme={appTheme}
-            title="重置為初始範例資料"
+          </button>
+          <button
             onClick={handleReset}
-            className="hidden sm:flex"
+            className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
+            style={{ color: appTheme.headerMuted }}
+            title="重置為初始範例資料"
           >
             <RotateCcw className="w-4 h-4" />
-          </ThemedIconButton>
+          </button>
 
           <button
             onClick={() => setShowTemplateModal(true)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-90 touch-target"
-            style={{ backgroundColor: appTheme.accent, color: appTheme.accentText }}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors touch-target shadow-2xs"
+            style={{
+              backgroundColor: appTheme.accent,
+              color: appTheme.accentText,
+            }}
           >
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">新增</span>
@@ -709,11 +658,18 @@ export default function WorkbenchPage() {
                 <span>使用教學</span>
               </button>
               <button
+                onClick={() => { setShowAppThemeCustomizer(true); setShowMobileMenu(false); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
+              >
+                <Palette className="w-4 h-4 text-purple-600" />
+                <span>工具列配色設定</span>
+              </button>
+              <button
                 onClick={() => { setShowBackgroundCustomizer(true); setShowMobileMenu(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
               >
-                <Palette className="w-4 h-4" />
-                <span>背景設定</span>
+                <Grid className="w-4 h-4" />
+                <span>畫布背景設定</span>
               </button>
               <button
                 onClick={() => { setShowFieldCustomizer(true); setShowMobileMenu(false); }}
@@ -722,23 +678,6 @@ export default function WorkbenchPage() {
                 <Settings className="w-4 h-4" />
                 <span>欄位設定</span>
               </button>
-              <button
-                onClick={() => setShowAppThemeCustomizer((v) => !v)}
-                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
-              >
-                <Palette className="w-4 h-4" />
-                <span>工具列配色</span>
-              </button>
-              {showAppThemeCustomizer && (
-                <div className="px-1 pb-2">
-                  <AppThemeCustomizer
-                    currentTheme={appTheme}
-                    onUpdateTheme={setAppTheme}
-                    onResetTheme={resetAppTheme}
-                    onClose={() => setShowAppThemeCustomizer(false)}
-                  />
-                </div>
-              )}
 
               <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1 mt-3">資料（檔案）</div>
               <button
@@ -1034,6 +973,16 @@ export default function WorkbenchPage() {
           window.localStorage.setItem("scinotes-tutorial-seen", "1");
         }}
       />
+
+      {/* App Theme Customizer Modal */}
+      {showAppThemeCustomizer && (
+        <AppThemeCustomizer
+          currentTheme={appTheme}
+          onUpdateTheme={setAppTheme}
+          onResetTheme={resetAppTheme}
+          onClose={() => setShowAppThemeCustomizer(false)}
+        />
+      )}
 
       {/* Background Customizer Modal */}
       {showBackgroundCustomizer && (
