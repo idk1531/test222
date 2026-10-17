@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import { MathText } from "./MathText";
-import { Maximize2, Eye } from "lucide-react";
+import { Maximize2, Eye, Palette, RotateCcw } from "lucide-react";
 import { resolveFont } from "@/lib/fonts";
 import { runFourPointCheckOnCard, STATUS_COMPILED, STATUS_UNCOMPILED } from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
@@ -292,7 +293,17 @@ interface KnowledgeCardNodeProps {
   onExpansionTest?: (card: CardData) => void;
   onUpdateCard?: (updated: Partial<CardData>) => void;
   fontFamily?: string;
+  /** v7.2：畫布節點的自訂主色（hex）；未設定時沿用推理形狀預設色 */
+  accentColor?: string;
+  /** v7.2：設定節點主色；傳 undefined 代表還原為形狀預設色 */
+  onChangeAccentColor?: (color: string | undefined) => void;
 }
+
+/** v7.2：節點調色盤的常用色（形狀預設色會另外動態帶入） */
+const NODE_COLOR_SWATCHES = [
+  "#3b82f6", "#10b981", "#f59e0b", "#a855f7", "#f43f5e", "#1e293b",
+  "#ef4444", "#06b6d4", "#84cc16", "#ec4899", "#0ea5e9", "#78716c",
+];
 
 /** 顆粒度色帶 */
 const GRANULARITY_STYLE: Record<string, string> = {
@@ -309,6 +320,8 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
   onOpenPreview,
   onOpenDetail,
   fontFamily,
+  accentColor,
+  onChangeAccentColor,
 }) => {
   // 每張卡片可獨立指定字體，未指定才用全域字體
   const ff = resolveFont(card.cardFont || fontFamily);
@@ -323,6 +336,21 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
 
   const shapeDef = SHAPE_DEFS[card.reasoningShape] || SHAPE_DEFS.A;
   const isComposite = card.reasoningShape === "COMPOSITE";
+  // v7.2：自訂色優先；沒有自訂色時維持原本的形狀預設色
+  const accentHex = accentColor || shapeDef.hex || "#3b82f6";
+  const [paletteAnchor, setPaletteAnchor] = useState<{ top: number; left: number } | null>(null);
+
+  const openPalette = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const width = 232;
+    const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width));
+    const top =
+      rect.bottom + 6 + 250 > window.innerHeight
+        ? Math.max(8, rect.top - 250)
+        : rect.bottom + 6;
+    setPaletteAnchor({ top, left });
+  };
 
   // v4 八點自我檢查＋符號綁定（構造思路＋WHY正文）彙總，僅供快速掃描
   const reports = runFourPointCheckOnCard(card);
@@ -336,15 +364,16 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
     <div
       onClick={onSelect}
       className={`group flex flex-col h-full rounded-xl select-none overflow-hidden transition-all duration-150 bg-white ${
-        isSelected ? "ring-2 ring-blue-500 shadow-lg" : "shadow-md hover:shadow-lg"
+        isSelected ? "shadow-lg" : "shadow-md hover:shadow-lg"
       }`}
       style={{
         fontFamily: ff,
-        border: isSelected ? "2px solid #3b82f6" : "1px solid #e2e8f0",
+        border: isSelected ? `2px solid ${accentHex}` : "1px solid #e2e8f0",
+        boxShadow: isSelected ? `0 0 0 2px ${accentHex}55, 0 10px 20px rgba(15, 23, 42, 0.15)` : undefined,
       }}
     >
-      {/* 顆粒度色帶 */}
-      <div className={`h-1 w-full ${shapeDef.color}`} />
+      {/* 顆粒度色帶（v7.2：可自訂，動態色一律 inline style） */}
+      <div className="h-1 w-full" style={{ backgroundColor: accentHex }} />
 
       <div className="flex-1 flex flex-col p-3.5 min-h-0">
         {/* 第一行：顆粒度 + 推理形狀 + 操作 */}
@@ -354,7 +383,8 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
               {card.granularity}
             </span>
             <span
-              className={`text-[9px] font-bold px-1.5 py-0.5 rounded text-white ${shapeDef.color}`}
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded text-white"
+              style={{ backgroundColor: accentHex }}
               title={shapeDef.name}
             >
               {isComposite && card.compositeShapes?.length
@@ -378,6 +408,16 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
+            {onChangeAccentColor && (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={openPalette}
+                className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                title="節點顏色"
+              >
+                <Palette className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -446,6 +486,84 @@ export const KnowledgeCardNode: React.FC<KnowledgeCardNodeProps> = ({
           )}
         </div>
       </div>
+
+      {/* v7.2：節點顏色 popover（portal，避免被卡片 overflow-hidden 裁切） */}
+      {paletteAnchor && onChangeAccentColor && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[120]"
+            onPointerDown={() => setPaletteAnchor(null)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="absolute w-[232px] rounded-xl border border-slate-200 bg-white p-3 shadow-2xl"
+              style={{ top: paletteAnchor.top, left: paletteAnchor.left }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-700">節點顏色</span>
+                <span className="h-3.5 w-3.5 rounded-full border border-slate-300" style={{ backgroundColor: accentHex }} />
+              </div>
+
+              <div className="mb-1 text-[9px] font-bold text-slate-400">形狀預設色</div>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {(["A", "B", "C", "D", "E", "COMPOSITE"] as const).map((key) => {
+                  const isOwnShape = key === (card.reasoningShape || "A");
+                  const isActive = accentHex.toLowerCase() === SHAPE_DEFS[key].hex.toLowerCase();
+                  return (
+                    <button
+                      key={key}
+                      title={isOwnShape ? `${SHAPE_DEFS[key].name}（預設）` : SHAPE_DEFS[key].name}
+                      onClick={() => {
+                        // 點自己的形狀＝還原為形狀預設（不留下多餘的 accentColor）
+                        onChangeAccentColor(isOwnShape ? undefined : SHAPE_DEFS[key].hex);
+                        setPaletteAnchor(null);
+                      }}
+                      className={`h-5 w-5 rounded-full border border-white shadow ${
+                        isActive ? "ring-2 ring-slate-900 ring-offset-1" : "ring-1 ring-slate-200"
+                      }`}
+                      style={{ backgroundColor: SHAPE_DEFS[key].hex }}
+                    />
+                  );
+                })}
+              </div>
+
+              <div className="mb-1 text-[9px] font-bold text-slate-400">常用色</div>
+              <div className="mb-2 grid grid-cols-6 gap-1.5">
+                {NODE_COLOR_SWATCHES.map((hex) => (
+                  <button
+                    key={hex}
+                    title={hex}
+                    onClick={() => { onChangeAccentColor(hex); setPaletteAnchor(null); }}
+                    className={`h-5 w-5 rounded-full border shadow-sm ${accentHex.toLowerCase() === hex ? "ring-2 ring-slate-900 ring-offset-1" : "border-white"}`}
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                <label className="flex items-center gap-1.5 text-[10px] text-slate-600">
+                  自訂
+                  <input
+                    type="color"
+                    value={accentHex}
+                    onChange={(e) => onChangeAccentColor(e.target.value)}
+                    className="h-6 w-8 cursor-pointer rounded border border-slate-300"
+                  />
+                </label>
+                <button
+                  onClick={() => { onChangeAccentColor(undefined); setPaletteAnchor(null); }}
+                  className="flex items-center gap-1 rounded border border-slate-200 px-1.5 py-1 text-[10px] text-slate-600 hover:bg-slate-50"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  形狀預設
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

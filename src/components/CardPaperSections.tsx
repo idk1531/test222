@@ -27,6 +27,10 @@ import {
   Printer,
   Palette,
   Sliders,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
 } from "lucide-react";
 import {
   epistemicLabel,
@@ -38,9 +42,55 @@ import {
 } from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
 import type { CheckResult, FourPointReport } from "@/lib/inspect";
-import { SOLO_LEVELS } from "./SoloAssessmentPanel";
+import { SOLO_LEVELS, SoloAssessmentPanel } from "./SoloAssessmentPanel";
+import {
+  EditableText,
+  EditableList,
+  EditableSelect,
+  EditableToggle,
+  EditableCheck,
+  EditableRating,
+  EditableSlider,
+  EditableTagGroup,
+  useCardEdit,
+  newRowId,
+  ReadOnlyBadge,
+  ApplyBranchTree,
+  type ApplyBranch,
+} from "./CardPaperEditor";
+
+export { CardEditContext, useCardEdit } from "./CardPaperEditor";
 
 const UI_FONT = "'Varela Round', sans-serif";
+
+/** v7.2：紙上編輯用的選項清單 */
+const GRANULARITY_OPTIONS = [
+  { value: "L1 核心原理", label: "L1 核心原理" },
+  { value: "L2 定理/機制", label: "L2 定理/機制" },
+  { value: "L3 例題/應用", label: "L3 例題/應用" },
+  { value: "L4 名詞/標籤", label: "L4 名詞/標籤" },
+];
+const BLOOM_OPTIONS = ["記憶", "理解", "應用", "分析", "評鑑", "創造"].map((v) => ({ value: v, label: v }));
+const SOLO_OPTIONS = SOLO_LEVELS.map((l) => ({ value: l.key, label: l.key }));
+const SHAPE_OPTIONS = Object.entries(SHAPE_DEFS).map(([key, def]) => ({
+  value: key,
+  label: `${def.short} ${def.name}`,
+}));
+const EPISTEMIC_MARKS = ["⊢證", "⊢歸", "⊢近", "⊢約", "⊢公設"].map((v) => ({ value: v, label: v }));
+const OMITTED_SLOT_OPTIONS = ["背景", "構造思路", "WHY", "WHAT", "APPLY", "關係邊", "過程日誌"].map((v) => ({
+  value: v,
+  label: v,
+}));
+const BRIDGE_TYPES = ["互通", "單向", "限定範圍", "走不通", "[未查]"].map((v) => ({ value: v, label: v }));
+const BLOCKED_MARKS = ["[已證無橋]", "[未找到橋]"].map((v) => ({ value: v, label: v }));
+
+function defaultCardCalibration(card: CardData) {
+  return {
+    confidenceBefore: card.constructionCalibration?.confidenceBefore ?? 3,
+    confidenceAfter: card.constructionCalibration?.confidenceAfter ?? 4,
+    ...card.constructionCalibration,
+  };
+}
 
 /** v6 主題配色設定結構 */
 export interface CardPaperTheme {
@@ -324,6 +374,21 @@ export function V6Page1HeaderOverview({
   const BLOOM_LEVELS = ["記憶", "理解", "應用", "分析", "評鑑", "創造"];
   const activeBloomIdx = BLOOM_LEVELS.indexOf(card.bloomLevel || "理解");
 
+  // v7.2：紙上編輯 context（預覽時為 null，所有 Editable* 都退回純顯示）
+  const ed = useCardEdit();
+  const [showSoloPanel, setShowSoloPanel] = useState(false);
+  const tagOptions = [
+    { label: "[有分支]", active: hasBranches },
+    { label: "[連續鏈]", active: isContinuous },
+    { label: "[存在性可分離]", active: isSeparable },
+    { label: "[前提依賴]", active: isFramework || rels.length > 0 },
+    { label: "[純約定]", active: isConvention },
+  ];
+  const activeTags = card.cardTags && card.cardTags.length > 0
+    ? card.cardTags
+    : tagOptions.filter((t) => t.active).map((t) => t.label);
+  const declaredSolo = card.soloData?.declaredLevel || card.soloLevel || "關聯結構";
+
   return (
     <div className="flex flex-col h-full space-y-4">
       <V6PageHeaderBox
@@ -344,7 +409,15 @@ export function V6Page1HeaderOverview({
               名稱：
             </span>
             <span className="text-xl font-bold ml-1" style={{ color: theme.headingColor, fontFamily: font }}>
-              <MathText text={card.title} />
+              <EditableText
+                value={card.title}
+                onChange={(v) => ed?.patch({ title: v })}
+                placeholder="卡片名稱"
+                inline
+                className="text-xl font-bold"
+                style={{ color: theme.headingColor, fontFamily: font }}
+                ariaLabel="卡片名稱"
+              />
             </span>
           </div>
           <div>
@@ -352,7 +425,15 @@ export function V6Page1HeaderOverview({
               領域：
             </span>
             <span className="text-base font-semibold ml-1" style={{ color: theme.textColor, fontFamily: font }}>
-              {card.domain || "未指定領域"}
+              <EditableText
+                value={card.domain || ""}
+                onChange={(v) => ed?.patch({ domain: v })}
+                placeholder="未指定領域"
+                inline
+                className="text-base font-semibold"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="領域"
+              />
             </span>
           </div>
         </div>
@@ -361,6 +442,15 @@ export function V6Page1HeaderOverview({
           <span className="text-[11px] font-bold" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             顆粒度：
           </span>
+          <EditableSelect
+            value={card.granularity || "L2 定理/機制"}
+            options={GRANULARITY_OPTIONS}
+            onChange={(v) => ed?.patch({ granularity: v })}
+            className="text-xs font-semibold"
+            style={{ color: theme.textColor, fontFamily: UI_FONT }}
+            controlClassName="rounded border border-amber-400/80 bg-white/95 px-1 py-0.5 text-[10px] font-semibold text-slate-900 shadow-sm outline-none print:hidden"
+            ariaLabel="顆粒度"
+          />
           <label className="flex items-center gap-1 text-xs cursor-default" style={{ fontFamily: UI_FONT }}>
             <span className="w-3.5 h-3.5 border rounded-xs inline-flex items-center justify-center text-[10px] bg-white font-mono" style={{ borderColor: theme.borderColor }}>
               {card.granularity?.startsWith("L1") || card.granularity?.startsWith("L2") ? "✓" : ""}
@@ -384,6 +474,94 @@ export function V6Page1HeaderOverview({
         </div>
       </div>
 
+      {/* v7.2：內部推理形狀（紙上可選 / 可勾 / 可拖） */}
+      {(ed?.editable || card.shapeRationale || card.compositeNote || card.shapeConfidence !== undefined) && (
+        <div
+          className="p-3 rounded-sm border space-y-1.5"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+              內部推理形狀
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <EditableSelect
+                value={card.reasoningShape}
+                options={SHAPE_OPTIONS}
+                onChange={(v) => ed?.patch({ reasoningShape: v, shapeAccepted: true })}
+                className="text-[11px] font-bold"
+                style={{ color: theme.accentColor, fontFamily: UI_FONT }}
+                controlClassName="rounded border border-amber-400/80 bg-white/95 px-1 py-0.5 text-[10px] font-bold text-slate-900 shadow-sm outline-none print:hidden max-w-[180px]"
+                ariaLabel="推理形狀"
+              />
+              {(ed?.editable || card.shapeConfidence !== undefined) && (
+                <>
+                  <span className="text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>信心</span>
+                  <EditableSlider
+                    value={card.shapeConfidence ?? 0}
+                    onChange={(v) => ed?.patch({ shapeConfidence: v })}
+                    className="text-[10px]"
+                  />
+                </>
+              )}
+              <EditableCheck
+                checked={!!card.shapeAccepted}
+                onChange={(v) => ed?.patch({ shapeAccepted: v })}
+                label="使用者已確認"
+                checkedClassName="text-emerald-700"
+              />
+            </div>
+          </div>
+
+          {isComposite && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-bold" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                複合型組成（至少 2 種）：
+              </span>
+              <EditableTagGroup
+                options={(["A", "B", "C", "D", "E"] as const).map((k) => ({ value: k, label: `${k} ${SHAPE_DEFS[k].name}` }))}
+                active={card.compositeShapes || []}
+                onChange={(next) => ed?.patch({ compositeShapes: next })}
+                activeStyle={{ backgroundColor: theme.accentColor, borderColor: theme.accentColor, color: "#ffffff" }}
+                inactiveStyle={{ borderColor: theme.borderColor, color: theme.textColor, backgroundColor: "transparent" }}
+              />
+            </div>
+          )}
+
+          {(ed?.editable || card.shapeRationale) && (
+            <div className="text-[11px] leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
+              <b style={{ color: theme.accentColor, fontFamily: UI_FONT }}>判型理由：</b>
+              <EditableText
+                value={card.shapeRationale || ""}
+                onChange={(v) => ed?.patch({ shapeRationale: v })}
+                multiline
+                rows={2}
+                placeholder="說明為什麼是這個形狀（可留空）"
+                className="text-[11px]"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="AI 判型理由"
+              />
+            </div>
+          )}
+
+          {isComposite && (ed?.editable || card.compositeNote) && (
+            <div className="text-[11px] leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
+              <b style={{ color: theme.accentColor, fontFamily: UI_FONT }}>組合說明：</b>
+              <EditableText
+                value={card.compositeNote || ""}
+                onChange={(v) => ed?.patch({ compositeNote: v })}
+                multiline
+                rows={2}
+                placeholder="哪一段是哪一型？缺了哪一段會出什麼錯？"
+                className="text-[11px]"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="複合型組合說明"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 卡片標籤（可複選） & 互斥二選一 */}
       <div
         className="p-3 rounded-sm border space-y-1.5"
@@ -395,27 +573,43 @@ export function V6Page1HeaderOverview({
           </span>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
-          {[
-            { label: "[有分支]", active: hasBranches },
-            { label: "[連續鏈]", active: isContinuous },
-            { label: "[存在性可分離]", active: isSeparable },
-            { label: "[前提依賴]", active: isFramework || (rels.length > 0) },
-            { label: "[純約定]", active: isConvention },
-          ].map((tag, idx) => (
-            <span
-              key={idx}
-              className={`px-2 py-0.5 rounded border text-[11px] transition-all ${
-                tag.active ? "font-bold shadow-xs" : "opacity-45"
-              }`}
-              style={{
-                borderColor: tag.active ? theme.accentColor : theme.borderColor,
-                backgroundColor: tag.active ? `${theme.accentColor}18` : "transparent",
-                color: tag.active ? theme.accentColor : theme.textColor,
-              }}
-            >
-              {tag.label}
-            </span>
-          ))}
+          {tagOptions.map((tag) => {
+            const active = activeTags.includes(tag.label);
+            const chipClass = `px-2 py-0.5 rounded border text-[11px] transition-all ${
+              active ? "font-bold shadow-xs" : "opacity-45"
+            }`;
+            const chipStyle = {
+              borderColor: active ? theme.accentColor : theme.borderColor,
+              backgroundColor: active ? `${theme.accentColor}18` : "transparent",
+              color: active ? theme.accentColor : theme.textColor,
+            };
+            if (!ed?.editable) {
+              return (
+                <span key={tag.label} className={chipClass} style={chipStyle}>
+                  {tag.label}
+                </span>
+              );
+            }
+            return (
+              <button
+                key={tag.label}
+                type="button"
+                title="點擊切換此標籤"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const next = active
+                    ? activeTags.filter((t) => t !== tag.label)
+                    : [...activeTags, tag.label];
+                  ed.patch({ cardTags: next });
+                }}
+                className={`${chipClass} print:hidden`}
+                style={chipStyle}
+              >
+                {tag.label}
+              </button>
+            );
+          })}
         </div>
         <div className="text-[11px] pt-1.5 flex flex-wrap items-center gap-2" style={{ color: theme.mutedTextColor }}>
           <span className="font-bold">互斥二選一：</span>
@@ -427,6 +621,55 @@ export function V6Page1HeaderOverview({
           </span>
         </div>
       </div>
+
+      {/* v7.2：省略聲明（省略本身也要交代理由） */}
+      {(ed?.editable || (card.omittedSlots?.length || 0) > 0) && (
+        <div
+          className="p-3 rounded-sm border space-y-1.5"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+        >
+          <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+            省略聲明（省略哪一格／為什麼）
+          </span>
+          <EditableList
+            items={card.omittedSlots || []}
+            onChange={(next) => ed?.patch({ omittedSlots: next })}
+            newItem={() => ({ slot: "WHY", reason: "" })}
+            addLabel="新增省略聲明"
+            emptyPlaceholder={null}
+            renderItem={(o, i) => (
+              <div className="flex flex-col sm:flex-row sm:items-start gap-1.5 rounded border p-1.5" style={{ borderColor: theme.borderColor }}>
+                <EditableSelect
+                  value={o.slot}
+                  options={OMITTED_SLOT_OPTIONS}
+                  onChange={(v) => {
+                    const next = [...(card.omittedSlots || [])];
+                    next[i] = { ...next[i], slot: v };
+                    ed?.patch({ omittedSlots: next });
+                  }}
+                  className="text-[10px] font-bold text-slate-800"
+                  controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[10px] print:hidden"
+                  ariaLabel="省略的格子"
+                />
+                <EditableText
+                  value={o.reason}
+                  onChange={(v) => {
+                    const next = [...(card.omittedSlots || [])];
+                    next[i] = { ...next[i], reason: v };
+                    ed?.patch({ omittedSlots: next });
+                  }}
+                  placeholder="省略理由"
+                  multiline
+                  rows={1}
+                  className="flex-1 text-[10px]"
+                  style={{ color: theme.textColor, fontFamily: UI_FONT }}
+                  ariaLabel="省略理由"
+                />
+              </div>
+            )}
+          />
+        </div>
+      )}
 
       {/* 摘要 · WHY / WHAT / APPLY（各一行） */}
       <div
@@ -484,6 +727,7 @@ export function V6Page1HeaderOverview({
           <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
             關係邊 RELATIONS —— 沒有邊＝孤島，自檢時第一個要抓
           </span>
+          <ReadOnlyBadge label="唯讀：關係邊請在畫布上編輯" />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
           {/* 左側羅盤示意圖 */}
@@ -551,7 +795,13 @@ export function V6Page1HeaderOverview({
                 const isActive = lvl === card.bloomLevel || idx === activeBloomIdx;
                 const heightPercent = 20 + idx * 16;
                 return (
-                  <div key={lvl} className="flex-1 flex flex-col items-center justify-end h-full">
+                  <div
+                    key={lvl}
+                    role={ed?.editable ? "button" : undefined}
+                    title={ed?.editable ? `設為 ${lvl}` : undefined}
+                    onClick={() => ed?.patch({ bloomLevel: lvl })}
+                    className={`flex-1 flex flex-col items-center justify-end h-full ${ed?.editable ? "cursor-pointer hover:opacity-80" : ""}`}
+                  >
                     <div
                       className="w-full rounded-t-xs transition-all"
                       style={{
@@ -578,9 +828,36 @@ export function V6Page1HeaderOverview({
           <div className="sm:col-span-6 text-[10px] leading-tight space-y-1" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
             <div className="flex items-center gap-2">
               <span className="font-bold text-slate-800">SOLO 整合度：</span>
-              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold text-[10px]">
-                {card.soloData?.declaredLevel || card.soloLevel || "Relational 關聯"}
-              </span>
+              <EditableSelect
+                value={declaredSolo}
+                options={SOLO_OPTIONS}
+                onChange={(v) =>
+                  ed?.patch({
+                    soloLevel: v,
+                    soloData: {
+                      declaredLevel: v,
+                      evidence: card.soloData?.evidence || [],
+                      autoSuggestedLevel: card.soloData?.autoSuggestedLevel,
+                      autoRationale: card.soloData?.autoRationale,
+                      accepted: card.soloData?.accepted,
+                      history: [
+                        ...(card.soloData?.history || []),
+                        { at: new Date().toISOString().slice(0, 10), from: declaredSolo, to: v, reason: "紙上編輯調整" },
+                      ],
+                    },
+                  })
+                }
+                className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold text-[10px]"
+                controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[10px] font-bold text-emerald-900 print:hidden"
+                ariaLabel="SOLO 整合度"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSoloPanel((v) => !v)}
+                className="ml-auto text-[9px] underline text-slate-500 hover:text-slate-800 print:hidden"
+              >
+                {showSoloPanel ? "收合 SOLO 評估" : "展開 SOLO 評估"}
+              </button>
             </div>
             <p>
               判準：不是「邊多就算」，而是「這些邊能不能實際參與推理」——裝飾性連線不算，[表面相似]不算有效整合。
@@ -588,6 +865,22 @@ export function V6Page1HeaderOverview({
           </div>
         </div>
       </div>
+
+      {showSoloPanel && (
+        <div
+          className="p-3 rounded-sm border print:hidden"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+        >
+          <SoloAssessmentPanel
+            cardId={card.id}
+            soloLevel={declaredSolo}
+            soloData={card.soloData}
+            bloomLevel={card.bloomLevel}
+            editable={!!ed?.editable}
+            onChange={(level, data) => ed?.patch({ soloLevel: level, soloData: data })}
+          />
+        </div>
+      )}
 
       {/* 頁數索引 (Table of Contents) */}
       <div
@@ -644,6 +937,9 @@ export function V6Page2Background({
 }) {
   const bgData = card.backgroundData || {};
   const calib = card.constructionCalibration;
+  const ed = useCardEdit();
+  const patchCalib = (p: Partial<NonNullable<CardData["constructionCalibration"]>>) =>
+    ed?.patch({ constructionCalibration: { ...defaultCardCalibration(card), ...p } });
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -663,42 +959,43 @@ export function V6Page2Background({
           <span className="font-bold" style={{ color: theme.headingColor }}>
             理解問題信心分（動筆前）：
           </span>
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((num) => (
-              <span
-                key={num}
-                className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-bold border ${
-                  (calib?.confidenceBefore || 3) >= num
-                    ? "bg-amber-400 text-amber-950 border-amber-500 shadow-xs"
-                    : "bg-white text-slate-400 border-slate-300"
-                }`}
-              >
-                {num}
-              </span>
-            ))}
-          </div>
+          <EditableRating
+            value={calib?.confidenceBefore ?? 3}
+            onChange={(v) => patchCalib({ confidenceBefore: v })}
+            activeClassName="bg-amber-400 text-amber-950 border-amber-500 shadow-xs"
+          />
         </div>
 
         <div className="flex items-center gap-2">
           <span className="font-bold" style={{ color: theme.headingColor }}>
             寫完後重打一次：
           </span>
-          <div className="flex items-center gap-1">
-            {[1, 2, 3, 4, 5].map((num) => (
-              <span
-                key={num}
-                className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] font-bold border ${
-                  (calib?.confidenceAfter || 4) >= num
-                    ? "bg-emerald-500 text-white border-emerald-600 shadow-xs"
-                    : "bg-white text-slate-400 border-slate-300"
-                }`}
-              >
-                {num}
-              </span>
-            ))}
-          </div>
+          <EditableRating
+            value={calib?.confidenceAfter ?? 4}
+            onChange={(v) => patchCalib({ confidenceAfter: v })}
+            activeClassName="bg-emerald-500 text-white border-emerald-600 shadow-xs"
+          />
         </div>
       </div>
+
+      {(ed?.editable || calib?.blindSpotNote) && (
+        <div
+          className="p-2.5 rounded-sm border text-[11px] leading-relaxed"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg, fontFamily: UI_FONT }}
+        >
+          <b style={{ color: theme.accentColor }}>理解問題階段盲區：</b>
+          <EditableText
+            value={calib?.blindSpotNote || ""}
+            onChange={(v) => patchCalib({ blindSpotNote: v })}
+            multiline
+            rows={2}
+            placeholder="掉分時先記在這裡，不急著進構造思路／WHY"
+            className="text-[11px]"
+            style={{ color: theme.textColor, fontFamily: font }}
+            ariaLabel="理解問題階段盲區"
+          />
+        </div>
+      )}
 
       {/* 梯形收窄條：三段式 */}
       <div className="space-y-3 flex flex-col items-center w-full">
@@ -716,7 +1013,16 @@ export function V6Page2Background({
             給 1~2 個引出問題的具體情境。若給 2 個，第二個最好共用第一個的具體對象、只換一個變數對照。須選同一領域的對象，不牽扯出需要額外背景知識的領域。
           </p>
           <div className="text-sm leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
-            <MathText text={bgData.situation || card.backgroundDescription || "（尚未填寫情境）"} />
+            <EditableText
+              value={bgData.situation || card.backgroundDescription || ""}
+              onChange={(v) => ed?.patch({ backgroundData: { ...bgData, situation: v } })}
+              multiline
+              rows={3}
+              placeholder="（尚未填寫情境）"
+              className="text-sm leading-relaxed"
+              style={{ color: theme.textColor, fontFamily: font }}
+              ariaLabel="第一段·情境"
+            />
           </div>
         </div>
 
@@ -734,7 +1040,16 @@ export function V6Page2Background({
             寫成精確的數學對象/式子；一般化之後不能脫離情境語言。可精確寫出的形式，先給形式、再給動機。
           </p>
           <div className="text-sm leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
-            <MathText text={bgData.preciseObject || "（尚未填寫精確對象）"} />
+            <EditableText
+              value={bgData.preciseObject || ""}
+              onChange={(v) => ed?.patch({ backgroundData: { ...bgData, preciseObject: v } })}
+              multiline
+              rows={3}
+              placeholder="（尚未填寫精確對象）"
+              className="text-sm leading-relaxed"
+              style={{ color: theme.textColor, fontFamily: font }}
+              ariaLabel="第二段·精確對象"
+            />
           </div>
         </div>
 
@@ -752,7 +1067,16 @@ export function V6Page2Background({
             必須精確對應回第一段的具體對象，不能寫成脫離情境的泛問句。
           </p>
           <div className="text-sm leading-relaxed font-medium" style={{ color: theme.textColor, fontFamily: font }}>
-            <MathText text={bgData.preciseQuestion || "（尚未填寫精確問題）"} />
+            <EditableText
+              value={bgData.preciseQuestion || ""}
+              onChange={(v) => ed?.patch({ backgroundData: { ...bgData, preciseQuestion: v } })}
+              multiline
+              rows={2}
+              placeholder="（尚未填寫精確問題）"
+              className="text-sm leading-relaxed font-medium"
+              style={{ color: theme.textColor, fontFamily: font }}
+              ariaLabel="第三段·精確問題"
+            />
           </div>
         </div>
       </div>
@@ -771,19 +1095,41 @@ export function V6Page2Background({
           歷史線：具體到當時是誰、什麼年代、卡在哪個矛盾，標 [歷史起源]。聯繫：歷史事件跟第一段情境是不是同一困境的一次具體發生——挖不到有意義的聯繫就不寫，不用硬湊。
         </p>
         <div className="text-xs space-y-1.5 leading-relaxed" style={{ color: theme.textColor, fontFamily: font }}>
-          {card.originData?.historicalContext && (
-            <p>
+          {(ed?.editable || card.originData?.historicalContext) && (
+            <div>
               <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[歷史起源] </b>
-              <MathText text={card.originData.historicalContext} />
-            </p>
+              <EditableText
+                value={card.originData?.historicalContext || ""}
+                onChange={(v) =>
+                  ed?.patch({ originData: { ...(card.originData || { conflict: "" }), historicalContext: v } })
+                }
+                multiline
+                rows={2}
+                placeholder="當時是誰、什麼年代、卡在哪個矛盾"
+                className="text-xs"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="歷史起源"
+              />
+            </div>
           )}
-          {card.originData?.conflict && (
-            <p>
+          {(ed?.editable || card.originData?.conflict) && (
+            <div>
               <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[矛盾焦點] </b>
-              <MathText text={card.originData.conflict} />
-            </p>
+              <EditableText
+                value={card.originData?.conflict || ""}
+                onChange={(v) =>
+                  ed?.patch({ originData: { ...(card.originData || { conflict: "" }), conflict: v } })
+                }
+                multiline
+                rows={2}
+                placeholder="歷史事件跟第一段情境的共同困境"
+                className="text-xs"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="矛盾焦點"
+              />
+            </div>
           )}
-          {!card.originData?.historicalContext && !card.originData?.conflict && (
+          {!ed?.editable && !card.originData?.historicalContext && !card.originData?.conflict && (
             <p className="italic" style={{ color: theme.mutedTextColor }}>（尚未填寫歷史起源與矛盾）</p>
           )}
         </div>
@@ -820,16 +1166,24 @@ export function V6Page3ConstructionThinking({
 }) {
   const candidate = card.candidate || {};
   const plan = card.plan || {};
+  const ed = useCardEdit();
 
   // 構造思路追問點
+  type ThoughtPoint = NonNullable<CardData["thoughtPoints"]>[number];
+  type IntuitionTrap = NonNullable<CardData["intuitionTraps"]>[number];
   const constructionProbes = (card.thoughtPoints || []).filter(
     (t) => t.placement === "construction" || !t.placement
   );
-  const probe1 = constructionProbes[0];
-  const probe2 = constructionProbes[1];
 
-  const [openAnswer1, setOpenAnswer1] = useState(false);
-  const [openAnswer2, setOpenAnswer2] = useState(false);
+  const [openAnswers, setOpenAnswers] = useState<Record<string, boolean>>({});
+
+  const setConstructionProbes = (next: ThoughtPoint[]) => {
+    const whyProbes = (card.thoughtPoints || []).filter((t) => t.placement === "why");
+    ed?.patch({ thoughtPoints: [...next, ...whyProbes] });
+  };
+
+  const patchPlan = (p: Partial<NonNullable<CardData["plan"]>>) =>
+    ed?.patch({ plan: { ...plan, ...p } });
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -849,6 +1203,28 @@ export function V6Page3ConstructionThinking({
         邏輯上可重複撞見的困境 → 構造思路；歷史上綁定人事時地 → 背景第四段。只有一條追問路徑時，右側追問②留空即可，不用硬湊第二條。
       </div>
 
+      {/* v7.2：構造思路主文（原本只在進階表單，現在紙上直接改） */}
+      {(ed?.editable || card.constructionThinking) && (
+        <div
+          className="p-3.5 rounded-sm border space-y-1.5"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+        >
+          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+            構造思路（邏輯觸發，不是歷史線）
+          </span>
+          <EditableText
+            value={card.constructionThinking || ""}
+            onChange={(v) => ed?.patch({ constructionThinking: v })}
+            multiline
+            rows={4}
+            placeholder="從需求出發：怎麼想到用哪個候選工具？"
+            className="text-sm leading-relaxed"
+            style={{ color: theme.textColor, fontFamily: font }}
+            ariaLabel="構造思路"
+          />
+        </div>
+      )}
+
       {/* 候選登場 (滿寬框) */}
       <div
         className="p-3.5 rounded-sm border space-y-1.5"
@@ -862,125 +1238,297 @@ export function V6Page3ConstructionThinking({
         <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
           提出候選工具，交代「為什麼會想到測試它」，明確不下結論。必須往回追溯到已經確立的「要求」，說明怎麼摸索到這個具體候選形式的——不能讓候選人像是憑空被選中的。
         </p>
-        <div className="text-sm space-y-1 leading-relaxed pt-1" style={{ color: theme.textColor, fontFamily: font }}>
-          {candidate.requirement && (
-            <p>
+        <div className="text-sm space-y-1.5 leading-relaxed pt-1" style={{ color: theme.textColor, fontFamily: font }}>
+          {(ed?.editable || candidate.requirement) && (
+            <div>
               <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[已確立要求] </b>
-              <MathText text={candidate.requirement} />
-            </p>
+              <EditableText
+                value={candidate.requirement || ""}
+                onChange={(v) => ed?.patch({ candidate: { ...candidate, requirement: v } })}
+                multiline
+                rows={2}
+                placeholder="往回追溯：構造思路已確立的要求"
+                className="text-sm"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="已確立要求"
+              />
+            </div>
           )}
-          {candidate.candidateForm && (
-            <p>
+          {(ed?.editable || candidate.candidateForm) && (
+            <div>
               <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[候選工具形式] </b>
-              <MathText text={candidate.candidateForm} />
-            </p>
+              <EditableText
+                value={candidate.candidateForm || ""}
+                onChange={(v) => ed?.patch({ candidate: { ...candidate, candidateForm: v } })}
+                multiline
+                rows={2}
+                placeholder="具體候選工具／building block 形式"
+                className="text-sm"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="候選工具形式"
+              />
+            </div>
           )}
-          {candidate.motivation && (
-            <p>
+          {(ed?.editable || candidate.motivation) && (
+            <div>
               <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[摸索動機] </b>
-              <MathText text={candidate.motivation} />
-            </p>
+              <EditableText
+                value={candidate.motivation || ""}
+                onChange={(v) => ed?.patch({ candidate: { ...candidate, motivation: v } })}
+                multiline
+                rows={2}
+                placeholder="為什麼偏偏是這個形式"
+                className="text-sm"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="摸索動機"
+              />
+            </div>
           )}
-          {!candidate.requirement && !candidate.candidateForm && !candidate.motivation && (
+          {(ed?.editable || candidate.expansion) && (
+            <div>
+              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[擴展方案] </b>
+              <EditableText
+                value={candidate.expansion || ""}
+                onChange={(v) => ed?.patch({ candidate: { ...candidate, expansion: v } })}
+                multiline
+                rows={2}
+                placeholder="單一候選不足時的下一步"
+                className="text-sm"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="擴展方案"
+              />
+            </div>
+          )}
+          {(ed?.editable || candidate.expansionOutOfScope) && (
+            <div>
+              <b style={{ fontFamily: UI_FONT, color: theme.accentColor }}>[超出本卡範圍] </b>
+              <EditableText
+                value={candidate.expansionOutOfScope || ""}
+                onChange={(v) => ed?.patch({ candidate: { ...candidate, expansionOutOfScope: v } })}
+                multiline
+                rows={2}
+                placeholder="牽涉更深獨立問題時老實標註"
+                className="text-sm"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="超出本卡範圍"
+              />
+            </div>
+          )}
+          {!ed?.editable && !candidate.requirement && !candidate.candidateForm && !candidate.motivation && (
             <p className="italic" style={{ color: theme.mutedTextColor }}>（尚未填寫候選登場摸索）</p>
           )}
         </div>
       </div>
 
-      {/* 並排雙欄：② 路徑 · 追問① 與 追問② */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* 左欄：追問① */}
-        <div
-          className="p-3.5 rounded-sm border space-y-2 flex flex-col"
-          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
-        >
-          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-            ② 路徑 · 追問①
-          </span>
-          <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-            主動自問的啟發式問句，只記錄問過什麼、指向什麼方向，不放完整推導（推導挪去 WHY）
-          </p>
-          <div className="flex-1 space-y-2 pt-1">
+      {/* 並排雙欄：② 路徑 · 追問（可新增／刪除／排序） */}
+      <EditableList<ThoughtPoint>
+        items={constructionProbes}
+        onChange={setConstructionProbes}
+        newItem={() => ({
+          id: newRowId("probe"),
+          modeName: "",
+          question: "",
+          answer: "",
+          passed: false,
+          placement: "construction",
+        })}
+        className="grid grid-cols-1 md:grid-cols-2 gap-3"
+        itemClassName="min-w-0"
+        addLabel="新增追問路徑"
+        renderItem={(tp, pi) => {
+          const key = tp.id || String(pi);
+          const open = !!openAnswers[key] || !!ed?.editable;
+          const patchProbe = (p: Partial<ThoughtPoint>) => {
+            const next = constructionProbes.map((t, i) => (i === pi ? { ...t, ...p } : t));
+            setConstructionProbes(next);
+          };
+          return (
             <div
-              className="p-2 rounded border bg-amber-50/60 text-xs font-semibold"
-              style={{ borderColor: theme.borderColor, color: theme.headingColor, fontFamily: font }}
+              className="p-3.5 rounded-sm border space-y-2 flex flex-col h-full"
+              style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
             >
-              【追問 · {probe1?.modeName || "啟發式問句"}】
-              <div className="mt-1 font-normal text-slate-800">
-                <MathText text={probe1?.question || "（自問核心思考障礙是什麼？）"} />
-              </div>
-            </div>
-
-            <button
-              onClick={() => setOpenAnswer1(!openAnswer1)}
-              className="text-[11px] flex items-center gap-1 font-bold text-amber-800 hover:underline"
-              style={{ fontFamily: UI_FONT }}
-            >
-              {openAnswer1 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-              {openAnswer1 ? "收合答案" : "→ (點擊揭曉答案，完整推導見 WHY)"}
-            </button>
-
-            {openAnswer1 && (
-              <div
-                className="p-2 rounded bg-white/90 border text-xs leading-relaxed"
-                style={{ borderColor: theme.borderColor, color: theme.textColor, fontFamily: font }}
-              >
-                <MathText text={probe1?.answer || "（此追問指引了最終的收斂計畫）"} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 右欄：追問②（若有） */}
-        <div
-          className="p-3.5 rounded-sm border space-y-2 flex flex-col"
-          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
-        >
-          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-            ② 路徑 · 追問②（若有）
-          </span>
-          <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-            同一份「要求」下摸索出的另一條問句，不是重複——不同問題指向同一個計畫
-          </p>
-          <div className="flex-1 space-y-2 pt-1">
-            {probe2 ? (
-              <>
+              <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+                ② 路徑 · 追問{pi + 1}
+              </span>
+              <p className="text-[10px] leading-tight" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                主動自問的啟發式問句，只記錄問過什麼、指向什麼方向，不放完整推導（推導挪去 WHY）
+              </p>
+              <div className="flex-1 space-y-2 pt-1">
                 <div
                   className="p-2 rounded border bg-amber-50/60 text-xs font-semibold"
                   style={{ borderColor: theme.borderColor, color: theme.headingColor, fontFamily: font }}
                 >
-                  【追問 · {probe2.modeName || "思維模式"}】
-                  <div className="mt-1 font-normal text-slate-800">
-                    <MathText text={probe2.question} />
+                  <span>【追問 · </span>
+                  <EditableText
+                    value={tp.modeName || ""}
+                    onChange={(v) => patchProbe({ modeName: v })}
+                    placeholder="思維模式名"
+                    inline
+                    className="font-semibold"
+                    style={{ color: theme.headingColor, fontFamily: font }}
+                    ariaLabel={`追問 ${pi + 1} 思維模式`}
+                  />
+                  <span>】</span>
+                  <div className="mt-1 font-normal" style={{ color: theme.textColor }}>
+                    <EditableText
+                      value={tp.question || ""}
+                      onChange={(v) => patchProbe({ question: v })}
+                      multiline
+                      rows={2}
+                      placeholder="（自問核心思考障礙是什麼？）"
+                      className="text-xs"
+                      style={{ color: theme.textColor, fontFamily: font }}
+                      ariaLabel={`追問 ${pi + 1} 問句`}
+                    />
                   </div>
+                  <EditableCheck
+                    checked={!!tp.passed}
+                    onChange={(v) => patchProbe({ passed: v })}
+                    label="[已推出]"
+                    className="mt-1.5"
+                    checkedClassName="text-emerald-700"
+                  />
                 </div>
 
                 <button
-                  onClick={() => setOpenAnswer2(!openAnswer2)}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenAnswers((prev) => ({ ...prev, [key]: !prev[key] }));
+                  }}
                   className="text-[11px] flex items-center gap-1 font-bold text-amber-800 hover:underline"
                   style={{ fontFamily: UI_FONT }}
                 >
-                  {openAnswer2 ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  {openAnswer2 ? "收合答案" : "→ (點擊揭曉答案，完整推導見 WHY)"}
+                  {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  {open ? "收合答案" : "→ (點擊揭曉答案，完整推導見 WHY)"}
                 </button>
 
-                {openAnswer2 && (
+                {open && (
                   <div
                     className="p-2 rounded bg-white/90 border text-xs leading-relaxed"
                     style={{ borderColor: theme.borderColor, color: theme.textColor, fontFamily: font }}
                   >
-                    <MathText text={probe2.answer} />
+                    <EditableText
+                      value={tp.answer || ""}
+                      onChange={(v) => patchProbe({ answer: v })}
+                      multiline
+                      rows={2}
+                      placeholder="（此追問指引了最終的收斂計畫）"
+                      className="text-xs"
+                      style={{ color: theme.textColor, fontFamily: font }}
+                      ariaLabel={`追問 ${pi + 1} 答案`}
+                    />
                   </div>
                 )}
-              </>
-            ) : (
-              <div className="h-full flex items-center justify-center border border-dashed rounded p-4 text-[11px] text-slate-400 italic">
-                （單一追問路徑已足夠，右側追問②留空）
+
+                {(ed?.editable || tp.note) && (
+                  <div className="text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                    <b>卡住的點：</b>
+                    <EditableText
+                      value={tp.note || ""}
+                      onChange={(v) => patchProbe({ note: v })}
+                      multiline
+                      rows={1}
+                      placeholder="卡在哪一步"
+                      className="text-[10px]"
+                      style={{ color: theme.textColor, fontFamily: font }}
+                      ariaLabel={`追問 ${pi + 1} 筆記`}
+                    />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          );
+        }}
+      />
+
+      {/* v7.2：直覺陷阱（可新增／刪除／排序） */}
+      {(ed?.editable || (card.intuitionTraps?.length || 0) > 0) && (
+        <div
+          className="p-3.5 rounded-sm border space-y-1.5"
+          style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+        >
+          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+            ③ 直覺陷阱（推導正確，但直覺容易誤判）
+          </span>
+          <EditableList<IntuitionTrap>
+            items={card.intuitionTraps || []}
+            onChange={(next) => ed?.patch({ intuitionTraps: next })}
+            newItem={() => ({ id: newRowId("trap"), description: "", whyMisleading: "", correctUnderstanding: "", passed: false, note: "" })}
+            addLabel="新增直覺陷阱"
+            className="space-y-1.5"
+            itemClassName=""
+            emptyPlaceholder={null}
+            renderItem={(trap, ti) => {
+              const patchTrap = (p: Partial<IntuitionTrap>) => {
+                const next = [...(card.intuitionTraps || [])];
+                next[ti] = { ...next[ti], ...p };
+                ed?.patch({ intuitionTraps: next });
+              };
+              return (
+                <div className="rounded border bg-white/70 p-2 text-[11px] space-y-1" style={{ borderColor: theme.borderColor }}>
+                  <div>
+                    <b style={{ color: theme.accentColor, fontFamily: UI_FONT }}>常見誤判：</b>
+                    <EditableText
+                      value={trap.description || ""}
+                      onChange={(v) => patchTrap({ description: v })}
+                      multiline
+                      rows={1}
+                      placeholder="讀者大概會怎麼誤會"
+                      className="text-[11px]"
+                      style={{ color: theme.textColor, fontFamily: font }}
+                      ariaLabel={`直覺陷阱 ${ti + 1} 誤判`}
+                    />
+                  </div>
+                  <div>
+                    <b style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>為什麼直覺會錯：</b>
+                    <EditableText
+                      value={trap.whyMisleading || ""}
+                      onChange={(v) => patchTrap({ whyMisleading: v })}
+                      multiline
+                      rows={1}
+                      placeholder="直覺在哪一步偷懶"
+                      className="text-[11px]"
+                      style={{ color: theme.textColor, fontFamily: font }}
+                      ariaLabel={`直覺陷阱 ${ti + 1} 原因`}
+                    />
+                  </div>
+                  <div>
+                    <b style={{ color: theme.accentColor, fontFamily: UI_FONT }}>正確理解：</b>
+                    <EditableText
+                      value={trap.correctUnderstanding || ""}
+                      onChange={(v) => patchTrap({ correctUnderstanding: v })}
+                      multiline
+                      rows={1}
+                      placeholder="正確的理解方式"
+                      className="text-[11px]"
+                      style={{ color: theme.textColor, fontFamily: font }}
+                      ariaLabel={`直覺陷阱 ${ti + 1} 正確理解`}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <EditableCheck
+                      checked={!!trap.passed}
+                      onChange={(v) => patchTrap({ passed: v })}
+                      label="[已推出]"
+                      checkedClassName="text-emerald-700"
+                    />
+                    <EditableText
+                      value={trap.note || ""}
+                      onChange={(v) => patchTrap({ note: v })}
+                      placeholder="筆記（選填）"
+                      inline
+                      className="text-[10px]"
+                      style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}
+                      ariaLabel={`直覺陷阱 ${ti + 1} 筆記`}
+                    />
+                  </div>
+                </div>
+              );
+            }}
+          />
         </div>
-      </div>
+      )}
 
       {/* 匯聚漏斗視覺圖形 (Convergence Funnel Arrow) */}
       <div className="flex flex-col items-center justify-center py-1 opacity-75">
@@ -1004,34 +1552,67 @@ export function V6Page3ConstructionThinking({
           打算證什麼、用什麼方法證、範圍劃在哪裡。必須說明為什麼是這個順序、為什麼這幾步合起來才夠——不是並列清單。
         </p>
         <div className="space-y-2 pt-1 text-xs" style={{ color: theme.textColor, fontFamily: font }}>
-          {plan.steps && plan.steps.length > 0 ? (
-            <div className="space-y-1.5">
-              {plan.steps.map((st, si) => (
-                <div key={st.id || si} className="flex items-start gap-2 bg-white/70 p-2 rounded border" style={{ borderColor: theme.borderColor }}>
+          <EditableList
+            items={plan.steps || []}
+            onChange={(next) => patchPlan({ steps: next })}
+            newItem={() => ({ id: newRowId("plan"), label: "", rationale: "" })}
+            addLabel="新增計畫步驟"
+            className="space-y-1.5"
+            itemClassName=""
+            emptyPlaceholder={<p className="italic text-slate-400">（尚未填寫收斂計畫）</p>}
+            renderItem={(st, si) => {
+              const patchStep = (p: Partial<{ id: string; label: string; rationale: string }>) => {
+                const next = [...(plan.steps || [])];
+                next[si] = { ...next[si], ...p };
+                patchPlan({ steps: next });
+              };
+              return (
+                <div className="flex items-start gap-2 bg-white/70 p-2 rounded border" style={{ borderColor: theme.borderColor }}>
                   <span className="w-5 h-5 rounded-full bg-slate-800 text-white flex items-center justify-center text-[10px] font-mono flex-shrink-0">
                     {si + 1}
                   </span>
-                  <div className="flex-1">
-                    <div className="font-bold text-slate-900">
-                      <MathText text={st.label} />
+                  <div className="flex-1 min-w-0">
+                    <EditableText
+                      value={st.label || ""}
+                      onChange={(v) => patchStep({ label: v })}
+                      placeholder="這一步打算證什麼／做什麼"
+                      multiline
+                      rows={1}
+                      className="font-bold text-slate-900"
+                      style={{ color: theme.headingColor, fontFamily: font }}
+                      ariaLabel={`計畫步驟 ${si + 1}`}
+                    />
+                    <div className="text-[11px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
+                      ↳ 順序依賴：
+                      <EditableText
+                        value={st.rationale || ""}
+                        onChange={(v) => patchStep({ rationale: v })}
+                        placeholder="為什麼是這個順序"
+                        inline
+                        className="text-[11px]"
+                        style={{ color: theme.textColor, fontFamily: font }}
+                        ariaLabel={`計畫步驟 ${si + 1} 理由`}
+                      />
                     </div>
-                    {st.rationale && (
-                      <div className="text-[11px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
-                        ↳ 順序依賴：<MathText text={st.rationale} />
-                      </div>
-                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="italic text-slate-400">（尚未填寫收斂計畫）</p>
-          )}
+              );
+            }}
+          />
 
-          {plan.ranges && (
+          {(ed?.editable || plan.ranges) && (
             <div className="text-[11px] p-2 rounded bg-amber-50/70 border border-amber-200 text-amber-900" style={{ fontFamily: UI_FONT }}>
               <b>範圍劃定（誠實標註）：</b>
-              <MathText text={plan.ranges} />
+              <EditableText
+                value={plan.ranges || ""}
+                onChange={(v) => patchPlan({ ranges: v })}
+                multiline
+                rows={1}
+                placeholder="超出本卡範圍的部分"
+                className="text-[11px]"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="範圍劃定"
+              />
             </div>
           )}
         </div>
@@ -1062,8 +1643,19 @@ export function V6Page4Why({
   const claims = card.claims || [];
   const assumptions = card.assumptions || [];
   const whyProbes = (card.thoughtPoints || []).filter((t) => t.placement === "why");
+  const ed = useCardEdit();
+  type WhyThoughtPoint = NonNullable<CardData["thoughtPoints"]>[number];
+  type Claim = NonNullable<CardData["claims"]>[number];
+  type Assumption = NonNullable<CardData["assumptions"]>[number];
 
   const [openWhyAnswer, setOpenWhyAnswer] = useState<Record<string, boolean>>({});
+
+  const patchWhy = (p: Partial<NonNullable<CardData["whyData"]>>) =>
+    ed?.patch({ whyData: { ...whyData, ...p } });
+  const setWhyProbes = (next: WhyThoughtPoint[]) => {
+    const others = (card.thoughtPoints || []).filter((t) => t.placement !== "why");
+    ed?.patch({ thoughtPoints: [...others, ...next] });
+  };
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -1084,6 +1676,29 @@ export function V6Page4Why({
         </p>
       </div>
 
+      {/* v7.2：WHY 信心校準（落筆前 / 寫完後） */}
+      <div
+        className="p-2.5 rounded-sm border flex flex-wrap items-center justify-between gap-3 text-xs"
+        style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg, fontFamily: UI_FONT }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="font-bold" style={{ color: theme.headingColor }}>落筆前信心：</span>
+          <EditableRating
+            value={whyData.confidenceBefore ?? 3}
+            onChange={(v) => patchWhy({ confidenceBefore: v })}
+            activeClassName="bg-amber-400 text-amber-950 border-amber-500 shadow-xs"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-bold" style={{ color: theme.headingColor }}>寫完後信心：</span>
+          <EditableRating
+            value={whyData.confidenceAfter ?? 4}
+            onChange={(v) => patchWhy({ confidenceAfter: v })}
+            activeClassName="bg-emerald-500 text-white border-emerald-600 shadow-xs"
+          />
+        </div>
+      </div>
+
       {/* 不對稱塔木德式版面：左側主正文 72% + 右側 Margin 評注欄 28% */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 items-start">
         {/* 左側主正文 (72% 寬度, md:col-span-8) */}
@@ -1091,40 +1706,78 @@ export function V6Page4Why({
           className="md:col-span-8 p-3.5 rounded-sm border space-y-3 shadow-xs"
           style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
         >
-          {/* 正交視角 1 & 2 */}
-          {(whyData.perspective1 || whyData.perspective2) && (
-            <div className="space-y-2 pb-2 border-b" style={{ borderColor: theme.borderColor }}>
-              {whyData.perspective1 && (
-                <div className="p-2.5 rounded bg-white/70 border" style={{ borderColor: theme.borderColor }}>
-                  <div className="flex items-center justify-between text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
-                    <span>視角 1 · {whyData.perspective1.name || "視角一"}</span>
-                    {whyData.perspective1.failureMode && (
-                      <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                        失效模式: {whyData.perspective1.failureMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
-                    <MathText text={whyData.perspective1.content} />
-                  </div>
+          {/* 正交視角 1 & 2（紙上可改；沒有內容時預覽不佔位） */}
+          {([1, 2] as const).map((n) => {
+            const key = (n === 1 ? "perspective1" : "perspective2") as "perspective1" | "perspective2";
+            const current = whyData[key];
+            if (!ed?.editable && !current) return null;
+            const val = current || { name: "", failureMode: "", content: "" };
+            const patchPerspective = (p: Partial<{ name: string; failureMode: string; content: string }>) =>
+              patchWhy({ [key]: { ...val, ...p } } as Partial<NonNullable<CardData["whyData"]>>);
+            return (
+              <div
+                key={key}
+                className="p-2.5 rounded bg-white/70 border"
+                style={{ borderColor: theme.borderColor }}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+                  <span>
+                    視角 {n} ·{" "}
+                    <EditableText
+                      value={val.name || ""}
+                      onChange={(v) => patchPerspective({ name: v })}
+                      placeholder="視角名稱"
+                      inline
+                      className="font-bold"
+                      style={{ color: theme.headingColor, fontFamily: UI_FONT }}
+                      ariaLabel={`WHY 視角 ${n} 名稱`}
+                    />
+                  </span>
+                  <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                    失效模式:{" "}
+                    <EditableText
+                      value={val.failureMode || ""}
+                      onChange={(v) => patchPerspective({ failureMode: v })}
+                      placeholder="這個視角會怎麼失效"
+                      inline
+                      className="text-[10px]"
+                      style={{ color: "#9f1239", fontFamily: UI_FONT }}
+                      ariaLabel={`WHY 視角 ${n} 失效模式`}
+                    />
+                  </span>
                 </div>
-              )}
+                <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
+                  <EditableText
+                    value={val.content || ""}
+                    onChange={(v) => patchPerspective({ content: v })}
+                    multiline
+                    rows={3}
+                    placeholder="這個正交視角怎麼重講一次"
+                    className="text-xs"
+                    style={{ color: theme.textColor, fontFamily: font }}
+                    ariaLabel={`WHY 視角 ${n} 內容`}
+                  />
+                </div>
+              </div>
+            );
+          })}
 
-              {whyData.perspective2 && (
-                <div className="p-2.5 rounded bg-white/70 border" style={{ borderColor: theme.borderColor }}>
-                  <div className="flex items-center justify-between text-xs font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
-                    <span>視角 2 · {whyData.perspective2.name || "視角二"}</span>
-                    {whyData.perspective2.failureMode && (
-                      <span className="text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                        失效模式: {whyData.perspective2.failureMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
-                    <MathText text={whyData.perspective2.content} />
-                  </div>
-                </div>
-              )}
+          {/* v7.2：閉卷草稿（先自己想一次） */}
+          {(ed?.editable || whyData.closedBookDraft) && (
+            <div className="space-y-1">
+              <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
+                閉卷草稿（不查資料先寫一次）
+              </span>
+              <EditableText
+                value={whyData.closedBookDraft || ""}
+                onChange={(v) => patchWhy({ closedBookDraft: v })}
+                multiline
+                rows={3}
+                placeholder="先用自己的話寫一次，再對照完整推導"
+                className="text-sm leading-relaxed"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="WHY 閉卷草稿"
+              />
             </div>
           )}
 
@@ -1134,60 +1787,186 @@ export function V6Page4Why({
               完整論證與推導教學稿
             </span>
             <div className="text-sm leading-relaxed space-y-2" style={{ color: theme.textColor, fontFamily: font }}>
-              <MathText text={whyData.fullReasoning || whyData.closedBookDraft || "（尚未填寫 WHY 完整論證）"} />
+              <EditableText
+                value={whyData.fullReasoning || whyData.closedBookDraft || ""}
+                onChange={(v) => patchWhy({ fullReasoning: v })}
+                multiline
+                rows={6}
+                placeholder="（尚未填寫 WHY 完整論證）"
+                className="text-sm leading-relaxed"
+                style={{ color: theme.textColor, fontFamily: font }}
+                ariaLabel="WHY 完整論證"
+              />
             </div>
           </div>
 
-          {/* 關鍵轉折追問點 */}
-          {whyProbes.length > 0 && (
+          {/* 關鍵轉折追問點（可新增／刪除／排序） */}
+          {(ed?.editable || whyProbes.length > 0) && (
             <div className="pt-2 border-t space-y-2" style={{ borderColor: theme.borderColor }}>
               <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 關鍵轉折追問點（Slamecka 測試效應）
               </span>
-              {whyProbes.map((pr) => {
-                const isOpen = openWhyAnswer[pr.id] || false;
-                return (
-                  <div key={pr.id} className="p-2 rounded bg-amber-50/70 border border-amber-200 text-xs">
-                    <div className="font-bold text-amber-900" style={{ fontFamily: UI_FONT }}>
-                      【追問 · {pr.modeName}】
-                    </div>
-                    <div className="mt-0.5 font-normal" style={{ color: theme.textColor, fontFamily: font }}>
-                      <MathText text={pr.question} />
-                    </div>
-                    <button
-                      onClick={() => setOpenWhyAnswer({ ...openWhyAnswer, [pr.id]: !isOpen })}
-                      className="text-[10px] font-bold text-amber-800 hover:underline mt-1 block"
-                      style={{ fontFamily: UI_FONT }}
-                    >
-                      {isOpen ? "收合答案" : "→ (讀者先想一次再點此揭曉答案)"}
-                    </button>
-                    {isOpen && (
-                      <div className="mt-1 pt-1 border-t border-amber-200 text-xs text-slate-800" style={{ fontFamily: font }}>
-                        <MathText text={pr.answer} />
+              <EditableList<WhyThoughtPoint>
+                items={whyProbes}
+                onChange={setWhyProbes}
+                newItem={() => ({
+                  id: newRowId("why-probe"),
+                  modeName: "",
+                  question: "",
+                  answer: "",
+                  passed: false,
+                  placement: "why",
+                })}
+                addLabel="新增 WHY 追問點"
+                className="space-y-2"
+                itemClassName=""
+                emptyPlaceholder={null}
+                renderItem={(pr, pi) => {
+                  const key = pr.id || String(pi);
+                  const isOpen = !!openWhyAnswer[key] || !!ed?.editable;
+                  const patchProbe = (p: Partial<WhyThoughtPoint>) => {
+                    const next = whyProbes.map((t, i) => (i === pi ? { ...t, ...p } : t));
+                    setWhyProbes(next);
+                  };
+                  return (
+                    <div className="p-2 rounded bg-amber-50/70 border border-amber-200 text-xs">
+                      <div className="font-bold text-amber-900" style={{ fontFamily: UI_FONT }}>
+                        【追問 ·{" "}
+                        <EditableText
+                          value={pr.modeName || ""}
+                          onChange={(v) => patchProbe({ modeName: v })}
+                          placeholder="思維模式名"
+                          inline
+                          className="font-bold"
+                          style={{ color: "#78350f", fontFamily: UI_FONT }}
+                          ariaLabel={`WHY 追問 ${pi + 1} 名稱`}
+                        />
+                        】
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                      <div className="mt-0.5 font-normal" style={{ color: theme.textColor, fontFamily: font }}>
+                        <EditableText
+                          value={pr.question || ""}
+                          onChange={(v) => patchProbe({ question: v })}
+                          multiline
+                          rows={2}
+                          placeholder="讀者先自己想一次的問題"
+                          className="text-xs"
+                          style={{ color: theme.textColor, fontFamily: font }}
+                          ariaLabel={`WHY 追問 ${pi + 1} 問題`}
+                        />
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenWhyAnswer((prev) => ({ ...prev, [key]: !prev[key] }));
+                          }}
+                          className="text-[10px] font-bold text-amber-800 hover:underline"
+                          style={{ fontFamily: UI_FONT }}
+                        >
+                          {isOpen ? "收合答案" : "→ (讀者先想一次再點此揭曉答案)"}
+                        </button>
+                        <EditableCheck
+                          checked={!!pr.passed}
+                          onChange={(v) => patchProbe({ passed: v })}
+                          label="[已推出]"
+                          checkedClassName="text-emerald-700"
+                        />
+                      </div>
+                      {isOpen && (
+                        <div className="mt-1 pt-1 border-t border-amber-200 text-xs text-slate-800" style={{ fontFamily: font }}>
+                          <EditableText
+                            value={pr.answer || ""}
+                            onChange={(v) => patchProbe({ answer: v })}
+                            multiline
+                            rows={2}
+                            placeholder="答案"
+                            className="text-xs"
+                            style={{ color: theme.textColor, fontFamily: font }}
+                            ariaLabel={`WHY 追問 ${pi + 1} 答案`}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                }}
+              />
             </div>
           )}
 
-          {/* 子目標聲明 */}
-          {whyData.subGoals && whyData.subGoals.length > 0 && (
+          {/* 子目標聲明（可新增／刪除／排序） */}
+          {(ed?.editable || (whyData.subGoals?.length || 0) > 0) && (
             <div className="pt-2 border-t space-y-1.5" style={{ borderColor: theme.borderColor }}>
               <span className="text-[11px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 子目標聲明（必要性與充分性）
               </span>
-              <div className="space-y-1">
-                {whyData.subGoals.map((sg, sgi) => (
-                  <div key={sg.id || sgi} className="p-2 rounded bg-white/60 border text-xs" style={{ borderColor: theme.borderColor }}>
-                    <div className="font-bold text-slate-900">{sg.goal}</div>
-                    <div className="text-[10px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
-                      必要性：{sg.whyNecessary} ｜ 充分性：{sg.whySufficient}
+              <EditableList
+                items={whyData.subGoals || []}
+                onChange={(next) => patchWhy({ subGoals: next })}
+                newItem={() => ({ id: newRowId("subgoal"), goal: "", requiredParts: [], whyNecessary: "", whySufficient: "" })}
+                addLabel="新增子目標"
+                className="space-y-1"
+                itemClassName=""
+                emptyPlaceholder={null}
+                renderItem={(sg, sgi) => {
+                  const patchSg = (p: Partial<{ id: string; goal: string; requiredParts: string[]; whyNecessary: string; whySufficient: string }>) => {
+                    const next = [...(whyData.subGoals || [])];
+                    next[sgi] = { ...next[sgi], ...p };
+                    patchWhy({ subGoals: next });
+                  };
+                  return (
+                    <div className="p-2 rounded bg-white/60 border text-xs" style={{ borderColor: theme.borderColor }}>
+                      <EditableText
+                        value={sg.goal || ""}
+                        onChange={(v) => patchSg({ goal: v })}
+                        placeholder="子目標"
+                        multiline
+                        rows={1}
+                        className="font-bold text-slate-900"
+                        style={{ color: theme.headingColor, fontFamily: font }}
+                        ariaLabel={`子目標 ${sgi + 1}`}
+                      />
+                      <div className="text-[10px] text-slate-600 mt-0.5" style={{ fontFamily: UI_FONT }}>
+                        必要性：
+                        <EditableText
+                          value={sg.whyNecessary || ""}
+                          onChange={(v) => patchSg({ whyNecessary: v })}
+                          placeholder="為什麼必要"
+                          inline
+                          className="text-[10px]"
+                          style={{ color: theme.textColor, fontFamily: font }}
+                          ariaLabel={`子目標 ${sgi + 1} 必要性`}
+                        />
+                        {" ｜ 充分性："}
+                        <EditableText
+                          value={sg.whySufficient || ""}
+                          onChange={(v) => patchSg({ whySufficient: v })}
+                          placeholder="為什麼充分"
+                          inline
+                          className="text-[10px]"
+                          style={{ color: theme.textColor, fontFamily: font }}
+                          ariaLabel={`子目標 ${sgi + 1} 充分性`}
+                        />
+                      </div>
+                      {(ed?.editable || (sg.requiredParts || []).length > 0) && (
+                        <div className="text-[9px] text-slate-500 mt-0.5" style={{ fontFamily: UI_FONT }}>
+                          必要零件：
+                          <EditableText
+                            value={(sg.requiredParts || []).join("、")}
+                            onChange={(v) => patchSg({ requiredParts: v.split(/[、,，;；]/).map((x) => x.trim()).filter(Boolean) })}
+                            placeholder="用「、」分隔"
+                            inline
+                            className="text-[9px]"
+                            style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}
+                            ariaLabel={`子目標 ${sgi + 1} 必要零件`}
+                          />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  );
+                }}
+              />
             </div>
           )}
         </div>
@@ -1206,18 +1985,80 @@ export function V6Page4Why({
               <p>[地位:證明/歸納/近似(框架)/約定/公設(框架)]</p>
               <p>[見WHY視角＿]</p>
             </div>
-            {claims.length > 0 && (
+            {(ed?.editable || claims.length > 0) && (
               <div className="pt-1.5 border-t space-y-1" style={{ borderColor: theme.borderColor }}>
                 <span className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                   本卡認識論聲明：
                 </span>
-                {claims.map((cl) => (
-                  <div key={cl.id} className="p-1.5 rounded bg-white/80 border text-[10px]" style={{ borderColor: theme.borderColor }}>
-                    <span className="font-bold text-blue-800">[{cl.epistemicMark}] </span>
-                    <span style={{ fontFamily: font }}>{cl.text}</span>
-                    {cl.anchor && <div className="text-[9px] text-slate-500 mt-0.5">{cl.anchor}</div>}
-                  </div>
-                ))}
+                <EditableList<Claim>
+                  items={claims}
+                  onChange={(next) => ed?.patch({ claims: next })}
+                  newItem={() => ({ id: newRowId("claim"), text: "", epistemicMark: "⊢證", frameworkNote: "", anchor: "" })}
+                  addLabel="新增聲明"
+                  className="space-y-1"
+                  itemClassName=""
+                  emptyPlaceholder={null}
+                  renderItem={(cl, ci) => {
+                    const patchClaim = (p: Partial<Claim>) => {
+                      const next = [...claims];
+                      next[ci] = { ...next[ci], ...p };
+                      ed?.patch({ claims: next });
+                    };
+                    return (
+                      <div className="p-1.5 rounded bg-white/80 border text-[10px]" style={{ borderColor: theme.borderColor }}>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <EditableSelect
+                            value={cl.epistemicMark}
+                            options={EPISTEMIC_MARKS}
+                            onChange={(v) => patchClaim({ epistemicMark: v as Claim["epistemicMark"] })}
+                            className="font-bold text-blue-800"
+                            controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[10px] font-bold text-blue-800 print:hidden"
+                            ariaLabel="認識論標記"
+                          />
+                          <span className="flex-1 min-w-[8rem]">
+                            <EditableText
+                              value={cl.text || ""}
+                              onChange={(v) => patchClaim({ text: v })}
+                              placeholder="聲明內容"
+                              inline
+                              className="text-[10px]"
+                              style={{ color: theme.textColor, fontFamily: font }}
+                              ariaLabel={`聲明 ${ci + 1}`}
+                            />
+                          </span>
+                        </div>
+                        {(ed?.editable || cl.frameworkNote) && (
+                          <div className="mt-0.5 text-[9px] text-slate-500">
+                            框架註記：
+                            <EditableText
+                              value={cl.frameworkNote || ""}
+                              onChange={(v) => patchClaim({ frameworkNote: v })}
+                              placeholder="選填"
+                              inline
+                              className="text-[9px]"
+                              style={{ color: theme.mutedTextColor, fontFamily: font }}
+                              ariaLabel={`聲明 ${ci + 1} 框架註記`}
+                            />
+                          </div>
+                        )}
+                        {(ed?.editable || cl.anchor) && (
+                          <div className="mt-0.5 text-[9px] text-slate-500">
+                            錨點：
+                            <EditableText
+                              value={cl.anchor || ""}
+                              onChange={(v) => patchClaim({ anchor: v })}
+                              placeholder="[見WHY視角＿]"
+                              inline
+                              className="text-[9px]"
+                              style={{ color: theme.mutedTextColor, fontFamily: font }}
+                              ariaLabel={`聲明 ${ci + 1} 錨點`}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
               </div>
             )}
           </div>
@@ -1259,7 +2100,7 @@ export function V6Page4Why({
           </div>
 
           {/* 假設鎖定清單 */}
-          {assumptions.length > 0 && (
+          {(ed?.editable || assumptions.length > 0) && (
             <div
               className="p-2.5 rounded-sm border space-y-1"
               style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
@@ -1267,12 +2108,75 @@ export function V6Page4Why({
               <div className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 假設鎖定清單
               </div>
-              {assumptions.map((as) => (
-                <div key={as.id} className="text-[10px] p-1 rounded bg-white/80 border" style={{ borderColor: theme.borderColor }}>
-                  <span className="font-bold text-purple-800">[{as.kind || "假設"}] </span>
-                  <span style={{ fontFamily: font }}>{as.name}</span>
-                </div>
-              ))}
+              <EditableList<Assumption>
+                items={assumptions}
+                onChange={(next) => ed?.patch({ assumptions: next })}
+                newItem={() => ({ id: newRowId("assumption"), name: "", status: "locked", description: "", kind: "situation" })}
+                addLabel="新增假設"
+                className="space-y-1"
+                itemClassName=""
+                emptyPlaceholder={null}
+                renderItem={(as, ai) => {
+                  const patchAssumption = (p: Partial<Assumption>) => {
+                    const next = [...assumptions];
+                    next[ai] = { ...next[ai], ...p };
+                    ed?.patch({ assumptions: next });
+                  };
+                  return (
+                    <div className="text-[10px] p-1 rounded bg-white/80 border" style={{ borderColor: theme.borderColor }}>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <EditableSelect
+                          value={as.kind || "situation"}
+                          options={[
+                            { value: "situation", label: "情境設定" },
+                            { value: "scope", label: "適用範圍" },
+                          ]}
+                          onChange={(v) => patchAssumption({ kind: v as Assumption["kind"] })}
+                          className="font-bold text-purple-800"
+                          controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[9px] print:hidden"
+                          ariaLabel="假設種類"
+                        />
+                        <EditableSelect
+                          value={as.status}
+                          options={[
+                            { value: "locked", label: "已鎖定" },
+                            { value: "smuggled_candidate", label: "偷渡候選" },
+                          ]}
+                          onChange={(v) => patchAssumption({ status: v as Assumption["status"] })}
+                          className="text-slate-500"
+                          controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[9px] print:hidden"
+                          ariaLabel="假設狀態"
+                        />
+                        <span className="flex-1 min-w-[7rem]">
+                          <EditableText
+                            value={as.name || ""}
+                            onChange={(v) => patchAssumption({ name: v })}
+                            placeholder="假設名稱"
+                            inline
+                            className="text-[10px] font-bold"
+                            style={{ color: theme.textColor, fontFamily: font }}
+                            ariaLabel={`假設 ${ai + 1} 名稱`}
+                          />
+                        </span>
+                      </div>
+                      {(ed?.editable || as.description) && (
+                        <div className="mt-0.5">
+                          <EditableText
+                            value={as.description || ""}
+                            onChange={(v) => patchAssumption({ description: v })}
+                            placeholder="這條假設是什麼、什麼時候成立"
+                            multiline
+                            rows={1}
+                            className="text-[9px]"
+                            style={{ color: theme.mutedTextColor, fontFamily: font }}
+                            ariaLabel={`假設 ${ai + 1} 說明`}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                }}
+              />
             </div>
           )}
         </div>
@@ -1316,6 +2220,33 @@ export function V6Page5What({
   const extQuestions = extensions.questions || {};
   const constructDetails = extensions.constructDetails || {};
   const readingNameMap = Object.fromEntries(readings.map((r) => [r.id, r.name]));
+  const ed = useCardEdit();
+  type Reading = NonNullable<NonNullable<CardData["whatData"]>["readings"]>[number];
+  type ReadingQuestion = NonNullable<NonNullable<CardData["whatData"]>["readingQuestions"]>[number];
+  type ReadingBridge = NonNullable<NonNullable<CardData["whatData"]>["readingBridges"]>[number];
+  type Perspective = NonNullable<NonNullable<CardData["whatData"]>["perspectives"]>[number];
+
+  const patchWhat = (p: Partial<NonNullable<CardData["whatData"]>>) =>
+    ed?.patch({ whatData: { ...whatData, ...p } });
+  const readingOptions = readings.map((r) => ({ value: r.id, label: r.name || r.id }));
+  const patchExt = (key: string, value: string) =>
+    patchWhat({
+      extensions: { ...extensions, [key]: value } as NonNullable<CardData["whatData"]>["extensions"],
+    });
+  const patchExtQuestion = (key: string, value: string) =>
+    patchWhat({
+      extensions: {
+        ...extensions,
+        questions: { ...extQuestions, [key]: value },
+      } as NonNullable<CardData["whatData"]>["extensions"],
+    });
+  const patchConstructDetails = (p: Partial<NonNullable<NonNullable<CardData["whatData"]>["extensions"]>["constructDetails"]>) =>
+    patchWhat({
+      extensions: {
+        ...extensions,
+        constructDetails: { ...constructDetails, ...p },
+      } as NonNullable<CardData["whatData"]>["extensions"],
+    });
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -1332,9 +2263,52 @@ export function V6Page5What({
           className="p-2.5 rounded-sm border text-[11px] leading-relaxed bg-amber-50/90 border-amber-300 text-amber-950"
           style={{ fontFamily: UI_FONT }}
         >
-          <MathText text={whatData.v6DemoPreservedNote} />
+          <EditableText
+            value={whatData.v6DemoPreservedNote || ""}
+            onChange={(v) => patchWhat({ v6DemoPreservedNote: v })}
+            multiline
+            rows={2}
+            placeholder="v6 對照示範卡註記"
+            className="text-[11px]"
+            style={{ fontFamily: UI_FONT, color: "#451a03" }}
+            ariaLabel="v6 對照示範卡註記"
+          />
         </div>
       )}
+
+      {/* v7.2：WHAT 摘要與「與 APPLY 的區分」（紙上直接改） */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="p-3 rounded-sm border space-y-1" style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}>
+          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+            WHAT 摘要
+          </span>
+          <EditableText
+            value={whatData.summary || ""}
+            onChange={(v) => patchWhat({ summary: v })}
+            multiline
+            rows={2}
+            placeholder="一句話講這張卡是什麼"
+            className="text-xs leading-relaxed"
+            style={{ color: theme.textColor, fontFamily: font }}
+            ariaLabel="WHAT 摘要"
+          />
+        </div>
+        <div className="p-3 rounded-sm border space-y-1" style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}>
+          <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+            與 APPLY 的區分
+          </span>
+          <EditableText
+            value={whatData.distinctionFromHow || ""}
+            onChange={(v) => patchWhat({ distinctionFromHow: v })}
+            multiline
+            rows={2}
+            placeholder="WHAT 講「它是什麼」，APPLY 講「怎麼用」"
+            className="text-xs leading-relaxed"
+            style={{ color: theme.textColor, fontFamily: font }}
+            ariaLabel="與 APPLY 的區分"
+          />
+        </div>
+      </div>
 
       {/* =================================================================
           子節點 1：讀法（v7 新增：什麼算不同讀法 · 問題×讀法表 · 橋 · 機械檢查）
@@ -1363,46 +2337,82 @@ export function V6Page5What({
             )}
           </div>
 
-          {/* 讀法清單 */}
-          {readings.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-              {readings.map((r, rIdx) => (
+          {/* 讀法清單（可新增／刪除／排序） */}
+          <EditableList<Reading>
+            items={readings}
+            onChange={(next) => patchWhat({ readings: next })}
+            newItem={() => ({ id: newRowId("reading"), name: "", description: "", linkedPerspective: "", onlyForUnderstanding: false })}
+            addLabel="新增讀法"
+            className="grid grid-cols-1 md:grid-cols-3 gap-2.5"
+            itemClassName=""
+            emptyPlaceholder={
+              <div className="p-2.5 rounded bg-white/60 border text-xs italic text-slate-400" style={{ borderColor: theme.borderColor }}>
+                （尚未建立讀法；若只有單一讀法請標「單一讀法，盲區未驗」）
+              </div>
+            }
+            renderItem={(r, rIdx) => {
+              const patchReading = (p: Partial<Reading>) => {
+                const next = [...readings];
+                next[rIdx] = { ...next[rIdx], ...p };
+                patchWhat({ readings: next });
+              };
+              return (
                 <div
-                  key={r.id || rIdx}
                   className="p-2.5 rounded bg-white/80 border space-y-1 flex flex-col justify-between"
                   style={{ borderColor: theme.borderColor }}
                 >
                   <div>
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-[11px] font-bold text-slate-900" style={{ fontFamily: UI_FONT }}>
-                        {r.name || `讀法${rIdx + 1}`}
-                      </span>
-                      {r.onlyForUnderstanding && (
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 text-[9px]" style={{ fontFamily: UI_FONT }}>
-                          僅理解用
-                        </span>
-                      )}
+                      <EditableText
+                        value={r.name || ""}
+                        onChange={(v) => patchReading({ name: v })}
+                        placeholder={`讀法${rIdx + 1}`}
+                        inline
+                        className="text-[11px] font-bold text-slate-900"
+                        style={{ color: theme.headingColor, fontFamily: UI_FONT }}
+                        ariaLabel={`讀法 ${rIdx + 1} 名稱`}
+                      />
+                      <EditableCheck
+                        checked={!!r.onlyForUnderstanding}
+                        onChange={(v) => patchReading({ onlyForUnderstanding: v })}
+                        label="僅理解用"
+                        checkedClassName="text-slate-700"
+                      />
                     </div>
                     <div className="text-xs leading-relaxed mt-1" style={{ color: theme.textColor, fontFamily: font }}>
-                      <MathText text={r.description} />
+                      <EditableText
+                        value={r.description || ""}
+                        onChange={(v) => patchReading({ description: v })}
+                        multiline
+                        rows={2}
+                        placeholder="讀法具體表述"
+                        className="text-xs"
+                        style={{ color: theme.textColor, fontFamily: font }}
+                        ariaLabel={`讀法 ${rIdx + 1} 說明`}
+                      />
                     </div>
                   </div>
-                  {r.linkedPerspective && (
+                  {(ed?.editable || r.linkedPerspective) && (
                     <div className="text-[9px] text-indigo-700 font-medium pt-1 border-t border-dotted" style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}>
-                      🔗 {r.linkedPerspective}
+                      🔗{" "}
+                      <EditableText
+                        value={r.linkedPerspective || ""}
+                        onChange={(v) => patchReading({ linkedPerspective: v })}
+                        placeholder="可配視角（選填）"
+                        inline
+                        className="text-[9px]"
+                        style={{ color: "#4338ca", fontFamily: UI_FONT }}
+                        ariaLabel={`讀法 ${rIdx + 1} 搭配視角`}
+                      />
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-2.5 rounded bg-white/60 border text-xs italic text-slate-400" style={{ borderColor: theme.borderColor }}>
-              （尚未建立讀法；若只有單一讀法請標「單一讀法，盲區未驗」）
-            </div>
-          )}
+              );
+            }}
+          />
 
-          {/* 問題 × 讀法表 */}
-          {readings.length > 0 && readingQuestions.length > 0 && (
+          {/* 問題 × 讀法表（列可新增；每格可改；最便宜／看不見可勾） */}
+          {readings.length > 0 && (ed?.editable || readingQuestions.length > 0) && (
             <div className="space-y-1.5 pt-1">
               <div className="flex flex-wrap items-center justify-between gap-1">
                 <span className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
@@ -1424,71 +2434,197 @@ export function V6Page5What({
                           {r.name || `讀法${rIdx + 1}`}
                         </th>
                       ))}
+                      {ed?.editable && (
+                        <th className="p-1 border-b text-[9px] font-bold print:hidden" style={{ borderColor: theme.borderColor, color: theme.mutedTextColor }}>
+                          列
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: theme.borderColor }}>
-                    {readingQuestions.map((rq, qIdx) => (
-                      <tr key={rq.id || qIdx} className="bg-white/75">
-                        <td className="p-2 border-r font-semibold text-slate-900 align-top" style={{ borderColor: theme.borderColor, fontFamily: font }}>
-                          <MathText text={rq.question} />
-                        </td>
-                        {readings.map((r) => {
-                          const cell = rq.cells?.[r.id];
-                          const isCheap = cell?.isCheapest;
-                          const isInv = cell?.isInvisible || /看不見|看不见/.test(cell?.text || "");
-                          return (
-                            <td
-                              key={r.id}
-                              className={`p-2 border-r last:border-r-0 align-top ${
-                                isCheap
-                                  ? "bg-emerald-50/80 font-semibold text-emerald-950"
-                                  : isInv
-                                  ? "bg-rose-50/60 text-rose-900"
-                                  : "text-slate-700"
-                              }`}
-                              style={{ borderColor: theme.borderColor, fontFamily: font }}
-                            >
-                              <div className="flex flex-wrap items-center gap-1 mb-0.5" style={{ fontFamily: UI_FONT }}>
-                                {isCheap && (
-                                  <span className="px-1 py-0.2 rounded bg-emerald-600 text-white text-[9px] font-bold">
-                                    ★ 最便宜
-                                  </span>
-                                )}
-                                {isInv && (
-                                  <span className="px-1 py-0.2 rounded bg-rose-200 text-rose-900 text-[9px] font-bold">
-                                    看不見
-                                  </span>
-                                )}
-                                {isInv && cell?.pointsToReadingId && readingNameMap[cell.pointsToReadingId] && (
-                                  <span className="text-[9px] text-rose-700 font-medium">
-                                    → 見 {readingNameMap[cell.pointsToReadingId]}
-                                  </span>
-                                )}
-                              </div>
-                              <div>
-                                <MathText text={cell?.text || "—"} />
+                    {readingQuestions.map((rq, qIdx) => {
+                      const patchQuestion = (p: Partial<ReadingQuestion>) => {
+                        const next = [...readingQuestions];
+                        next[qIdx] = { ...next[qIdx], ...p };
+                        patchWhat({ readingQuestions: next });
+                      };
+                      const moveQuestion = (to: number) => {
+                        if (to < 0 || to >= readingQuestions.length) return;
+                        const next = [...readingQuestions];
+                        const [row] = next.splice(qIdx, 1);
+                        next.splice(to, 0, row);
+                        patchWhat({ readingQuestions: next });
+                      };
+                      const removeQuestion = () => {
+                        if (readingQuestions.length === 1) {
+                          const ok = typeof window !== "undefined"
+                            ? window.confirm("這是最後一列問題，刪除後問題×讀法表會變空。確定刪除嗎？")
+                            : false;
+                          if (!ok) return;
+                        }
+                        patchWhat({ readingQuestions: readingQuestions.filter((_, i) => i !== qIdx) });
+                      };
+                      return (
+                        <tr key={rq.id || qIdx} className="bg-white/75">
+                          <td className="p-2 border-r font-semibold text-slate-900 align-top" style={{ borderColor: theme.borderColor, fontFamily: font }}>
+                            <EditableText
+                              value={rq.question || ""}
+                              onChange={(v) => patchQuestion({ question: v })}
+                              multiline
+                              rows={1}
+                              placeholder="問題"
+                              className="text-xs font-semibold"
+                              style={{ color: theme.headingColor, fontFamily: font }}
+                              ariaLabel={`問題 ${qIdx + 1}`}
+                            />
+                          </td>
+                          {readings.map((r) => {
+                            const cell = rq.cells?.[r.id] || { text: "" };
+                            const isCheap = cell.isCheapest;
+                            const isInv = cell.isInvisible || /看不見|看不见/.test(cell.text || "");
+                            const patchCell = (p: Partial<typeof cell>) => {
+                              const current = readingQuestions[qIdx];
+                              const cells = { ...(current.cells || {}) };
+                              cells[r.id] = { ...(cells[r.id] || { text: "" }), ...p };
+                              patchQuestion({ cells });
+                            };
+                            return (
+                              <td
+                                key={r.id}
+                                className={`p-2 border-r last:border-r-0 align-top ${
+                                  isCheap
+                                    ? "bg-emerald-50/80 font-semibold text-emerald-950"
+                                    : isInv
+                                    ? "bg-rose-50/60 text-rose-900"
+                                    : "text-slate-700"
+                                }`}
+                                style={{ borderColor: theme.borderColor, fontFamily: font }}
+                              >
+                                <div className="flex flex-wrap items-center gap-1 mb-0.5" style={{ fontFamily: UI_FONT }}>
+                                  <EditableCheck
+                                    checked={!!isCheap}
+                                    onChange={(v) => patchCell({ isCheapest: v })}
+                                    label="★ 最便宜"
+                                    checkedClassName="bg-emerald-600 text-white border-emerald-700"
+                                  />
+                                  <EditableCheck
+                                    checked={!!isInv}
+                                    onChange={(v) => patchCell({ isInvisible: v })}
+                                    label="看不見"
+                                    checkedClassName="bg-rose-200 text-rose-900 border-rose-300"
+                                  />
+                                  {!ed?.editable && isInv && cell.pointsToReadingId && readingNameMap[cell.pointsToReadingId] && (
+                                    <span className="text-[9px] text-rose-700 font-medium">
+                                      → 見 {readingNameMap[cell.pointsToReadingId]}
+                                    </span>
+                                  )}
+                                  {ed?.editable && (
+                                    <EditableSelect
+                                      value={cell.pointsToReadingId || ""}
+                                      options={[{ value: "", label: "（不指向）" }, ...readingOptions]}
+                                      onChange={(v) => patchCell({ pointsToReadingId: v || undefined })}
+                                      className="text-[9px] text-rose-700"
+                                      controlClassName="max-w-[110px] rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[9px] print:hidden"
+                                      ariaLabel={`${r.name || "讀法"} 指向哪個讀法`}
+                                    />
+                                  )}
+                                </div>
+                                <EditableText
+                                  value={cell.text || ""}
+                                  onChange={(v) => patchCell({ text: v })}
+                                  multiline
+                                  rows={1}
+                                  placeholder="—"
+                                  className="text-xs"
+                                  style={{ color: theme.textColor, fontFamily: font }}
+                                  ariaLabel={`問題 ${qIdx + 1} × ${r.name || "讀法"} 單格`}
+                                />
+                              </td>
+                            );
+                          })}
+                          {ed?.editable && (
+                            <td className="p-1 align-top print:hidden">
+                              <div className="flex flex-col items-center gap-0.5">
+                                <button
+                                  type="button"
+                                  title="上移問題列"
+                                  disabled={qIdx === 0}
+                                  onClick={() => moveQuestion(qIdx - 1)}
+                                  className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-30"
+                                >
+                                  <ArrowUp className="h-3 w-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="下移問題列"
+                                  disabled={qIdx === readingQuestions.length - 1}
+                                  onClick={() => moveQuestion(qIdx + 1)}
+                                  className="rounded border border-slate-200 bg-white p-0.5 text-slate-500 shadow-sm hover:bg-slate-50 disabled:opacity-30"
+                                >
+                                  <ArrowDown className="h-3 w-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="刪除問題列"
+                                  onClick={removeQuestion}
+                                  className="rounded border border-rose-200 bg-white p-0.5 text-rose-500 shadow-sm hover:bg-rose-50"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
                               </div>
                             </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+              {ed?.editable && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    patchWhat({
+                      readingQuestions: [
+                        ...readingQuestions,
+                        { id: newRowId("reading-q"), question: "", cells: {} },
+                      ],
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded border border-dashed border-amber-400/80 bg-amber-50/50 px-2 py-1 text-[10px] font-bold text-amber-800 hover:bg-amber-100/70 print:hidden"
+                >
+                  <Plus className="h-3 w-3" />
+                  新增問題列
+                </button>
+              )}
             </div>
           )}
 
-          {/* 橋（讀法之間的關係，4 種：互通 / 單向 / 限定範圍 / 走不通） */}
-          {readingBridges.length > 0 && (
+          {/* 橋（可新增／刪除／排序；切換型別會顯示對應欄位） */}
+          {(ed?.editable || readingBridges.length > 0) && (
             <div className="space-y-1.5 pt-1">
               <div className="text-[10px] font-bold" style={{ color: theme.headingColor, fontFamily: UI_FONT }}>
                 橋 · 讀法之間的關係（四種：互通〔雙向推導〕／單向〔推導＋反向反例〕／限定範圍〔推導＋範圍條件＋範圍外反例〕／走不通〔理由＋[已證無橋]或[未找到橋]〕）
               </div>
-              <div className="grid grid-cols-1 gap-2">
-                {readingBridges.map((br, bIdx) => {
-                  const fromName = readingNameMap[br.fromReadingId] || br.fromReadingId;
-                  const toName = readingNameMap[br.toReadingId] || br.toReadingId;
+              <EditableList<ReadingBridge>
+                items={readingBridges}
+                onChange={(next) => patchWhat({ readingBridges: next })}
+                newItem={() => ({
+                  id: newRowId("bridge"),
+                  fromReadingId: readings[0]?.id || "",
+                  toReadingId: readings[1]?.id || readings[0]?.id || "",
+                  type: "互通",
+                })}
+                addLabel="新增橋"
+                className="grid grid-cols-1 gap-2"
+                itemClassName=""
+                emptyPlaceholder={null}
+                renderItem={(br, bIdx) => {
+                  const patchBridge = (p: Partial<ReadingBridge>) => {
+                    const next = [...readingBridges];
+                    next[bIdx] = { ...next[bIdx], ...p };
+                    patchWhat({ readingBridges: next });
+                  };
                   const arrow =
                     br.type === "互通"
                       ? "↔"
@@ -1499,70 +2635,153 @@ export function V6Page5What({
                       : br.type === "走不通"
                       ? "✕"
                       : "⋯";
+                  const showForward = br.type === "互通" || br.type === "單向" || br.type === "限定範圍";
+                  const showBackward = br.type === "互通";
+                  const showCounter = br.type === "單向" || br.type === "限定範圍";
+                  const showScope = br.type === "限定範圍";
+                  const showBlocked = br.type === "走不通";
                   return (
                     <div
-                      key={br.id || bIdx}
                       className="p-2.5 rounded bg-white/80 border text-xs space-y-1"
                       style={{ borderColor: theme.borderColor }}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-1" style={{ fontFamily: UI_FONT }}>
-                        <span className="font-bold text-slate-900 text-[11px]">
-                          {fromName} {arrow} {toName}
+                        <span className="font-bold text-slate-900 text-[11px] flex flex-wrap items-center gap-1">
+                          <EditableSelect
+                            value={br.fromReadingId}
+                            options={readingOptions}
+                            onChange={(v) => patchBridge({ fromReadingId: v })}
+                            className="font-bold text-[11px]"
+                            controlClassName="max-w-[130px] rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[10px] print:hidden"
+                            ariaLabel="橋的起點讀法"
+                          />
+                          <span>{arrow}</span>
+                          <EditableSelect
+                            value={br.toReadingId}
+                            options={readingOptions}
+                            onChange={(v) => patchBridge({ toReadingId: v })}
+                            className="font-bold text-[11px]"
+                            controlClassName="max-w-[130px] rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[10px] print:hidden"
+                            ariaLabel="橋的終點讀法"
+                          />
                         </span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
-                            br.type === "互通"
-                              ? "bg-emerald-100 text-emerald-900 border-emerald-300"
-                              : br.type === "單向"
-                              ? "bg-blue-100 text-blue-900 border-blue-300"
-                              : br.type === "限定範圍"
-                              ? "bg-amber-100 text-amber-900 border-amber-300"
-                              : br.type === "走不通"
-                              ? "bg-rose-100 text-rose-900 border-rose-300"
-                              : "bg-slate-100 text-slate-700 border-slate-300"
-                          }`}
-                        >
-                          橋類型：{br.type} {br.blockedMark ? `· ${br.blockedMark}` : ""}
+                        <span className="flex items-center gap-1">
+                          <EditableSelect
+                            value={br.type}
+                            options={BRIDGE_TYPES}
+                            onChange={(v) => patchBridge({ type: v as ReadingBridge["type"] })}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                              br.type === "互通"
+                                ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                                : br.type === "單向"
+                                ? "bg-blue-100 text-blue-900 border-blue-300"
+                                : br.type === "限定範圍"
+                                ? "bg-amber-100 text-amber-900 border-amber-300"
+                                : br.type === "走不通"
+                                ? "bg-rose-100 text-rose-900 border-rose-300"
+                                : "bg-slate-100 text-slate-700 border-slate-300"
+                            }`}
+                            controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[9px] font-bold text-slate-800 print:hidden"
+                            ariaLabel="橋的型別"
+                          />
+                          {showBlocked && (
+                            <EditableSelect
+                              value={br.blockedMark || "[未找到橋]"}
+                              options={BLOCKED_MARKS}
+                              onChange={(v) => patchBridge({ blockedMark: v as ReadingBridge["blockedMark"] })}
+                              className="text-[9px] text-rose-700"
+                              controlClassName="rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[9px] print:hidden"
+                              ariaLabel="走不通標記"
+                            />
+                          )}
                         </span>
                       </div>
                       <div className="space-y-0.5 text-[11px] leading-relaxed" style={{ fontFamily: font, color: theme.textColor }}>
-                        {br.forwardProof && (
+                        {showForward && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-slate-700">
                               {br.type === "互通" ? "正向推導：" : "推導："}
                             </b>
-                            <MathText text={br.forwardProof} />
+                            <EditableText
+                              value={br.forwardProof || ""}
+                              onChange={(v) => patchBridge({ forwardProof: v })}
+                              multiline
+                              rows={1}
+                              placeholder="推導內容"
+                              className="text-[11px]"
+                              style={{ color: theme.textColor, fontFamily: font }}
+                              ariaLabel={`橋 ${bIdx + 1} 推導`}
+                            />
                           </div>
                         )}
-                        {br.backwardProof && (
+                        {showBackward && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-slate-700">反向推導：</b>
-                            <MathText text={br.backwardProof} />
+                            <EditableText
+                              value={br.backwardProof || ""}
+                              onChange={(v) => patchBridge({ backwardProof: v })}
+                              multiline
+                              rows={1}
+                              placeholder="反向推導"
+                              className="text-[11px]"
+                              style={{ color: theme.textColor, fontFamily: font }}
+                              ariaLabel={`橋 ${bIdx + 1} 反向推導`}
+                            />
                           </div>
                         )}
-                        {br.scopeCondition && (
+                        {showScope && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-amber-800">範圍條件：</b>
-                            <MathText text={br.scopeCondition} />
+                            <EditableText
+                              value={br.scopeCondition || ""}
+                              onChange={(v) => patchBridge({ scopeCondition: v })}
+                              multiline
+                              rows={1}
+                              placeholder="在什麼範圍內成立"
+                              className="text-[11px]"
+                              style={{ color: theme.textColor, fontFamily: font }}
+                              ariaLabel={`橋 ${bIdx + 1} 範圍條件`}
+                            />
                           </div>
                         )}
-                        {br.counterExample && (
+                        {showCounter && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-rose-800">反例：</b>
-                            <MathText text={br.counterExample} />
+                            <EditableText
+                              value={br.counterExample || ""}
+                              onChange={(v) => patchBridge({ counterExample: v })}
+                              multiline
+                              rows={1}
+                              placeholder="反例"
+                              className="text-[11px]"
+                              style={{ color: theme.textColor, fontFamily: font }}
+                              ariaLabel={`橋 ${bIdx + 1} 反例`}
+                            />
                           </div>
                         )}
-                        {br.blockedReason && (
+                        {showBlocked && (
                           <div>
                             <b style={{ fontFamily: UI_FONT }} className="text-rose-800">走不通理由：</b>
-                            <MathText text={br.blockedReason} />
+                            <EditableText
+                              value={br.blockedReason || ""}
+                              onChange={(v) => patchBridge({ blockedReason: v })}
+                              multiline
+                              rows={1}
+                              placeholder="為什麼走不通"
+                              className="text-[11px]"
+                              style={{ color: theme.textColor, fontFamily: font }}
+                              ariaLabel={`橋 ${bIdx + 1} 走不通理由`}
+                            />
                           </div>
+                        )}
+                        {br.type === "[未查]" && (
+                          <div className="text-[10px] italic text-slate-500">尚未查這條橋（[未查]）。</div>
                         )}
                       </div>
                     </div>
                   );
-                })}
-              </div>
+                }}
+              />
             </div>
           )}
         </div>
@@ -1579,68 +2798,165 @@ export function V6Page5What({
         </span>
       </div>
 
-      {/* 平行欄位：視角①、②、③... */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {perspectives.length > 0 ? (
-          perspectives.map((p, idx) => {
-            const isMirror = p.kind === "mirror" || /借鏡視角|借镜视角/.test(`${p.code || ""} ${p.label || ""}`);
-            return (
-              <div
-                key={p.code || idx}
-                className="p-3 rounded-sm border space-y-2 flex flex-col shadow-xs"
-                style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
-              >
-                <div className="flex items-center justify-between border-b pb-1 gap-1" style={{ borderColor: theme.borderColor }}>
-                  <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
-                    視角 {idx + 1} · {p.label || p.code}
-                  </span>
-                  {p.isAlsoReading && (
-                    <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 border border-sky-300 text-[9px] font-bold" style={{ fontFamily: UI_FONT }}>
-                      同時為讀法
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
-                  <span className={!isMirror ? "font-bold text-slate-900" : ""}>{!isMirror ? "☑" : "□"} 視角</span>
-                  <span className={isMirror ? "font-bold text-indigo-800" : ""}>{isMirror ? "☑" : "□"} 借鏡視角</span>
-                </div>
-                <div className="text-[10px] font-mono p-1.5 rounded bg-white/75 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
-                  <div className="font-bold text-slate-800" style={{ fontFamily: UI_FONT }}>
-                    (1) 對應表：
-                  </div>
-                  <div style={{ fontFamily: font, color: theme.textColor }}>
-                    <MathText text={p.mappingTable || `${p.code} ↔ ${p.label}`} />
-                  </div>
-                </div>
-                <div className="text-xs leading-relaxed flex-1" style={{ color: theme.textColor, fontFamily: font }}>
-                  <MathText text={p.content || "（視角闡述內容）"} />
-                </div>
-                {p.derivedFact && (
-                  <div className="text-[10px] p-1.5 rounded bg-emerald-50/80 border border-emerald-200 text-emerald-950 space-y-0.5">
-                    <div className="font-bold text-emerald-800" style={{ fontFamily: UI_FONT }}>
-                      (2) 導出可獨立核對的具體事實：
-                    </div>
-                    <div style={{ fontFamily: font }}>
-                      <MathText text={p.derivedFact} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        ) : (
+      {/* 平行欄位：視角①、②、③...（可新增／刪除／排序） */}
+      <EditableList<Perspective>
+        items={perspectives}
+        onChange={(next) => patchWhat({ perspectives: next })}
+        newItem={() => ({ code: `視角${perspectives.length + 1}`, label: "", content: "", kind: "perspective" })}
+        addLabel="新增視角"
+        className="grid grid-cols-1 md:grid-cols-3 gap-3"
+        itemClassName=""
+        emptyPlaceholder={
           <div className="col-span-3 p-4 rounded border text-center text-xs italic" style={{ borderColor: theme.borderColor, color: theme.mutedTextColor }}>
             （尚未建立視角，建議至少撰寫 3 個不同視角）
           </div>
-        )}
-      </div>
+        }
+        renderItem={(p, idx) => {
+          const isMirror = p.kind === "mirror" || /借鏡視角|借镜视角/.test(`${p.code || ""} ${p.label || ""}`);
+          const patchP = (patch: Partial<Perspective>) => {
+            const next = [...perspectives];
+            next[idx] = { ...next[idx], ...patch };
+            patchWhat({ perspectives: next });
+          };
+          return (
+            <div
+              className="p-3 rounded-sm border space-y-2 flex flex-col shadow-xs"
+              style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}
+            >
+              <div className="flex items-center justify-between border-b pb-1 gap-1" style={{ borderColor: theme.borderColor }}>
+                <span className="text-[11px] font-bold" style={{ color: theme.accentColor, fontFamily: UI_FONT }}>
+                  視角 {idx + 1} ·{" "}
+                  <EditableText
+                    value={p.label || ""}
+                    onChange={(v) => patchP({ label: v })}
+                    placeholder={p.code || "視角名稱"}
+                    inline
+                    className="font-bold"
+                    style={{ color: theme.accentColor, fontFamily: UI_FONT }}
+                    ariaLabel={`視角 ${idx + 1} 名稱`}
+                  />
+                </span>
+                <EditableCheck
+                  checked={!!p.isAlsoReading}
+                  onChange={(v) => patchP({ isAlsoReading: v })}
+                  label="同時為讀法"
+                  checkedClassName="bg-sky-100 text-sky-900 border-sky-300"
+                />
+              </div>
 
-      {whatData.mirrorPerspectiveTriedNote && (
+              <div className="flex flex-wrap items-center gap-2 text-[10px]" style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}>
+                <EditableCheck
+                  checked={!isMirror}
+                  onChange={(v) => patchP({ kind: v ? "perspective" : "mirror" })}
+                  label="視角"
+                  showWhenUnchecked
+                  checkedClassName="font-bold text-slate-900"
+                />
+                <EditableCheck
+                  checked={isMirror}
+                  onChange={(v) => patchP({ kind: v ? "mirror" : "perspective" })}
+                  label="借鏡視角"
+                  showWhenUnchecked
+                  checkedClassName="font-bold text-indigo-800"
+                />
+                {p.isAlsoReading && (
+                  <EditableSelect
+                    value={p.linkedReadingId || ""}
+                    options={[{ value: "", label: "（未指定讀法）" }, ...readingOptions]}
+                    onChange={(v) => patchP({ linkedReadingId: v || undefined })}
+                    className="text-[9px] text-sky-800"
+                    controlClassName="max-w-[120px] rounded border border-amber-400/80 bg-white px-1 py-0.5 text-[9px] print:hidden"
+                    ariaLabel={`視角 ${idx + 1} 對應讀法`}
+                  />
+                )}
+              </div>
+
+              <div className="text-[10px] p-1.5 rounded bg-white/75 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
+                <div className="font-bold text-slate-800" style={{ fontFamily: UI_FONT }}>
+                  (1) 對應表：
+                </div>
+                <div style={{ fontFamily: font, color: theme.textColor }}>
+                  <EditableText
+                    value={p.mappingTable || ""}
+                    onChange={(v) => patchP({ mappingTable: v })}
+                    multiline
+                    rows={1}
+                    placeholder={`${p.code || "視角"} ↔ ${p.label || "本知識點角色"}`}
+                    className="text-[10px]"
+                    style={{ color: theme.textColor, fontFamily: font }}
+                    ariaLabel={`視角 ${idx + 1} 對應表`}
+                  />
+                </div>
+              </div>
+
+              <div className="text-xs leading-relaxed flex-1" style={{ color: theme.textColor, fontFamily: font }}>
+                <EditableText
+                  value={p.content || ""}
+                  onChange={(v) => patchP({ content: v })}
+                  multiline
+                  rows={3}
+                  placeholder="（視角闡述內容）"
+                  className="text-xs"
+                  style={{ color: theme.textColor, fontFamily: font }}
+                  ariaLabel={`視角 ${idx + 1} 內容`}
+                />
+              </div>
+
+              {(ed?.editable || p.derivedFact) && (
+                <div className="text-[10px] p-1.5 rounded bg-emerald-50/80 border border-emerald-200 text-emerald-950 space-y-0.5">
+                  <div className="font-bold text-emerald-800" style={{ fontFamily: UI_FONT }}>
+                    (2) 導出可獨立核對的具體事實：
+                  </div>
+                  <div style={{ fontFamily: font }}>
+                    <EditableText
+                      value={p.derivedFact || ""}
+                      onChange={(v) => patchP({ derivedFact: v })}
+                      multiline
+                      rows={1}
+                      placeholder="用對應表導出可核對的事實"
+                      className="text-[10px]"
+                      style={{ color: "#022c22", fontFamily: font }}
+                      ariaLabel={`視角 ${idx + 1} 導出事實`}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(ed?.editable || p.code) && (
+                <div className="text-[9px] text-slate-400" style={{ fontFamily: UI_FONT }}>
+                  代號：
+                  <EditableText
+                    value={p.code || ""}
+                    onChange={(v) => patchP({ code: v })}
+                    placeholder="視角代號"
+                    inline
+                    className="text-[9px]"
+                    style={{ color: theme.mutedTextColor, fontFamily: UI_FONT }}
+                    ariaLabel={`視角 ${idx + 1} 代號`}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        }}
+      />
+
+      {(ed?.editable || whatData.mirrorPerspectiveTriedNote) && (
         <div
           className="p-2 rounded border text-[11px] bg-slate-50 text-slate-700"
           style={{ borderColor: theme.borderColor, fontFamily: UI_FONT }}
         >
-          <b>借鏡視角誠實標註：</b>{whatData.mirrorPerspectiveTriedNote}
+          <b>借鏡視角誠實標註：</b>
+          <EditableText
+            value={whatData.mirrorPerspectiveTriedNote || ""}
+            onChange={(v) => patchWhat({ mirrorPerspectiveTriedNote: v })}
+            multiline
+            rows={1}
+            placeholder="已嘗試尋找借鏡視角，未找到"
+            className="text-[11px]"
+            style={{ fontFamily: UI_FONT, color: "#334155" }}
+            ariaLabel="借鏡視角誠實標註"
+          />
         </div>
       )}
 
@@ -1701,47 +3017,93 @@ export function V6Page5What({
                   {ext.desc}
                 </div>
                 <div className="text-xs leading-relaxed pt-0.5" style={{ color: theme.textColor, fontFamily: font }}>
-                  {ext.val ? <MathText text={ext.val} /> : <span className="text-slate-300 italic text-[10px]">（從缺）</span>}
+                  <EditableText
+                    value={ext.val || ""}
+                    onChange={(v) => patchExt(ext.key, v)}
+                    multiline
+                    rows={3}
+                    placeholder="（從缺）"
+                    className="text-xs"
+                    style={{ color: theme.textColor, fontFamily: font }}
+                    ariaLabel={`${ext.label} 內容`}
+                  />
                 </div>
 
                 {/* 若為第 6 方向「造」，顯示必寫的三件事 */}
-                {ext.key === "construct" && (constructDetails.choice || constructDetails.alternative || constructDetails.linkBack) && (
+                {ext.key === "construct" && (ed?.editable || constructDetails.choice || constructDetails.alternative || constructDetails.linkBack) && (
                   <div className="mt-1.5 pt-1.5 border-t border-teal-200 space-y-1 text-[10px]" style={{ fontFamily: font }}>
-                    {constructDetails.name && (
-                      <div className="font-bold text-teal-900" style={{ fontFamily: UI_FONT }}>
-                        造出新對象：<MathText text={constructDetails.name} />
-                      </div>
-                    )}
-                    {constructDetails.choice && (
-                      <div>
-                        <b className="text-teal-800" style={{ fontFamily: UI_FONT }}>① 選了什麼：</b>
-                        <MathText text={constructDetails.choice} />
-                      </div>
-                    )}
-                    {constructDetails.alternative && (
-                      <div>
-                        <b className="text-amber-800" style={{ fontFamily: UI_FONT }}>② 換一個選擇會怎樣：</b>
-                        <MathText text={constructDetails.alternative} />
-                      </div>
-                    )}
-                    {constructDetails.linkBack && (
-                      <div>
-                        <b className="text-indigo-800" style={{ fontFamily: UI_FONT }}>③ 連回對象（可核對式子）：</b>
-                        <MathText text={constructDetails.linkBack} />
-                      </div>
-                    )}
+                    <div className="font-bold text-teal-900" style={{ fontFamily: UI_FONT }}>
+                      造出新對象：
+                      <EditableText
+                        value={constructDetails.name || ""}
+                        onChange={(v) => patchConstructDetails({ name: v })}
+                        placeholder="新量／對象／操作名稱"
+                        inline
+                        className="font-bold text-[10px]"
+                        style={{ color: "#134e4a", fontFamily: font }}
+                        ariaLabel="造出新對象名稱"
+                      />
+                    </div>
+                    <div>
+                      <b className="text-teal-800" style={{ fontFamily: UI_FONT }}>① 選了什麼：</b>
+                      <EditableText
+                        value={constructDetails.choice || ""}
+                        onChange={(v) => patchConstructDetails({ choice: v })}
+                        multiline
+                        rows={1}
+                        placeholder="邏輯沒有逼你做的那個決定"
+                        className="text-[10px]"
+                        style={{ color: theme.textColor, fontFamily: font }}
+                        ariaLabel="造 ① 選了什麼"
+                      />
+                    </div>
+                    <div>
+                      <b className="text-amber-800" style={{ fontFamily: UI_FONT }}>② 換一個選擇會怎樣：</b>
+                      <EditableText
+                        value={constructDetails.alternative || ""}
+                        onChange={(v) => patchConstructDetails({ alternative: v })}
+                        multiline
+                        rows={1}
+                        placeholder="至少寫出一個別的選擇和結果"
+                        className="text-[10px]"
+                        style={{ color: theme.textColor, fontFamily: font }}
+                        ariaLabel="造 ② 換一個選擇"
+                      />
+                    </div>
+                    <div>
+                      <b className="text-indigo-800" style={{ fontFamily: UI_FONT }}>③ 連回對象（可核對式子）：</b>
+                      <EditableText
+                        value={constructDetails.linkBack || ""}
+                        onChange={(v) => patchConstructDetails({ linkBack: v })}
+                        multiline
+                        rows={1}
+                        placeholder="用可核對的式子或推導說明關係"
+                        className="text-[10px]"
+                        style={{ color: theme.textColor, fontFamily: font }}
+                        ariaLabel="造 ③ 連回對象"
+                      />
+                    </div>
                   </div>
                 )}
               </div>
 
               {/* v7 功能判準洞見檢查題 */}
-              {ext.q && (
+              {(ed?.editable || ext.q) && (
                 <div className="p-1.5 rounded bg-indigo-50/80 border border-indigo-200 text-[10px] text-indigo-950">
                   <span className="font-bold text-indigo-800" style={{ fontFamily: UI_FONT }}>
                     [功能判準題]{" "}
                   </span>
                   <span style={{ fontFamily: font }}>
-                    <MathText text={ext.q} />
+                    <EditableText
+                      value={ext.q || ""}
+                      onChange={(v) => patchExtQuestion(ext.key, v)}
+                      multiline
+                      rows={1}
+                      placeholder="拿掉這句就會答錯或做不出來的題"
+                      className="text-[10px]"
+                      style={{ color: "#1e1b4b", fontFamily: font }}
+                      ariaLabel={`${ext.label} 功能判準題`}
+                    />
                   </span>
                 </div>
               )}
@@ -1775,6 +3137,12 @@ export function V6Page6Apply({
   const checks = howData?.checks || [];
   const branches = howData?.branches || [];
   const cans = howData?.can || [];
+  const ed = useCardEdit();
+  type HowCheck = NonNullable<NonNullable<CardData["howData"]>["checks"]>[number];
+  type HowCan = NonNullable<NonNullable<CardData["howData"]>["can"]>[number];
+
+  const patchHow = (p: Partial<NonNullable<CardData["howData"]>>) =>
+    ed?.patch({ howData: { status: "uncompiled", ...howData, ...p } as CardData["howData"] });
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -1806,6 +3174,18 @@ export function V6Page6Apply({
         <p className="text-[9px] text-slate-500">
           ‖ = CHECK關卡（過不了不能往下選） →分岔=分支（標明用哪個讀法 [源:WHAT-讀法n]） ┄→CAN（選填，某能力只屬於該分支時寫在分支末端）
         </p>
+        <div className="flex items-center gap-1.5 text-[10px]" style={{ color: theme.mutedTextColor }}>
+          <span className="font-bold" style={{ color: theme.headingColor }}>卡片編譯狀態：</span>
+          <EditableToggle
+            checked={howData?.status === "compiled"}
+            onChange={(v) => patchHow({ status: v ? "compiled" : "uncompiled" })}
+            onLabel="[已編譯]"
+            offLabel="[未編譯]"
+            onClassName="text-emerald-700"
+            offClassName="text-amber-700"
+            ariaLabel="APPLY 編譯狀態"
+          />
+        </div>
       </div>
 
       {/* 並排雙欄：CHECK vs CAN */}
@@ -1824,29 +3204,73 @@ export function V6Page6Apply({
             不管走哪條分支都要先過的前置關卡。判準：眾多分歧裡多一種→歸分支；不管走哪條現在全都不能選→歸CHECK。允許兩段式：看到原始情境X→做變換/識別動作→變成能判斷的Y→檢查Y→結論
           </p>
           <div className="flex-1 space-y-1.5 pt-1 text-xs">
-            {checks.length > 0 ? (
-              checks.map((c, ci) => (
-                <div key={c.id || ci} className="p-2 rounded bg-white/70 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
-                  <div className="font-bold text-blue-900">
-                    看到：<MathText text={c.cue} />
-                  </div>
-                  {c.twoStageTransform && (
+            <EditableList<HowCheck>
+              items={checks}
+              onChange={(next) => patchHow({ checks: next })}
+              newItem={() => ({ id: newRowId("check"), cue: "", check: "" })}
+              addLabel="新增 CHECK 關卡"
+              className="space-y-1.5"
+              itemClassName=""
+              emptyPlaceholder={<p className="italic text-slate-400 text-xs">（尚未建立 CHECK 關卡）</p>}
+              renderItem={(c, ci) => {
+                const patchCheck = (p: Partial<HowCheck>) => {
+                  const next = [...checks];
+                  next[ci] = { ...next[ci], ...p };
+                  patchHow({ checks: next });
+                };
+                return (
+                  <div className="p-2 rounded bg-white/70 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
+                    <div className="font-bold text-blue-900">
+                      看到：
+                      <EditableText
+                        value={c.cue || ""}
+                        onChange={(v) => patchCheck({ cue: v })}
+                        placeholder="觸發線索"
+                        inline
+                        className="text-xs font-bold"
+                        style={{ color: "#1e3a8a", fontFamily: font }}
+                        ariaLabel={`CHECK ${ci + 1} 線索`}
+                      />
+                    </div>
                     <div className="text-[11px] text-amber-900 bg-amber-50/80 px-1.5 py-0.5 rounded border border-amber-200">
                       <b>→ 兩段式變換／識別：</b>
-                      <MathText text={c.twoStageTransform} />
+                      <EditableText
+                        value={c.twoStageTransform || ""}
+                        onChange={(v) => patchCheck({ twoStageTransform: v })}
+                        placeholder="先做什麼變換／識別（選填）"
+                        inline
+                        className="text-[11px]"
+                        style={{ color: "#78350f", fontFamily: font }}
+                        ariaLabel={`CHECK ${ci + 1} 兩段式變換`}
+                      />
                     </div>
-                  )}
-                  <div className="font-bold text-emerald-900">
-                    → 檢查：<MathText text={c.check} />
+                    <div className="font-bold text-emerald-900">
+                      → 檢查：
+                      <EditableText
+                        value={c.check || ""}
+                        onChange={(v) => patchCheck({ check: v })}
+                        placeholder="檢查什麼"
+                        inline
+                        className="text-xs font-bold"
+                        style={{ color: "#064e3b", fontFamily: font }}
+                        ariaLabel={`CHECK ${ci + 1} 檢查`}
+                      />
+                    </div>
+                    <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
+                      <EditableText
+                        value={c.source || ""}
+                        onChange={(v) => patchCheck({ source: v })}
+                        placeholder="[源:定義/前置]"
+                        inline
+                        className="text-[9px] font-mono"
+                        style={{ color: "#4338ca", fontFamily: "monospace" }}
+                        ariaLabel={`CHECK ${ci + 1} 來源`}
+                      />
+                    </div>
                   </div>
-                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
-                    {c.source || "[源:定義/前置]"}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="italic text-slate-400 text-xs">（尚未建立 CHECK 關卡）</p>
-            )}
+                );
+              }}
+            />
           </div>
         </div>
 
@@ -1864,20 +3288,59 @@ export function V6Page6Apply({
             只問「下游解鎖了什麼原本做不到的具體問題」，跟卡片類型無關，挖不到不用硬湊。某能力只有特定分支才有，寫在該分支末端，不進CAN。
           </p>
           <div className="flex-1 space-y-1.5 pt-1 text-xs">
-            {cans.length > 0 ? (
-              cans.map((cn, cni) => (
-                <div key={cn.id || cni} className="p-2 rounded bg-white/70 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
-                  <div className="font-bold text-purple-900">
-                    看到 <MathText text={cn.trigger} /> → 就能 <MathText text={cn.capability} />
+            <EditableList<HowCan>
+              items={cans}
+              onChange={(next) => patchHow({ can: next })}
+              newItem={() => ({ id: newRowId("can"), trigger: "", capability: "" })}
+              addLabel="新增 CAN 解鎖"
+              className="space-y-1.5"
+              itemClassName=""
+              emptyPlaceholder={<p className="italic text-slate-400 text-xs">（尚未填寫 CAN 下游解鎖）</p>}
+              renderItem={(cn, cni) => {
+                const patchCan = (p: Partial<HowCan>) => {
+                  const next = [...cans];
+                  next[cni] = { ...next[cni], ...p };
+                  patchHow({ can: next });
+                };
+                return (
+                  <div className="p-2 rounded bg-white/70 border space-y-0.5" style={{ borderColor: theme.borderColor }}>
+                    <div className="font-bold text-purple-900">
+                      看到{" "}
+                      <EditableText
+                        value={cn.trigger || ""}
+                        onChange={(v) => patchCan({ trigger: v })}
+                        placeholder="觸發"
+                        inline
+                        className="text-xs font-bold"
+                        style={{ color: "#581c87", fontFamily: font }}
+                        ariaLabel={`CAN ${cni + 1} 觸發`}
+                      />{" "}
+                      → 就能{" "}
+                      <EditableText
+                        value={cn.capability || ""}
+                        onChange={(v) => patchCan({ capability: v })}
+                        placeholder="解鎖的能力"
+                        inline
+                        className="text-xs font-bold"
+                        style={{ color: "#581c87", fontFamily: font }}
+                        ariaLabel={`CAN ${cni + 1} 能力`}
+                      />
+                    </div>
+                    <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
+                      <EditableText
+                        value={cn.source || ""}
+                        onChange={(v) => patchCan({ source: v })}
+                        placeholder="[源:HOW解鎖]"
+                        inline
+                        className="text-[9px] font-mono"
+                        style={{ color: "#4338ca", fontFamily: "monospace" }}
+                        ariaLabel={`CAN ${cni + 1} 來源`}
+                      />
+                    </div>
                   </div>
-                  <div className="text-[9px] text-indigo-700 font-mono mt-0.5" style={{ fontFamily: UI_FONT }}>
-                    {cn.source || "[源:HOW解鎖]"}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="italic text-slate-400 text-xs">（尚未填寫 CAN 下游解鎖）</p>
-            )}
+                );
+              }}
+            />
           </div>
         </div>
       </div>
@@ -1907,98 +3370,12 @@ export function V6Page6Apply({
             <div className="col-span-2 text-right">來源</div>
           </div>
 
-          <div className="divide-y" style={{ borderColor: theme.borderColor }}>
-            {branches.length > 0 ? (
-              branches.map((b, bi) => (
-                <React.Fragment key={b.id || bi}>
-                  <div className="grid grid-cols-12 py-2 px-2 items-start text-xs bg-white/60">
-                    <div className="col-span-4 font-bold text-slate-900 pr-2 space-y-1">
-                      <div>
-                        【看到 {b.title || `分支 ${bi + 1}`}】
-                        {b.isCompiled ? (
-                          <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>
-                        ) : (
-                          <span className="ml-1 text-[9px] text-amber-600 font-normal">[未編譯]</span>
-                        )}
-                      </div>
-                      {b.constructionAction && (
-                        <div className="text-[10px] font-normal text-amber-900 bg-amber-50 p-1 rounded border border-amber-200">
-                          <b>兩段式構造：</b>
-                          <MathText text={b.constructionAction} />
-                        </div>
-                      )}
-                    </div>
-                    <div className="col-span-6 leading-relaxed pr-2 space-y-1.5" style={{ fontFamily: font }}>
-                      <div>
-                        <MathText text={b.action || "（執行步驟）"} />
-                      </div>
-                      {/* 分支內的區域性 CHECK */}
-                      {b.checks && b.checks.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          {b.checks.map((rc: any, rci: number) => (
-                            <div key={rc.id || rci} className="p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px]" style={{ fontFamily: UI_FONT }}>
-                              <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
-                              看到「<MathText text={rc.cue} />」
-                              {rc.twoStageTransform && <> → 變換：<MathText text={rc.twoStageTransform} /></>}
-                              {" "}→ 檢查：<MathText text={rc.check} />{" "}
-                              {rc.source && <span className="text-indigo-700 font-mono">{rc.source}</span>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="col-span-2 text-right text-[10px] text-indigo-700 font-mono">
-                      {b.source || "[源:WHY/分支]"}
-                    </div>
-                  </div>
-                  {/* 巢狀子分支 */}
-                  {b.branches &&
-                    b.branches.map((sb: any, sbi: number) => (
-                      <div
-                        key={sb.id || `${bi}-${sbi}`}
-                        className="grid grid-cols-12 py-2 px-2 pl-6 items-start text-xs bg-slate-50/80 border-t border-dashed"
-                        style={{ borderColor: theme.borderColor }}
-                      >
-                        <div className="col-span-4 font-bold text-slate-800 pr-2">
-                          ↳ 【{sb.title || `子分支 ${sbi + 1}`}】
-                          {sb.isCompiled ? (
-                            <span className="ml-1 text-[9px] text-emerald-600 font-normal">✓已編譯</span>
-                          ) : (
-                            <span className="ml-1 text-[9px] text-amber-600 font-normal">[未編譯]</span>
-                          )}
-                        </div>
-                        <div className="col-span-6 leading-relaxed pr-2 space-y-1" style={{ fontFamily: font }}>
-                          <div>
-                            <MathText text={sb.action || ""} />
-                          </div>
-                          {sb.checks &&
-                            sb.checks.map((srcChk: any, sci: number) => (
-                              <div
-                                key={srcChk.id || sci}
-                                className="p-1.5 rounded bg-blue-50/70 border border-blue-200 text-[10px]"
-                                style={{ fontFamily: UI_FONT }}
-                              >
-                                <span className="font-bold text-blue-900">‖ 區域 CHECK：</span>
-                                看到「<MathText text={srcChk.cue} />」
-                                {srcChk.twoStageTransform && <> → 變換：<MathText text={srcChk.twoStageTransform} /></>}
-                                {" "}→ 檢查：<MathText text={srcChk.check} />{" "}
-                                {srcChk.source && <span className="text-indigo-700 font-mono">{srcChk.source}</span>}
-                              </div>
-                            ))}
-                        </div>
-                        <div className="col-span-2 text-right text-[10px] text-indigo-700 font-mono">
-                          {sb.source || b.source || "[源:WHY/子分支]"}
-                        </div>
-                      </div>
-                    ))}
-                </React.Fragment>
-              ))
-            ) : (
-              <div className="p-3 text-center text-xs italic text-slate-400">
-                （尚未建立分支步驟）
-              </div>
-            )}
-          </div>
+          <ApplyBranchTree
+            branches={branches as ApplyBranch[]}
+            onChange={(next) => patchHow({ branches: next })}
+            font={font}
+            theme={theme}
+          />
         </div>
       </div>
 
@@ -2043,6 +3420,13 @@ export function V6Page7ProcessLogs({
         pageNumber="7/7"
         theme={theme}
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-sm border px-2.5 py-1.5" style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg, fontFamily: UI_FONT }}>
+        <span className="text-[10px]" style={{ color: theme.mutedTextColor }}>
+          過程日誌由工作區統一記錄，紙上僅供檢視；新增／修改請走「日誌」視圖。
+        </span>
+        <ReadOnlyBadge label="唯讀" />
+      </div>
 
       {/* 三大圖例語義說明 */}
       <div
