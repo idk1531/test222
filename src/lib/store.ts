@@ -17,6 +17,7 @@ import {
   makeCategory,
   genStudyId,
   UNCATEGORIZED_ID,
+  type StudyCamera,
 } from "./study";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
@@ -563,12 +564,17 @@ export const actions = {
     });
   },
 
-  /** 書房佈局（視角記憶、書架層數）；與卡片內容無關 */
-  updateStudyLayout(updates: Partial<{ camera: { yaw: number; pitch: number }; shelfRows: number }>) {
+  /**
+   * 書房佈局（視角記憶含走動位置 x/z/height、書架層數）；與卡片內容無關。
+   * camera 採合併更新：部分欄位（如拖曳結束只帶 yaw/pitch）不會洗掉 x/z/height。
+   */
+  updateStudyLayout(updates: Partial<{ camera: Partial<StudyCamera>; shelfRows: number }>) {
     setState((s) => ({
       ...s,
       studyLayout: {
-        camera: updates.camera ? { ...updates.camera } : s.studyLayout.camera,
+        camera: updates.camera
+          ? { ...s.studyLayout.camera, ...updates.camera }
+          : s.studyLayout.camera,
         shelfRows: updates.shelfRows ?? s.studyLayout.shelfRows,
       },
     }));

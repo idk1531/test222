@@ -43,10 +43,11 @@ npx serve out                                  # 本機驗證
 
 | 檔案 | 職責 |
 |---|---|
-| `src/lib/store.ts` | 全域狀態倉庫（`useSyncExternalStore`）、CRUD actions、localStorage 自動持久化、`exportFile` / `importFile` / `resetToSeed`、**v4→v5 結構遷移**（WHEN 併入 HOW：triggers→checks、steps→branches、enables→can；本機載入與 JSON 匯入都會自動跑）、**v7.1→v8.0 書房資料遷移**、純函式 `applyPatch`（預留 op log/同步介接） |
-| `src/lib/study.ts` | **v8.0 虛擬書房**資料型別（分類櫃板／書本佈置／視角）、顏色與排列 helper、遷移補齊 `ensureStudyState` |
+| `src/lib/store.ts` | 全域狀態倉庫（`useSyncExternalStore`）、CRUD actions、localStorage 自動持久化、`exportFile` / `importFile` / `resetToSeed`、**v4→v5 結構遷移**（WHEN 併入 HOW：triggers→checks、steps→branches、enables→can；本機載入與 JSON 匯入都會自動跑）、**v7.1→v8.0 書房資料遷移（v8.1 相機欄位相容補齊）**、純函式 `applyPatch`（預留 op log/同步介接） |
+| `src/lib/study.ts` | 虛擬書房資料型別、分類／書本 helper、v8.1 相機欄位補齊與 360° yaw/pitch 限制 |
+| `src/lib/room3d.ts` | v8.1 房間尺寸、光源／相機參數、移動限制、3D→CSS 投影與書架佈局純函式 |
 | `src/lib/seedData.ts` | 預設種子資料（4 張完整例卡＋畫布物件＋關係邊＋日誌＋盲區＋母題） |
-| `src/lib/types.ts` | 資料型別與匯出檔格式（`schemaVersion`，v8.0 = 8） |
+| `src/lib/types.ts` | 資料型別與匯出檔格式（`schemaVersion`，v8.1 仍為 8） |
 
 - **自動保存**：任何編輯立即寫入 localStorage，重新整理不遺失；畫布拖曳採「畫面立即更新＋250ms 防抖寫入」，放開手指／滑鼠後立即提交最後座標，低階平板不會因保存而卡頓。
 - **備份／遷移**：頭部 `下載` 圖標匯出 JSON、`上傳` 圖標匯入、`重轉` 還原為範例。畫布節點的 `style.accentColor`（v7.2 節點顏色）會一併匯出／匯入。
@@ -149,18 +150,18 @@ WHY 只有結論 · 推理跳步 · 循環解釋 · **偷渡前提**（與假設
 
 ---
 
-## 虛擬書房（v8.0）
+## 虛擬書房（v8.1 全景書房）
 
-開站預設進入**「溫和陽光下的半擬 3D 木色書房」**：書桌上嵌著原有的無限畫布（操作完全不變），書架把每張筆記卡呈現為一本書，並可建立分類櫃板與標籤。純 CSS 3D（`perspective` + `preserve-3d` + 分層平面），**不使用 three.js**，畫布仍是真正的 HTML（事件、輸入框、IME 全部正常）。
+開站預設進入可 360° 環顧、可走動的 three.js 真 3D 書房：窗景庭園、柔和日光與窗框影條、窗下無桌腿壁掛桌、另一側 3D 書架。房間是可操作空間，不是影片。**WebGL 僅呈現環境與家具；畫布、書封預覽、HUD、分類面板、虛擬搖桿都是原生 HTML 浮層。**
 
-- **書桌**：桌板＋前緣厚度，畫布紙面 `#faf7ee`（與 v7.2 紙張一致）；新增卡、選取、拖曳、框選、縮放、雙擊開卡、關聯邊、右鍵選單全部沿用 `InfiniteCanvas`。
-- **書架與書本**：平時只看書脊（書名直排、分類色條、形狀色、依內容長度微調厚度、高度微差異）；桌機 hover／手機第一次點擊 → 書本向前抽出＋書封預覽（標題、領域、推理形狀、摘要首行）；再點一次或按「開啟筆記卡」→ 開啟既有 `CardDetailModal`（單一渲染路徑）；「在畫布定位」→ 切回書桌並把該卡置中／選取。
-- **分類櫃板**：分類 CRUD（新增／改名／改色／上下移動／刪除），櫃板貼紙膠帶標籤；拖書到另一櫃板＝改分類並插到尾端，櫃板內可拖曳排序；刪除分類只把書移回「未分類」，不刪卡。「未分類」為系統保留分類。
-- **視角**：在書房背景／家具上拖曳可環繞視角（yaw ±28°、pitch −6°～+14°），另有「重置視角」與「平移 ↔ 環繞」模式切換（觸控裝置預設平移）。**畫布上的手勢永遠交給畫布**，不觸發環繞。
-- **資料**：一卡一書（1:1，`cardId` 為 key）；書本佈置（`orderInShelf`／`categoryId`）與畫布座標（`x/y`）完全分離。`STORAGE_KEY` 升到 `scinotes-workspace-v8.0`，載入舊 key 自動遷移、舊資料不掉；JSON 匯出／匯入含書房資料，舊檔自動補齊。
-- **列印**：書房為螢幕介面，`@media print` 只輸出卡片紙面（沿用 v7.2 規則）。
+- **桌面工作視角**：點桌上畫布後相機約 0.52 秒飛到桌面正上方；此時原有 `InfiniteCanvas` 以螢幕平行 HTML 層完整接手，無 CSS 3D 透視，`getBoundingClientRect()` 座標換算保持純仿射，輸入框／IME／拖卡／框選／雙指縮放均沿用原實作。Esc 或「回到房間」飛回進入前精確位置與朝向。房間模式下畫布只顯示靜態縮圖，不接收精細操作。
+- **走動與環顧**：桌機 WASD／方向鍵行走、Shift 加速、滑鼠拖曳轉頭；手機左下虛擬搖桿行走、畫面拖曳轉頭。yaw 360° 連續，pitch 約 −70°～+40°，移動受牆面邊界限制；輸入框聚焦時不會觸發走動。房間模式滾輪調整視高。
+- **光影與效能**：ACES Filmic、抗鋸齒、PCFSoftShadowMap（桌機 2048／手機 1024）、pixelRatio 上限 2／1.5；程序化木紋、牆面顆粒、分層庭園窗景。桌機可有淡光柱與 140 顆塵埃；手機關閉粒子／光柱並降低陰影與像素比。
+- **書架與分類**：書架與書本為 3D 幾何；書脊顏色依 `spineColor → 節點 accentColor → 形狀色`，卡片標題／形狀色即時同步。點書本開 HTML 書封預覽，可沿用 `CardDetailModal` 開卡、飛入畫布定位、選擇分類櫃板及上下排序；「書架目錄」提供可 Tab 操作的大按鈕入口。分類 CRUD 與刪分類回未分類、不刪卡的規則沿用 v8.0。
+- **資料相容**：一卡一書（1:1），書本佈置與 `CanvasObjectData.x/y` 分離。`STORAGE_KEY=scinotes-workspace-v8.0`、`SCHEMA_VERSION=8` 不變；相機只新增選填 `x/z/height`，舊 JSON／本機資料載入時補上預設值；匯出仍整包帶出書房資料。
+- **列印**：書房 UI 不印，沿用 v7.2 規則只輸出卡片紙面。
 
-設計細節與取捨見 [`docs/v8.0-study-room.md`](docs/v8.0-study-room.md)。
+設計、光影取捨與驗收細節見 [`docs/v8.1-panorama-room.md`](docs/v8.1-panorama-room.md)。
 
 ---
 
@@ -198,14 +199,17 @@ src/
 │   ├── BackgroundCustomizer.tsx   背景自訂
 │   ├── BlindSpotsView.tsx         盲區清單
 │   ├── BlockageGuideModal.tsx     卡關／堵塞感引導
-│   ├── BookSpine.tsx              書房：單本書書脊＋抽出預覽（v8.0）
-│   ├── BookshelfView.tsx          書房：書架／櫃板／書本拖曳排列（v8.0）
+│   ├── Book3D.tsx                 v8.1：three.js 書本與 3D 櫃板標籤
+│   ├── BookSpine.tsx              v8.0 HTML 書脊（舊版元件，保留相容）
+│   ├── BookshelfView.tsx          v8.0 HTML 書架（舊版元件，保留相容）
 │   ├── CardDetailModal.tsx        卡片詳細（預覽／編輯、一頁式／分頁、每卡字體）
 │   ├── CardIndexView.tsx          卡片索引
 │   ├── AppThemeCustomizer.tsx     工具列配色面板（v7.2）
 │   ├── CardPaperEditor.tsx        紙上編輯原子元件 + CardEditContext（v7.2）
 │   ├── CardPaperSections.tsx      紙張區塊渲染 + 四點自我檢查面板
-│   ├── DeskCanvas.tsx             書房：書桌＋內嵌 InfiniteCanvas（v8.0）
+│   ├── CameraRig.tsx              v8.1：WASD/搖桿、360° 環顧與桌面飛行
+│   ├── DeskCanvas.tsx             v8.0 HTML 書桌（舊版元件，保留相容）
+│   ├── DeskWorkView.tsx           v8.1：工作視角 HTML InfiniteCanvas 浮層
 │   ├── ExpansionTestModal.tsx     展開測試（追問測試）
 │   ├── FieldCustomizer.tsx        自訂欄位
 │   ├── FontSelector.tsx           字體選擇
@@ -222,8 +226,12 @@ src/
 │   ├── ProcessLogsView.tsx        過程日誌
 │   ├── ShapeClassifier.tsx        推理形狀判型（含複合型）
 │   ├── SoloAssessmentPanel.tsx    Bloom × SOLO 診斷
-│   ├── StudyCategoryPanel.tsx     書房：分類櫃板管理（v8.0）
-│   ├── StudyRoomView.tsx          書房外殼：CSS 3D 環繞＋光源＋牆／地板／家具（v8.0）
+│   ├── Joystick.tsx               v8.1：手機虛擬搖桿
+│   ├── RoomGeometry.tsx            v8.1：真 3D 房間／窗／壁掛桌／書架
+│   ├── StudyCategoryPanel.tsx     書房分類櫃板 CRUD
+│   ├── StudyRoomView.tsx          v8.1：全景書房＋HTML 浮層
+│   ├── StudyScene.tsx              v8.1：three.js 生命週期／渲染器
+│   ├── WindowLight.tsx            v8.1：窗景植物、陽光與柔影
 │   └── TemplateSelectorModal.tsx  模板選擇
 └── lib/
     ├── appTheme.ts                工具列配色主題 + localStorage（v7.2）
@@ -232,7 +240,8 @@ src/
     ├── seedData.ts                預設種子資料
     ├── solo.ts                    SOLO 診斷邏輯
     ├── store.ts                   狀態管理 ＋ localStorage 持久化
-    ├── study.ts                   書房資料型別／helper／遷移（v8.0）
+    ├── room3d.ts                  v8.1 房間尺寸、光源與 3D 書架計算
+    ├── study.ts                   書房資料型別／helper／遷移（v8.1）
     └── types.ts                   型別定義
 ```
 

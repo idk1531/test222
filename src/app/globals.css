@@ -164,7 +164,10 @@
   );
 }
 
-/* ===== v8.0 虛擬書房（半擬 3D；CSS 3D，不使用 three.js） ===== */
+/* ===== v8.1 虛擬書房 =====
+ * v8.0 CSS 3D 家具規則保留作舊版/離線 fallback 樣式；實際書房由 three.js WebGL 場景呈現。
+ * InfiniteCanvas、預覽卡、HUD、分類面板、搖桿仍是可操作的 HTML 浮層。
+ */
 :root {
   /* 木材 */
   --study-oak: #d9b98a;
@@ -440,6 +443,38 @@
   }
   .study-shelf-boards { min-height: 112px; }
   .study-board-books { min-height: 104px; }
+}
+
+/* ===== v8.1 全景書房浮層 ===== */
+.study-room-view {
+  background: #e6ded2;
+  isolation: isolate;
+}
+.study-room-view > canvas,
+.study-room-view canvas {
+  display: block;
+}
+.study-work-overlay {
+  contain: layout paint;
+  background-color: var(--study-paper, #faf7ee);
+}
+.study-book-preview {
+  color: #292524;
+  isolation: isolate;
+}
+.study-joystick {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .study-joystick { display: none; }
+}
+@media (max-width: 767px) {
+  .study-room-view { overscroll-behavior: none; }
+  .study-joystick { width: 96px; height: 96px; }
+  .study-book-preview { max-height: min(72dvh, 420px); overflow-y: auto; }
 }
 
 /* ===== v7.2：紙上編輯列印（只印紙張，不印工具列與輸入控件） ===== */
