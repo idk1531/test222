@@ -4,9 +4,11 @@ import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   CAMERA,
+  FIDELITY,
   type SceneQuality,
   projectToScreen,
 } from "@/lib/room3d";
+import { attachEnvironment } from "@/lib/roomTextures";
 
 export type FrameCallback = (dt: number, elapsedSec: number) => void;
 
@@ -76,11 +78,20 @@ export const StudyScene: React.FC<StudySceneProps> = ({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.22; // v8.3：圖一的亮窗／暗書牆高對比
 
     // ---- scene / camera ----
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#e6ded2");
+    // v8.3：大理石的柔反射——同一張窗外庭園圖做 PMREM envMap（手機跳過）。
+    let disposeEnv: () => void = () => {};
+    if (FIDELITY.envMap && !quality.mobile) {
+      // 全域環境反射：牆面與天花以 envMapIntensity 壓低，大理石另給 0.5／0.35
+      scene.environmentIntensity = 1;
+      disposeEnv = attachEnvironment(renderer, "garden", (env) => {
+        scene.environment = env;
+      });
+    }
     const camera = new THREE.PerspectiveCamera(
       CAMERA.fov,
       container.clientWidth / container.clientHeight,
@@ -196,6 +207,7 @@ export const StudyScene: React.FC<StudySceneProps> = ({
           mat.dispose();
         });
       });
+      disposeEnv();
       renderer.dispose();
       setApi(null);
     };

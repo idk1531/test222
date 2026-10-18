@@ -8,6 +8,8 @@ import { StudyScene, type StudySceneApi } from "./StudyScene";
 import { RoomGeometry } from "./RoomGeometry";
 import { WindowLight } from "./WindowLight";
 import { Book3D } from "./Book3D";
+import { ShelfDecor } from "./ShelfDecor";
+import { RoomFurniture } from "./RoomFurniture";
 import { CameraRig, type CameraRigHandle } from "./CameraRig";
 import { Joystick, type JoystickVector } from "./Joystick";
 import { StudyCategoryPanel } from "./StudyCategoryPanel";
@@ -168,6 +170,8 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
             />
             <WindowLight api={api} />
             <Book3D api={api} layout={layout} titleOf={titleOf} />
+            <ShelfDecor api={api} layout={layout} />
+            <RoomFurniture api={api} />
             <CameraRig
               api={api}
               initialCamera={state.studyLayout.camera}
