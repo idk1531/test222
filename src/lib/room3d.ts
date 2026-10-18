@@ -62,8 +62,8 @@ export const SHELF = {
 export const SUN = {
   color: "#fff3d6", // 淡金（色溫約 4000K）
   intensity: 3.0,
-  position: new THREE.Vector3(-7.5, 6.2, -8.5), // 窗外左上方
-  target: new THREE.Vector3(0.9, 0.3, 0.7),
+  position: new THREE.Vector3(-2.35, 2.6, -ROOM.depth / 2 - 1.1), // 窗外左上方
+  target: new THREE.Vector3(0.85, 0.12, 1.35),
   shadowMap: { desktop: 2048, mobile: 1024 },
 };
 export const AMBIENT = {

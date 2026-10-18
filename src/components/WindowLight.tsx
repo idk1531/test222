@@ -29,8 +29,8 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
 
     // 日光源放於窗洞內側少許，確保光線能穿過窗洞入室；窗框實體形成地板/桌面影條。
     const sun = new THREE.DirectionalLight(SUN.color, SUN.intensity);
-    sun.position.set(-2.35, 2.6, wallZ - 1.1);
-    sun.target.position.set(0.85, 0.12, 1.35);
+    sun.position.copy(SUN.position);
+    sun.target.position.copy(SUN.target);
     sun.castShadow = true;
     sun.shadow.mapSize.set(api.quality.shadowMap, api.quality.shadowMap);
     sun.shadow.camera.left = -3.5;
