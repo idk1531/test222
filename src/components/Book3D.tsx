@@ -2,6 +2,7 @@
 
 import React, { useEffect } from "react";
 import * as THREE from "three";
+import { SHELF, SHELF_INWARD } from "@/lib/room3d";
 import type { ShelfLayout, ShelfBookPlacement } from "@/lib/room3d";
 import type { StudySceneApi } from "./StudyScene";
 
@@ -55,7 +56,7 @@ function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
   book.userData.cardId = placement.cardId;
   book.userData.categoryId = placement.categoryId;
   g.add(book);
-  // 書名標籤貼於書脊（東牆書架面向室內 −X）
+  // 書名標籤貼於書脊（v8.3：書牆在西牆，法向一律乘 wallSign）
   const labelTexture = makeBookLabel(title, placement.categoryHex || "#e1c797");
   const labelMat = new THREE.MeshStandardMaterial({
     map: labelTexture,
@@ -64,8 +65,8 @@ function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
     side: THREE.DoubleSide,
   });
   const label = new THREE.Mesh(new THREE.PlaneGeometry(t * 0.78, d * 0.86), labelMat);
-  label.rotation.y = -Math.PI / 2;
-  label.position.set(-depth / 2 - 0.001, 0, 0);
+  label.rotation.y = (-Math.PI / 2) * SHELF.wallSign;
+  label.position.set((-depth / 2 - 0.001) * SHELF.wallSign, 0, 0);
   label.userData.kind = "book";
   label.userData.cardId = placement.cardId;
   label.userData.categoryId = placement.categoryId;
@@ -74,13 +75,13 @@ function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
   // 分類紙標籤：書脊下沿 1.4cm
   if (placement.categoryHex) {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.018, t * 0.86), materialFor(placement.categoryHex));
-    stripe.position.set(-depth / 2 - 0.004, -d * 0.39, 0);
+    stripe.position.set((-depth / 2 - 0.004) * SHELF.wallSign, -d * 0.39, 0);
     stripe.userData.kind = "book";
     stripe.userData.cardId = placement.cardId;
     g.add(stripe);
   }
   const foot = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.012, t * 0.8), shapeMat);
-  foot.position.set(-depth / 2 - 0.005, -d * 0.46, 0);
+  foot.position.set((-depth / 2 - 0.005) * SHELF.wallSign, -d * 0.46, 0);
   foot.userData.kind = "book";
   foot.userData.cardId = placement.cardId;
   g.add(foot);
@@ -129,12 +130,17 @@ export const Book3D: React.FC<{
         labelTexture.colorSpace = THREE.SRGBColorSpace;
         const labelFaceMat = new THREE.MeshStandardMaterial({ map: labelTexture, roughness: 0.9, side: THREE.DoubleSide });
         materials.push(labelFaceMat);
+        // 分類櫃板標籤：站在板前緣的小卡（P1 要求保留），面向室內
         const label = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.24, 0.06),
+          new THREE.PlaneGeometry(0.18, 0.05),
           labelFaceMat
         );
-        label.rotation.y = -Math.PI / 2;
-        label.position.set(layout.frontX - 0.12, row.plankY + 0.065, (board.z0 + board.z1) / 2);
+        label.rotation.y = (-Math.PI / 2) * SHELF.wallSign;
+        label.position.set(
+          layout.frontX + SHELF_INWARD * 0.035,
+          row.plankY + 0.027,
+          board.z0 + SHELF.labelWidth / 2
+        );
         label.userData.kind = "categoryLabel";
         label.userData.categoryId = board.category.id;
         label.castShadow = false;
