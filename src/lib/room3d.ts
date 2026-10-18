@@ -90,6 +90,53 @@ export const CAMERA = {
   wheelHeightStep: 0.07,
 };
 
+// ================= 照片級貼圖（v8.2，對應參考圖拍板的材質） =================
+// 資產位置：`public/textures/study-room/`（由 scripts/make-room-textures.sh 產製）。
+// `enabled: false` 或圖片載入失敗 → 自動退回 RoomGeometry／WindowLight 的程序化紋理，
+// 所以關掉此開關即可回到 v8.1 的純程序化視覺。
+export type TextureKey =
+  | "walnut"
+  | "oak"
+  | "marble"
+  | "plaster"
+  | "garden"
+  | "spines";
+/** 地板材質：oak＝v8.1 暖橡木拼板；marble＝圖一的淺灰大理石地坪 */
+export type RoomFloorMaterial = "oak" | "marble";
+
+export const TEXTURES: {
+  enabled: boolean;
+  /** 相對 basePath 的資料夾（`roomTextures.assetUrl` 負責補部署前綴） */
+  dir: string;
+  floor: RoomFloorMaterial;
+  files: Record<TextureKey, string>;
+  /** 平貼密度（次數）；spines／garden 為單張非平貼 */
+  repeat: Record<
+    "wall" | "floorOak" | "floorMarble" | "desk" | "shelf" | "spines",
+    [number, number]
+  >;
+} = {
+  enabled: true,
+  dir: "textures/study-room",
+  floor: "oak",
+  files: {
+    walnut: "walnut.jpg", // 書牆胡桃木（圖一深胡桃書架）
+    oak: "oak-floor.jpg", // 暖橡木拼板地板
+    marble: "marble.jpg", // 淺灰大理石（沿窗桌板／可選地坪）
+    plaster: "plaster.jpg", // 米白細顆粒牆面
+    garden: "garden-view.jpg", // 窗外綠意庭園（保留的「布景」）
+    spines: "book-spines.jpg", // 書脊色票（書架背板暗景）
+  },
+  repeat: {
+    wall: [3, 2],
+    floorOak: [2.2, 1.8],
+    floorMarble: [1.5, 1.25],
+    desk: [1.6, 0.9],
+    shelf: [1.4, 1],
+    spines: [1, 1],
+  },
+};
+
 // 色票（沿用 v8.0／v7.2）
 export const PALETTE = {
   oak: "#d9b98a",
