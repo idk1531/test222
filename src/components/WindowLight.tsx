@@ -4,6 +4,7 @@ import React, { useEffect } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
 import { AMBIENT, PALETTE, ROOM, SUN, WINDOW } from "@/lib/room3d";
+import { attachPhotoMap } from "@/lib/roomTextures";
 
 /**
  * 窗景綠植＋溫和日光：分層天空、樹冠、灌木、草地；窗框/窗櫺以真實幾何投下軟影。
@@ -49,6 +50,13 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     const sky = new THREE.Mesh(new THREE.PlaneGeometry(15, 7), skyMat);
     sky.position.set(WINDOW.cx, 2.1, outsideZ - 3.1);
     g.add(sky);
+    // v8.2：遠景換照片級庭園（單張、不平貼）。分層樹冠／灌木景片留在前方提供視差與投影。
+    const skyDisposer = attachPhotoMap(skyMat, "garden", {
+      tileable: false,
+      tint: "#ffffff",
+      anisotropy: Math.min(8, api.renderer.capabilities.getMaxAnisotropy()),
+    });
+    disposers.push(skyDisposer);
     const farMat = new THREE.MeshStandardMaterial({ color: "#9dbb98", roughness: 1 });
     const leafMat = new THREE.MeshStandardMaterial({ color: "#6f966b", roughness: 0.92 });
     const leafLight = new THREE.MeshStandardMaterial({ color: "#91ae7e", roughness: 0.95 });

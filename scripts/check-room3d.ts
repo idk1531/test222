@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import * as THREE from "three";
 import {
-  CAMERA, ROOM, SUN, clampRoomPosition, clampPitchRad, clampHeight,
+  CAMERA, ROOM, SUN, TEXTURES, clampRoomPosition, clampPitchRad, clampHeight,
   forwardFromYawPitch, easeInOutCubic, projectToScreen, detectQuality,
 } from "../src/lib/room3d";
 
@@ -26,4 +28,17 @@ const center = projectToScreen(new THREE.Vector3(0, 0, -2), camera, viewport);
 assert.deepEqual(center, { x: 187.5, y: 187.5, visible: true });
 assert.equal(projectToScreen(new THREE.Vector3(0, 0, 2), camera, viewport).visible, false);
 assert.ok(detectQuality().pixelRatio <= 2); // SSR-safe, no browser globals required.
-console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality)");
+// ---- v8.2 照片級貼圖介接（public/textures/study-room）----
+assert.equal(TEXTURES.enabled, true);
+assert.ok(!TEXTURES.dir.startsWith("/"), "TEXTURES.dir 必須是相對路徑（assetUrl 負責補 basePath）");
+assert.ok(["oak", "marble"].includes(TEXTURES.floor), "TEXTURES.floor 只能是 oak / marble");
+for (const [key, file] of Object.entries(TEXTURES.files)) {
+  const p = path.join(process.cwd(), "public", TEXTURES.dir, file);
+  assert.ok(fs.existsSync(p), `缺少貼圖 ${key}：${p}（請跑 scripts/make-room-textures.sh）`);
+  assert.ok(fs.statSync(p).size > 8_000, `貼圖 ${key} 過小，疑似損壞：${p}`);
+}
+for (const [key, [u, v]] of Object.entries(TEXTURES.repeat)) {
+  assert.ok(u > 0 && v > 0, `TEXTURES.repeat.${key} 需為正數`);
+}
+
+console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產)");

@@ -10,9 +10,12 @@ import {
   PALETTE,
   ROOM,
   SHELF,
+  TEXTURES,
   WINDOW,
   shelfPlankY,
+  type TextureKey,
 } from "@/lib/room3d";
+import { attachPhotoMap, type AttachOptions } from "@/lib/roomTextures";
 
 // ================= 程式化貼圖（canvas → CanvasTexture） =================
 
@@ -223,9 +226,18 @@ export const RoomGeometry: React.FC<{
     wallTex.repeat.set(3, 2);
     disposers.push(() => wallTex.dispose());
 
-    const floorTex = canvasTexture(512, 512, drawFloorPlanks);
+    // 地板依 TEXTURES.floor 選橡木／大理石；程序化版同時擔任照片貼圖的退回底
+    const floorIsMarble = TEXTURES.floor === "marble";
+    const floorTex = canvasTexture(512, 512, (c, w, h) =>
+      floorIsMarble
+        ? drawWood(c, w, h, "#dbdbd6", "rgba(148,148,144,0.28)")
+        : drawFloorPlanks(c, w, h)
+    );
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-    floorTex.repeat.set(2.2, 1.8);
+    const floorRepeat = floorIsMarble
+      ? TEXTURES.repeat.floorMarble
+      : TEXTURES.repeat.floorOak;
+    floorTex.repeat.set(floorRepeat[0], floorRepeat[1]);
     disposers.push(() => floorTex.dispose());
 
     const deskWoodTex = canvasTexture(256, 256, (c, w, h) =>
@@ -238,6 +250,14 @@ export const RoomGeometry: React.FC<{
     );
     disposers.push(() => shelfWoodTex.dispose());
 
+    // 書架背板退回底：深褐紋理牆（圖一書牆背板），照片貼圖換上書脊色票
+    const shelfBackTex = canvasTexture(256, 256, (c, w, h) =>
+      drawWood(c, w, h, "#4b3729", "rgba(18,12,8,0.45)")
+    );
+    shelfBackTex.wrapS = shelfBackTex.wrapT = THREE.RepeatWrapping;
+    shelfBackTex.repeat.set(3, 2);
+    disposers.push(() => shelfBackTex.dispose());
+
     const wallMat = new THREE.MeshStandardMaterial({
       color: PALETTE.wall,
       map: wallTex,
@@ -249,15 +269,15 @@ export const RoomGeometry: React.FC<{
       roughness: 1,
     });
     const floorMat = new THREE.MeshStandardMaterial({
-      color: "#e8d7b8",
+      color: floorIsMarble ? "#e9e9e6" : "#e8d7b8",
       map: floorTex,
-      roughness: 0.72,
-      metalness: 0.02,
+      roughness: floorIsMarble ? 0.4 : 0.72,
+      metalness: floorIsMarble ? 0.05 : 0.02,
     });
     const deskMat = new THREE.MeshStandardMaterial({
       color: "#ffffff",
       map: deskWoodTex,
-      roughness: 0.55,
+      roughness: 0.5,
       metalness: 0.03,
     });
     const honeyMat = new THREE.MeshStandardMaterial({
@@ -277,6 +297,13 @@ export const RoomGeometry: React.FC<{
       map: shelfWoodTex,
       roughness: 0.62,
     });
+    // 書架背板：換上書脊色票後讀起來是「塞滿書」的暗深度（圖一書牆）
+    const shelfBackMat = new THREE.MeshStandardMaterial({
+      color: "#ffffff",
+      map: shelfBackTex,
+      roughness: 0.95,
+      metalness: 0,
+    });
     const initialPaperTexture = canvasTexture(640, 400, (c, w, h) => drawDeskPreview(c, w, h, objects, cards));
     paperTextureRef.current = initialPaperTexture;
     const paperMat = new THREE.MeshStandardMaterial({
@@ -293,10 +320,35 @@ export const RoomGeometry: React.FC<{
       brownMat.dispose();
       frameMat.dispose();
       shelfMat.dispose();
+      shelfBackMat.dispose();
       paperMat.dispose();
       paperTextureRef.current?.dispose();
       paperTextureRef.current = null;
       paperRef.current = null;
+    });
+
+    // ---- v8.2 照片級 albedo：載入成功才換掉上面的程序化紋理，失敗靜默留原樣 ----
+    const aniso = Math.min(8, api.renderer.capabilities.getMaxAnisotropy());
+    const photo = (
+      mat: THREE.MeshStandardMaterial,
+      key: TextureKey,
+      opts: Omit<AttachOptions, "anisotropy"> = {}
+    ) => {
+      disposers.push(attachPhotoMap(mat, key, { anisotropy: aniso, ...opts }));
+    };
+    photo(wallMat, "plaster", { repeat: TEXTURES.repeat.wall });
+    photo(
+      floorMat,
+      floorIsMarble ? "marble" : "oak",
+      floorIsMarble
+        ? { repeat: TEXTURES.repeat.floorMarble, tint: "#f2f2ef" }
+        : { repeat: TEXTURES.repeat.floorOak }
+    );
+    photo(deskMat, "marble", { repeat: TEXTURES.repeat.desk }); // 圖一：淺灰大理石桌板
+    photo(shelfMat, "walnut", { repeat: TEXTURES.repeat.shelf }); // 圖一：深胡桃書架
+    photo(shelfBackMat, "spines", {
+      tileable: false,
+      tint: "#8b7a68", // 壓暗成書架深處的低亮度
     });
 
     const W = ROOM.width;
@@ -309,6 +361,19 @@ export const RoomGeometry: React.FC<{
     // ---- 地板／天花 ----
     group.add(box(W + 0.48, 0.1, D + 0.48, floorMat, 0, -0.05, 0, { cast: false }));
     group.add(box(W + 0.48, 0.1, D + 0.48, ceilMat, 0, H + 0.05, 0, { receive: false }));
+
+    // ---- 發光材質：天花燈槽＋書牆層板燈帶（圖一的暖色間接光） ----
+    const coveMat = new THREE.MeshBasicMaterial({ color: "#ffdcae" });
+    const ledMat = new THREE.MeshBasicMaterial({ color: "#ffcf96" });
+    disposers.push(() => {
+      coveMat.dispose();
+      ledMat.dispose();
+    });
+    const coveY = H - 0.08;
+    group.add(box(W - 0.5, 0.024, 0.05, coveMat, 0, coveY, D / 2 - 0.22, { cast: false, receive: false }));
+    group.add(box(W - 0.5, 0.024, 0.05, coveMat, 0, coveY, -D / 2 + 0.22, { cast: false, receive: false }));
+    group.add(box(0.05, 0.024, D - 0.5, coveMat, W / 2 - 0.22, coveY, 0, { cast: false, receive: false }));
+    group.add(box(0.05, 0.024, D - 0.5, coveMat, -W / 2 + 0.22, coveY, 0, { cast: false, receive: false }));
 
     // ---- 南牆（背後）／西牆／東牆 ----
     group.add(box(W + 0.24, H, T, wallMat, 0, H / 2, D / 2 + T / 2));
@@ -365,6 +430,24 @@ export const RoomGeometry: React.FC<{
     group.add(glass);
     disposers.push(() => glass.material.dispose());
 
+    // ---- 白色半拉捲簾（圖一：簾布蓋住窗上段，柔化進光但不遮光） ----
+    const blindH = winH * 0.45;
+    const blindW = WINDOW.width - 2 * f - 0.02;
+    const blindY = winY1 - f - blindH / 2;
+    const blindMat = new THREE.MeshStandardMaterial({
+      color: "#f6f2e8",
+      roughness: 0.95,
+      metalness: 0,
+      emissive: new THREE.Color("#fff3d6"),
+      emissiveIntensity: 0.14, // 背光簾面微微發亮
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+    });
+    disposers.push(() => blindMat.dispose());
+    group.add(box(blindW, blindH, 0.014, blindMat, WINDOW.cx, blindY, winZ + 0.12, { cast: false, receive: false }));
+    group.add(box(blindW, 0.024, 0.032, brownMat, WINDOW.cx, blindY - blindH / 2, winZ + 0.128, { cast: false, receive: false }));
+
     // ---- 壁掛書桌（窗下、無桌腿、桌板有厚度） ----
     const deskZ = wallInnerZ + DESK.depth / 2;
     group.add(box(DESK.width, DESK.thickness, DESK.depth, deskMat, DESK.cx, DESK.top - DESK.thickness / 2, deskZ));
@@ -393,7 +476,7 @@ export const RoomGeometry: React.FC<{
     const sw = SHELF.width;
     const sh = SHELF.height;
     const sd = SHELF.depth;
-    group.add(box(0.03, sh, sw, shelfMat, sx - 0.015, SHELF.baseY + sh / 2, sz)); // 背板
+    group.add(box(0.03, sh, sw, shelfBackMat, sx - 0.015, SHELF.baseY + sh / 2, sz)); // 背板（書脊色票／深褐退回底）
     group.add(box(sd, sh, SHELF.side, shelfMat, sx - sd / 2, SHELF.baseY + sh / 2, sz - sw / 2 + SHELF.side / 2)); // 左側
     group.add(box(sd, sh, SHELF.side, shelfMat, sx - sd / 2, SHELF.baseY + sh / 2, sz + sw / 2 - SHELF.side / 2)); // 右側
     group.add(box(sd, 0.03, sw, shelfMat, sx - sd / 2, SHELF.baseY + sh - 0.015, sz)); // 頂板
@@ -401,6 +484,13 @@ export const RoomGeometry: React.FC<{
     for (let r = 0; r < shelfRows; r++) {
       const py = shelfPlankY(r, shelfRows);
       group.add(box(sd - 0.05, 0.026, SHELF.width - SHELF.side * 2 - 0.06, shelfMat, sx - sd / 2, py - 0.013, sz));
+      // 層板下緣暖色燈帶（圖一書牆 LED；純發光片，不增加光源成本）
+      group.add(
+        box(0.014, 0.012, SHELF.width - SHELF.side * 2 - 0.22, ledMat, sx - sd - 0.004, py - 0.036, sz, {
+          cast: false,
+          receive: false,
+        })
+      );
     }
 
     // ---- 踢腳板（其餘三面＋北牆窗下段） ----
