@@ -16,62 +16,110 @@ import {
 export const ROOM = {
   width: 6, // X：東西向（−3 … +3）
   depth: 5, // Z：南北向（−2.5 … +2.5）
-  height: 3.1, // Y
+  height: 2.75, // v8.3：圖一量測值（原 3.1）
   wall: 0.12, // 牆厚
 };
 
-// 大窗（北牆 z = −depth/2；窗台略高於桌面，溫和日光由窗外左上方射入）
+// 大窗（北牆 z = −depth/2；窗台略高於桌面，溫和日光由窗外右上方射入）
+// v8.3：框變細、單中挺、無橫櫺（圖一＝大玻璃＋一條直中挺）
 export const WINDOW = {
   cx: -0.55, // 窗中心 X（略偏西）
   width: 3.4,
-  sill: 1.02, // 窗台高（高於桌面 0.78）
-  top: 2.72,
-  frame: 0.085, // 窗框寬
+  sill: 0.9, // 窗台高（大理石檯面頂）
+  top: 2.58,
+  frame: 0.055, // 窗框寬（原 0.085）
   depth: 0.16,
-  mullions: 2, // 直向窗櫺（窗分 3 格）
-  bars: 1, // 橫向窗櫺
+  mullions: 1, // 直向窗櫺（窗分 2 格：大玻璃＋單中挺）
+  bars: 0, // 無橫向窗櫺
+  sillDepth: 0.3, // 窗台大理石深（與桌板同材質）
+  sillThickness: 0.12, // 窗台石塊厚（自桌面 0.78 墊到 0.90）
 };
 
-// 壁掛書桌（貼窗下牆面、無桌腿、桌板有厚度）
+// L 形大理石檯面：沿窗 3.4 m ＋ 沿西牆回折 1.7 m ＋ 東側延伸（盆栽）
+// 桌板頂 0.78、厚 0.05、深 0.68；CameraRig 的飛行公式 deskZ = −D/2 + wall + depth/2
+// 必須落在板中央，因此 depth 與桌板位置以此為錨（桌板後緣離牆 0.12，由窗台石與櫃體填滿）。
 export const DESK = {
-  cx: -0.55,
-  width: 3.0,
-  depth: 1.55,
+  cx: -0.55, // 沿窗段中心 X（＝窗中心；飛行目標沿用）
+  width: 3.4, // 沿窗段寬（＝窗寬）
+  depth: 0.68, // 檯面深
   top: 0.78, // 桌面高度
   thickness: 0.05,
+  sideDepth: 1.7, // 沿西牆回折段長（Z）
+  wingWidth: 0.8, // 東側延伸（龜背竹座）
+  sideX: 0.68, // 西牆回折段深（X）
 };
 
-// 書架（東牆 x = +width/2，面向房間 −X）
+// 桌下落地的深炭櫃（圖一：櫃高 0.73、深 0.60、4 片門、縫 0.008）
+export const CABINET = {
+  height: 0.73,
+  depth: 0.6,
+  gap: 0.008,
+  doors: 4,
+};
+
+/** 逐項可退步開關（v8.3）：任一 false 只影響該項，其餘照舊。 */
+export const FIDELITY = {
+  shelfWallSign: -1 as -1 | 1, // 書牆所在牆（-1 西牆＝圖一；+1 回 v8.2 東牆）
+  ledge: true, // 腰高長檯面＋矮擱板＋落地書堆
+  blind: "screen" as "screen" | "cloth", // 透光橫紋簾 / v8.2 不透明布簾
+  furniture: true, // 皮革單椅／筆電／小物／龜背竹／相框
+  envMap: true, // 大理石柔反射（手機自動跳過）
+  decor: true, // 層板間裝飾書／相框／書堆
+};
+
+// 懸浮薄層板書牆（v8.3：西牆 wallSign=-1；-1＝西牆、+1＝東牆，保留可切換）
+// xBack 為背牆面 X；板材自背牆往室內長 depth；層板沿 Z 長 width。
 export const SHELF = {
-  z: 0.15, // 中心 Z
-  width: 2.5, // 沿 Z 軸寬度
-  height: 2.05,
-  depth: 0.3,
-  xBack: ROOM.width / 2 - 0.16, // 背板 X（貼牆）
-  baseY: 0.07,
-  side: 0.03, // 側板厚
+  wallSign: FIDELITY.shelfWallSign,
+  z: -0.7, // 中心 Z（北端 −2.5 貼齊北牆內面，往南 3.6 m 到 +1.1）
+  width: 3.6, // 沿 Z 軸寬度
+  height: 2.42, // 最上層板「頂面」Y（圖一量測）
+  depth: 0.28, // 層板深
+  plank: 0.035, // 板厚
+  pitch: 0.40, // 層板間距（板頂到板頂）
+  minRows: 4, // 至少 4 排懸浮層板（資料列不足時以空板＋裝飾書補滿）
+  xBack: (ROOM.width / 2 - 0.16) * FIDELITY.shelfWallSign, // 背牆 X（西牆 −2.84）
+  baseY: 0,
   bookDepth: 0.19, // 書本深度（X 向）
   bookGap: 0.006,
   boardGap: 0.05,
   labelWidth: 0.15, // 櫃板標籤佔寬
   maxRowHeight: 0.52,
   pullOut: 0.055, // 書本抽出距離（預覽）
+  // 腰高長檯面（板頂 0.92、厚 0.045、深 0.30）
+  ledge: { top: 0.92, thickness: 0.045, depth: 0.3, z0: -0.68, z1: 1.1 },
+  // 檯面下矮擱板（板頂 0.40、厚 0.035、深 0.28）
+  lowShelf: { top: 0.4, thickness: 0.035, depth: 0.28, z0: -0.68, z1: 1.1 },
 };
+
+
 
 // ================= 光源（參數集中於此，預留晝夜切換） =================
 export const SUN = {
   color: "#fff3d6", // 淡金（色溫約 4000K）
-  intensity: 3.0,
-  position: new THREE.Vector3(-2.35, 2.6, -ROOM.depth / 2 - 1.1), // 窗外左上方
-  target: new THREE.Vector3(0.85, 0.12, 1.35),
+  intensity: 4.6, // v8.3：圖一的高對比（原 3.0）
+  // v8.3：仍在窗的左上方，但改由東側進光（x=+2.05），避免書牆搬到西牆後燈光穿牆。
+  position: new THREE.Vector3(2.05, 2.45, -ROOM.depth / 2 - 1.4),
+  target: new THREE.Vector3(-0.85, 0.12, 1.55),
   shadowMap: { desktop: 2048, mobile: 1024 },
+  /** PCFSoft 陰影模糊半徑（桌機較柔） */
+  shadowRadius: { desktop: 6, mobile: 3 },
 };
 export const AMBIENT = {
   hemisphereSky: "#e8f0f7",
   hemisphereGround: "#caa87a",
-  hemisphereIntensity: 0.55,
+  hemisphereIntensity: 0.34,
   ambientColor: "#ffe9c8",
-  ambientIntensity: 0.3,
+  ambientIntensity: 0.15,
+};
+
+/** 大理石柔反射參數（v8.3 §P4） */
+export const MARBLE_ROUGH = {
+  desk: 0.3,
+  floor: 0.26,
+  metalness: 0.06,
+  envIntensityDesk: 0.5,
+  envIntensityFloor: 0.35,
 };
 
 // ================= 相機 =================
@@ -100,7 +148,10 @@ export type TextureKey =
   | "marble"
   | "plaster"
   | "garden"
-  | "spines";
+  | "spines"
+  | "microcement"
+  | "blind"
+  | "leaf";
 /** 地板材質：oak＝v8.1 暖橡木拼板；marble＝圖一的淺灰大理石地坪 */
 export type RoomFloorMaterial = "oak" | "marble";
 
@@ -112,29 +163,46 @@ export const TEXTURES: {
   files: Record<TextureKey, string>;
   /** 平貼密度（次數）；spines／garden 為單張非平貼 */
   repeat: Record<
-    "wall" | "floorOak" | "floorMarble" | "desk" | "shelf" | "spines",
+    "wall" | "microcement" | "floorOak" | "floorMarble" | "desk" | "shelf" | "spines",
     [number, number]
   >;
 } = {
   enabled: true,
   dir: "textures/study-room",
-  floor: "oak",
+  floor: "marble", // v8.3：圖一的淺灰大理石地坪（原 oak）
   files: {
-    walnut: "walnut.jpg", // 書牆胡桃木（圖一深胡桃書架）
-    oak: "oak-floor.jpg", // 暖橡木拼板地板
-    marble: "marble.jpg", // 淺灰大理石（沿窗桌板／可選地坪）
-    plaster: "plaster.jpg", // 米白細顆粒牆面
+    walnut: "walnut.jpg", // 層板木紋底（壓暗成深褐）
+    oak: "oak-floor.jpg", // 暖橡木拼板地板（保留，可切回 floor="oak"）
+    marble: "marble.jpg", // 淺灰大理石（桌板／窗台／地坪）
+    plaster: "plaster.jpg", // 米白細顆粒牆面（南／東牆）
     garden: "garden-view.jpg", // 窗外綠意庭園（保留的「布景」）
-    spines: "book-spines.jpg", // 書脊色票（書架背板暗景）
+    spines: "book-spines.jpg", // 書脊色票（保留；不再當背板）
+    microcement: "microcement.jpg", // 書牆背牆：深褐微水泥
+    blind: "blind-slats.jpg", // 透光橫紋簾 alphaMap（3px 亮 / 6px 暗）
+    leaf: "monstera-leaf.jpg", // 龜背竹葉片 alphaMap（白底黑葉）
   },
   repeat: {
     wall: [3, 2],
+    microcement: [2.2, 1.6],
     floorOak: [2.2, 1.8],
-    floorMarble: [1.5, 1.25],
+    floorMarble: [1.6, 1.35],
     desk: [1.6, 0.9],
-    shelf: [1.4, 1],
+    shelf: [3.6, 1],
     spines: [1, 1],
   },
+};
+
+/**
+ * 對照視角（P6）：站東南角、面向西北，左書牆右窗＝圖一機位。
+ * 僅供預覽／驗收截圖使用，不寫入 localStorage、不影響使用者相機。
+ */
+export const MATCH_VIEW = {
+  x: 2.3,
+  z: 1.9,
+  height: 1.52,
+  yaw: -Math.PI / 4,
+  pitch: -0.035,
+  fov: 55,
 };
 
 // 色票（沿用 v8.0／v7.2）
@@ -229,17 +297,30 @@ export function projectToScreen(
 
 // ================= 書架佈局（純計算；幾何與書本共用同一真相） =================
 
-/** 層板行高（依層數均分，上限 maxRowHeight） */
-export function shelfRowHeight(rowCount: number): number {
-  return Math.min(
-    SHELF.maxRowHeight,
-    (SHELF.height - 0.14 - 0.06 * (rowCount - 1)) / Math.max(1, rowCount)
-  );
+/** 由牆面指向室內的水準方向（西牆 +1、東牆 −1；書本／標籤的法向一律乘此值） */
+export const SHELF_INWARD = -SHELF.wallSign;
+
+/** 層板前緣 X（書脊貼齊處，離板緣 12 mm） */
+export function shelfFrontX(): number {
+  return SHELF.xBack + SHELF_INWARD * (SHELF.depth - 0.012);
 }
 
-/** 第 row 列層板頂面 Y（與 computeShelfLayout 同一公式） */
-export function shelfPlankY(row: number, rowCount: number): number {
-  return SHELF.baseY + 0.05 + row * (shelfRowHeight(rowCount) + 0.06);
+/** 層板行高：v8.3 改為固定 0.40 間距（圖一），不再依層數均分 */
+export function shelfRowHeight(_rowCount: number): number {
+  return Math.min(SHELF.maxRowHeight, SHELF.pitch - SHELF.plank);
+}
+
+/** 顯示用層板數：資料列不足 4 排時仍顯示 4 排（缺的排以裝飾書補滿） */
+export function shelfPlankCount(rowCount: number): number {
+  return Math.max(SHELF.minRows, rowCount);
+}
+
+/**
+ * 第 row 列層板「頂面」Y：最上層板頂 2.42，往下每 0.40 一排。
+ * 資料列由最上層往下排（row 0 最高），層板與書本位置共用同一公式。
+ */
+export function shelfPlankY(row: number, _rowCount: number): number {
+  return SHELF.height - row * SHELF.pitch;
 }
 
 export interface ShelfBookItem {
@@ -305,9 +386,10 @@ export function computeShelfLayout(
   cards: any[],
   spineHexOf: (book: StudyBookLayout, card: any) => string
 ): ShelfLayout {
-  const innerWidth = SHELF.width - SHELF.side * 2 - 0.04;
-  const innerHeight = SHELF.height - 0.14;
-  const frontX = SHELF.xBack - SHELF.depth + 0.012;
+  // v8.3：無側板／頂板／底座，板材全長即為可用寬度（兩端各留 2 cm）
+  const innerWidth = SHELF.width - 0.04;
+  const innerHeight = shelfRowHeight(1);
+  const frontX = shelfFrontX();
 
   const sortedCats = [...categories].sort((a, b) => a.order - b.order);
   const known = new Set(cards.map((c) => c.id));
@@ -356,8 +438,9 @@ export function computeShelfLayout(
           shapeHex: card.reasoningShape ? shapeHexOf(card.reasoningShape) : "#3b82f6",
           thickness: dims.thickness,
           height: dims.height,
-          x: frontX - dims.depth / 2,
-          y: plankY + 0.013 + dims.height / 2,
+          // 書本自書脊面往牆面退，整本落在層板上（inward 由牆指向室內）
+          x: frontX - SHELF_INWARD * (dims.depth / 2),
+          y: plankY + 0.0015 + dims.height / 2,
           z: bz + dims.thickness / 2,
         });
         bz += dims.thickness + SHELF.bookGap;

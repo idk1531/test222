@@ -157,7 +157,8 @@ WHY 只有結論 · 推理跳步 · 循環解釋 · **偷渡前提**（與假設
 - **桌面工作視角**：點桌上畫布後相機約 0.52 秒飛到桌面正上方；此時原有 `InfiniteCanvas` 以螢幕平行 HTML 層完整接手，無 CSS 3D 透視，`getBoundingClientRect()` 座標換算保持純仿射，輸入框／IME／拖卡／框選／雙指縮放均沿用原實作。Esc 或「回到房間」飛回進入前精確位置與朝向。房間模式下畫布只顯示靜態縮圖，不接收精細操作。
 - **走動與環顧**：桌機 WASD／方向鍵行走、Shift 加速、滑鼠拖曳轉頭；手機左下虛擬搖桿行走、畫面拖曳轉頭。yaw 360° 連續，pitch 約 −70°～+40°，移動受牆面邊界限制；輸入框聚焦時不會觸發走動。房間模式滾輪調整視高。
 - **光影與效能**：ACES Filmic、抗鋸齒、PCFSoftShadowMap（桌機 2048／手機 1024）、pixelRatio 上限 2／1.5；程序化木紋、牆面顆粒、分層庭園窗景。桌機可有淡光柱與 140 顆塵埃；手機關閉粒子／光柱並降低陰影與像素比。
-- **照片級材質（v8.2）**：`public/textures/study-room/` 的 6 張 albedo（深胡桃書牆、橡木地坪、大理石、米白牆、窗外庭園、書脊色票）非同步換掉程序化紋理，**載入失敗自動退回 v8.1 視覺**；`src/lib/room3d.ts` 的 `TEXTURES.floor` 可在 `oak`（暖橡木）與 `marble`（圖一的淺灰大理石地坪）之間一鍵切換。另補上參考圖的三處氛圍幾何：書架層板下暖色燈帶、天花四周燈槽、窗上段白色半拉捲簾（簾面不投影，不影響窗影）。產製與取捨見 [`docs/v8.2-room-textures.md`](docs/v8.2-room-textures.md)。
+- **照片級材質（v8.2）**：`public/textures/study-room/` 的照片級 albedo 非同步換掉程序化紋理，**載入失敗自動退回程序化視覺**；`src/lib/room3d.ts` 的 `TEXTURES.floor` 可在 `oak`（暖橡木）與 `marble`（圖一的淺灰大理石地坪）之間一鍵切換。產製流程見 [`docs/v8.2-room-textures.md`](docs/v8.2-room-textures.md)。
+- **完全復刻圖一（v8.3）**：書牆搬到**西牆**（`SHELF.wallSign = -1`，站東南角 `yaw=-45°` 即「左書牆、右窗」）、房高 2.75、4 排 **0.40 間距懸浮薄層板**（無側板／頂板／底座，板下暖光暈＋LED）、腰高長檯面＋矮擱板、**L 形大理石連續檯面**（窗台＝桌板）、桌下落地深炭櫃、透光橫紋簾、皮革單椅／筆電／黑色小物／龜背竹、淺灰大理石地坪、天花燈槽＋2 個方形嵌燈；`SUN 4.6`＋`exposure 1.22`＋`AMBIENT 0.15/0.34` 拉出亮窗與暖暗書牆的高對比，大理石柔反射用同一張窗景做 PMREM envMap（手機跳過）。`FIDELITY` 逐項可退步。詳見 [`docs/v8.3-match-reference-room.md`](docs/v8.3-match-reference-room.md)。
 - **書架與分類**：書架與書本為 3D 幾何；書脊顏色依 `spineColor → 節點 accentColor → 形狀色`，卡片標題／形狀色即時同步。點書本開 HTML 書封預覽，可沿用 `CardDetailModal` 開卡、飛入畫布定位、選擇分類櫃板及上下排序；「書架目錄」提供可 Tab 操作的大按鈕入口。分類 CRUD 與刪分類回未分類、不刪卡的規則沿用 v8.0。
 - **資料相容**：一卡一書（1:1），書本佈置與 `CanvasObjectData.x/y` 分離。`STORAGE_KEY=scinotes-workspace-v8.0`、`SCHEMA_VERSION=8` 不變；相機只新增選填 `x/z/height`，舊 JSON／本機資料載入時補上預設值；匯出仍整包帶出書房資料。
 - **列印**：書房 UI 不印，沿用 v7.2 規則只輸出卡片紙面。
@@ -228,7 +229,9 @@ src/
 │   ├── ShapeClassifier.tsx        推理形狀判型（含複合型）
 │   ├── SoloAssessmentPanel.tsx    Bloom × SOLO 診斷
 │   ├── Joystick.tsx               v8.1：手機虛擬搖桿
-│   ├── RoomGeometry.tsx            v8.1：真 3D 房間／窗／壁掛桌／書架；v8.2：貼圖材質、燈帶、燈槽、捲簾
+│   ├── RoomGeometry.tsx            v8.1：真 3D 房間／窗／桌／書架；v8.2：貼圖材質、燈帶、燈槽、捲簾；v8.3：西牆懸浮層板＋L 形大理石檯面＋落地櫃＋透光簾
+│   ├── RoomFurniture.tsx           v8.3：皮革單椅／筆電／黑色小物／龜背竹（程序化，不參與 raycast）
+│   ├── ShelfDecor.tsx              v8.3：層板間裝飾書（InstancedMesh）與斜靠相框
 │   ├── StudyCategoryPanel.tsx     書房分類櫃板 CRUD
 │   ├── StudyRoomView.tsx          v8.1：全景書房＋HTML 浮層
 │   ├── StudyScene.tsx              v8.1：three.js 生命週期／渲染器
@@ -241,8 +244,8 @@ src/
     ├── seedData.ts                預設種子資料
     ├── solo.ts                    SOLO 診斷邏輯
     ├── store.ts                   狀態管理 ＋ localStorage 持久化
-    ├── room3d.ts                  v8.1 房間尺寸、光源與 3D 書架計算
-    ├── roomTextures.ts            v8.2：照片級 albedo 非同步介接（含 basePath 解析與退回）
+    ├── room3d.ts                  v8.1 房間尺寸、光源與 3D 書架計算；v8.3 西牆書牆／L 形檯面／FIDELITY／MATCH_VIEW
+    ├── roomTextures.ts            v8.2：照片級 albedo 非同步介接（含 basePath 解析與退回）；v8.3：alphaMap 槽與 PMREM envMap
     ├── study.ts                   書房資料型別／helper／遷移（v8.1）
     └── types.ts                   型別定義
 ```
@@ -260,4 +263,4 @@ src/
 
 母題：「連續對稱性與守恆律對偶」（3 實例 ＋ 候選推理測試 ＋ 新預測驗證 → 已成立）
 
-v8.1 回歸檢查：`npx tsx scripts/check-room3d.ts`（相機邊界／360°／飛行 easing／日光／375px 投影／SSR／**v8.2 貼圖資產齊備**）。v8.2 換材質來源後重生貼圖：`bash scripts/make-room-textures.sh <來源圖目錄>`（需 ImageMagick，會順手輸出 `tile-check-*.jpg` 2×2 平貼檢查圖）；詳見 [`docs/v8.2-room-textures.md`](docs/v8.2-room-textures.md)。2026-10-18 補強包含輸入焦點移動隔離、可見的返回飛行，以及書本預覽即時讀取 store；詳見 v8.1 文件 §7。
+v8.1／v8.3 回歸檢查：`npx tsx scripts/check-room3d.ts`（相機邊界／360°／飛行 easing／日光／375px 投影／SSR／**v8.2 貼圖資產齊備**／**v8.3 西牆書牆＋對照視角投影＋層板堆疊**）。v8.2 換材質來源後重生貼圖：`bash scripts/make-room-textures.sh <來源圖目錄>`（需 ImageMagick，會順手輸出 `tile-check-*.jpg` 2×2 平貼檢查圖）；詳見 [`docs/v8.2-room-textures.md`](docs/v8.2-room-textures.md)。2026-10-18 補強包含輸入焦點移動隔離、可見的返回飛行，以及書本預覽即時讀取 store；詳見 v8.1 文件 §7。

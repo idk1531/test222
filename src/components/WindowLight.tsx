@@ -34,19 +34,21 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     sun.target.position.copy(SUN.target);
     sun.castShadow = true;
     sun.shadow.mapSize.set(api.quality.shadowMap, api.quality.shadowMap);
-    sun.shadow.camera.left = -3.5;
-    sun.shadow.camera.right = 3.5;
-    sun.shadow.camera.top = 3.6;
-    sun.shadow.camera.bottom = -2.7;
+    // v8.3：光源改由東側進光（書牆在西牆），陰影視錐涵蓋整個房間對角
+    sun.shadow.camera.left = -4.6;
+    sun.shadow.camera.right = 4.6;
+    sun.shadow.camera.top = 4.2;
+    sun.shadow.camera.bottom = -3.4;
     sun.shadow.camera.near = 0.1;
-    sun.shadow.camera.far = 14;
+    sun.shadow.camera.far = 18;
     sun.shadow.bias = -0.00022;
     sun.shadow.normalBias = 0.025;
-    sun.shadow.radius = api.quality.mobile ? 3 : 5;
+    sun.shadow.radius = api.quality.mobile ? SUN.shadowRadius.mobile : SUN.shadowRadius.desktop;
     g.add(sun, sun.target);
 
     // ---- 窗外景片：天空遠景、遠樹冠、中景樹、近灌木、草地 ----
-    const skyMat = new THREE.MeshBasicMaterial({ color: "#c9e1ed" });
+    // v8.3：窗景「近過曝」——純白底色＋toneMapped:false，讓窗外突破 1.0 拉開明暗對比
+    const skyMat = new THREE.MeshBasicMaterial({ color: "#ffffff", toneMapped: false });
     const sky = new THREE.Mesh(new THREE.PlaneGeometry(15, 7), skyMat);
     sky.position.set(WINDOW.cx, 2.1, outsideZ - 3.1);
     g.add(sky);
