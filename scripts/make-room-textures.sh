@@ -10,7 +10,10 @@
 #   tex-marble.png    → marble.jpg        淺灰大理石（桌板／可選地坪）
 #   tex-plaster.png   → plaster.jpg       米白細顆粒牆面
 #   tex-garden-view.png → garden-view.jpg 窗外庭園（依窗景平面 15:7 裁切，不平貼）
-#   tex-book-spines.png → book-spines.jpg 書脊色票（書架背板「塞滿書」深景）
+#   tex-book-spines.png → book-spines.jpg 書脊色票（保留；v8.3 不再當背板）
+#   tex-microcement.png → microcement.jpg 書牆背牆：深褐微水泥（v8.3）
+#   tex-blind-slats.png → blind-slats.jpg 透光橫紋簾 alphaMap（3px 亮 / 6px 暗，v8.3）
+#   tex-monstera-leaf.png → monstera-leaf.jpg 龜背竹葉片 alphaMap（白底黑葉，v8.3）
 #
 # 平貼做法（seamless）：把原圖鏡像拼成 2W×2H，再取中央 W×H —— 邊界值必然相等，
 # 平貼無接縫；代價是紋理內含一次鏡像對稱，低對比材質（木紋／大理石／顆粒牆）可忽略。
@@ -40,6 +43,7 @@ seamless() { # $1=來源 $2=輸出
   local extra=""
   case "$(basename "$2")" in
     plaster.jpg) extra="-attenuate 0.10 +noise Gaussian -blur 0x0.4" ;;
+    microcement.jpg) extra="-attenuate 0.06 +noise Gaussian -blur 0x0.3" ;;
   esac
   convert "$tmp/d.png" -resize "${TILE}x${TILE}" $extra -strip -quality "$QUAL" "$2"
   # 2×2 平貼檢查圖（看十字處有沒有接縫）
@@ -49,7 +53,8 @@ seamless() { # $1=來源 $2=輸出
 }
 
 for pair in "tex-walnut.png:walnut.jpg" "tex-oak-floor.png:oak-floor.jpg" \
-            "tex-marble.png:marble.jpg" "tex-plaster.png:plaster.jpg"; do
+            "tex-marble.png:marble.jpg" "tex-plaster.png:plaster.jpg" \
+            "tex-microcement.png:microcement.jpg"; do
   src="${pair%%:*}"; dst="${pair##*:}"
   [ -f "$SRC/$src" ] || { echo "缺少 $SRC/$src，跳過"; continue; }
   seamless "$SRC/$src" "$OUT/$dst"
@@ -60,6 +65,17 @@ if [ -f "$SRC/tex-garden-view.png" ]; then
   convert "$SRC/tex-garden-view.png" -resize 1536x717^ -gravity center -extent 1536x717 \
     -colorspace sRGB -strip -quality "$QUAL" "$OUT/garden-view.jpg"
 fi
+# v8.3 透光橫紋簾 alphaMap：3px 亮 / 6px 暗，灰階、不平貼（單張遮罩）
+if [ -f "$SRC/tex-blind-slats.png" ]; then
+  convert "$SRC/tex-blind-slats.png" -colorspace Gray -resize "${TILE}x${TILE}!" \
+    -strip -quality "$QUAL" "$OUT/blind-slats.jpg"
+fi
+# v8.3 龜背竹葉片 alphaMap：白底黑葉 → 灰階單張（512²，alphaTest 用）
+if [ -f "$SRC/tex-monstera-leaf.png" ]; then
+  convert "$SRC/tex-monstera-leaf.png" -colorspace Gray -resize 512x512 \
+    -strip -quality "$QUAL" "$OUT/monstera-leaf.jpg"
+fi
+
 # 書脊色票：書架背板用，保留原始寬幅、不平貼
 if [ -f "$SRC/tex-book-spines.png" ]; then
   convert "$SRC/tex-book-spines.png" -resize 1376x -colorspace sRGB -strip \
