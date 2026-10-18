@@ -571,7 +571,8 @@ export const RoomGeometry: React.FC<{
           receive: false,
         })
       );
-      disposers.push(() =>
+      // 注意：push 的是 attachPhotoMap 回傳的 dispose，不是「dispose 時才去載圖」
+      disposers.push(
         attachPhotoMap(blindMat, "blind", {
           anisotropy: aniso,
           tileable: false,
