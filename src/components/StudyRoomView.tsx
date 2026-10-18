@@ -49,7 +49,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   const [workMode, setWorkMode] = useState(false);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
   const [showCatalog, setShowCatalog] = useState(false);
-  const [preview, setPreview] = useState<BookPreview | null>(null);
+  const [previewSnapshot, setPreview] = useState<BookPreview | null>(null);
 
   useEffect(() => { cameraRef.current = state.studyLayout.camera; }, [state.studyLayout.camera]);
 
@@ -63,6 +63,18 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     state.cards as CardData[],
     (book, card) => desaturateColor(resolveSpineColor(book, accentOf(card.id), card.reasoningShape), 0.4)
   ), [state.studyCategories, state.studyBooks, state.cards, accentOf]);
+
+  // Keep the preview anchored to a card ID, never a stale copy of store data.
+  const previewCard = previewSnapshot
+    ? (state.cards as CardData[]).find((card) => card.id === previewSnapshot.card.id)
+    : undefined;
+  const previewPlacement = previewSnapshot
+    ? layout.rows.flatMap((row) => row.boards.flatMap((board) => board.books))
+      .find((book) => book.cardId === previewSnapshot.card.id)
+    : undefined;
+  const preview = previewSnapshot && previewCard && previewPlacement
+    ? { ...previewSnapshot, card: previewCard, placement: previewPlacement }
+    : null;
 
   useEffect(() => {
     if (layout.rows.length !== state.studyLayout.shelfRows) {
@@ -277,7 +289,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               role="dialog"
               aria-label={`書本預覽：${preview.card.title}`}
             >
-              <div className="h-1 w-full rounded-full" style={{ backgroundColor: desaturateColor(resolveSpineColor(undefined, accentOf(preview.card.id), preview.card.reasoningShape)) }} />
+              <div className="h-1 w-full rounded-full" style={{ backgroundColor: desaturateColor(resolveSpineColor(state.studyBooks.find((book) => book.cardId === preview.card.id), accentOf(preview.card.id), preview.card.reasoningShape)) }} />
               <h3 className="mt-2 text-sm font-bold text-stone-800">{preview.card.title || "（未命名）"}</h3>
               <p className="mt-1 text-[11px] text-stone-600">{preview.card.domain || "未分類領域"} · {preview.card.reasoningShape}</p>
               <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-stone-600">

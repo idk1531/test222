@@ -131,6 +131,9 @@ export const CameraRig: React.FC<{
 
   const beginFlight = (to: CameraMode) => {
     if (flyingRef.current || modeRef.current === to) return;
+    keysRef.current.clear();
+    pointerRef.current = null;
+    joystickRef.current = { x: 0, y: 0 };
     const start = getPose();
     let end: Pose;
     if (to === "work") {
@@ -151,6 +154,8 @@ export const CameraRig: React.FC<{
       const room = roomPoseRef.current;
       if (!room) return;
       end = room;
+      // Reveal the return flight immediately; the HTML canvas must not cover it.
+      callbackRef.current.onExitWork();
       api.setActive(true);
     }
     flightRef.current = { start, end, startedAt: performance.now(), duration: 520, to };
@@ -238,8 +243,15 @@ export const CameraRig: React.FC<{
       keysRef.current.delete(e.key.toLowerCase());
       if (modeRef.current === "room" && !flyingRef.current) storeCamera();
     };
+    const onFocusIn = () => {
+      // A held movement key must not survive focus entering an editor/HUD.
+      keysRef.current.clear();
+      joystickRef.current = { x: 0, y: 0 };
+    };
     const onBlur = () => {
       keysRef.current.clear();
+      pointerRef.current = null;
+      joystickRef.current = { x: 0, y: 0 };
       if (!flyingRef.current) storeCamera();
     };
     const onWheel = (e: WheelEvent) => {
@@ -280,6 +292,7 @@ export const CameraRig: React.FC<{
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("focusin", onFocusIn);
     window.addEventListener("keydown", onEscape, true);
     window.addEventListener("study-room-reset-camera", onReset);
 
@@ -302,7 +315,7 @@ export const CameraRig: React.FC<{
           if (flight.to === "work") {
             callbackRef.current.onEnterWork();
             // 離開後只有 HTML 畫布互動，停掉 WebGL 循環節省電。
-            window.setTimeout(() => api.setActive(false), 0);
+            api.setActive(false);
           } else {
             callbackRef.current.onExitWork();
             storeCamera();
@@ -352,6 +365,7 @@ export const CameraRig: React.FC<{
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focusin", onFocusIn);
       window.removeEventListener("keydown", onEscape, true);
       window.removeEventListener("study-room-reset-camera", onReset);
       if (rigRef) rigRef.current = null;
