@@ -777,6 +777,7 @@ export default function WorkbenchPage() {
       >
         {activeView === "study" && (
           <StudyRoomView
+            cardModalOpen={!!detailCard}
             objects={canvasObjects}
             cards={cards}
             relations={relations}
