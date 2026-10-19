@@ -57,6 +57,32 @@ export const CABINET = {
   doors: 4,
 };
 
+/** v8.3 椅子的世界座標與外形 footprint；幾何/碰撞不在元件內重抄位置。 */
+export const CHAIR = {
+  x: 0.55,
+  y: 0,
+  z: 0.62,
+  yaw: 2.55,
+  width: 0.67,
+  depth: 0.67,
+  seatWidth: 0.6,
+  seatDepth: 0.52,
+  seatHeight: 0.42,
+};
+
+export const SIT = {
+  triggerRadius: 0.34,
+  seatY: 0.42,
+  eyeY: 1.18,
+  walkSpeed: 1.15,
+  fov: 58,
+  fadeOpacity: 0.25,
+};
+
+export function isWithinSitTrigger(x: number, z: number, chairX = CHAIR.x, chairZ = CHAIR.z): boolean {
+  return Math.hypot(x - chairX, z - chairZ) < SIT.triggerRadius;
+}
+
 /** 逐項可退步開關（v8.3）：任一 false 只影響該項，其餘照舊。 */
 export const FIDELITY = {
   shelfWallSign: -1 as -1 | 1, // 書牆所在牆（-1 西牆＝圖一；+1 回 v8.2 東牆）
@@ -92,7 +118,71 @@ export const SHELF = {
   lowShelf: { top: 0.4, thickness: 0.035, depth: 0.28, z0: -0.68, z1: 1.1 },
 };
 
+/** 桌上書的位置網格，公尺；保持落點可重現。 */
+export const DESK_SNAP = 0.04;
 
+export interface RoomRect {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+/** L 形桌板實際 footprint，與 RoomGeometry 的桌板段共用 DESK/SHELF/WINDOW 真相。 */
+export const DESK_FOOTPRINT: readonly RoomRect[] = (() => {
+  const wallInnerZ = -ROOM.depth / 2 + ROOM.wall;
+  const mainMinX = SHELF.xBack;
+  const mainMaxX = WINDOW.cx + WINDOW.width / 2 + DESK.wingWidth;
+  const mainMinZ = wallInnerZ;
+  const mainMaxZ = wallInnerZ + DESK.depth;
+  return [
+    { minX: mainMinX, maxX: mainMaxX, minZ: mainMinZ, maxZ: mainMaxZ },
+    {
+      minX: SHELF.xBack,
+      maxX: SHELF.xBack + DESK.sideX,
+      minZ: mainMaxZ,
+      maxZ: wallInnerZ + DESK.sideDepth,
+    },
+  ];
+})();
+
+/** 桌下深炭櫃 footprint；RoomGeometry 的櫃體/門片與玩家碰撞共用此座標真相。 */
+export const CABINET_FOOTPRINT: readonly RoomRect[] = (() => {
+  const wallZ = -ROOM.depth / 2;
+  const wallInnerZ = wallZ + ROOM.wall;
+  const deskX1 = WINDOW.cx + WINDOW.width / 2 + DESK.wingWidth;
+  const cabinetZ0 = wallZ;
+  const cabinetZ1 = cabinetZ0 + CABINET.depth;
+  const sideCabinetX0 = SHELF.xBack;
+  const sideCabinetX1 = SHELF.xBack + DESK.sideX - 0.08;
+  return [
+    { minX: sideCabinetX1, maxX: deskX1 - 0.12, minZ: cabinetZ0, maxZ: cabinetZ1 },
+    { minX: sideCabinetX0, maxX: sideCabinetX1, minZ: wallInnerZ + 0.02, maxZ: cabinetZ1 },
+  ];
+})();
+
+/**
+ * 將桌上書中心夾回 L 形桌板內，並吸附 4 cm 網格。
+ * 每段預留 10 cm 給書本邊緣；轉角以到合法區域的最短距離選段。
+ */
+export function clampToDesk(x: number, z: number): { x: number; z: number } {
+  const edge = 0.1;
+  const candidates = DESK_FOOTPRINT.map((rect) => {
+    const minX = Math.ceil((rect.minX + edge) / DESK_SNAP - 1e-9) * DESK_SNAP;
+    const maxX = Math.floor((rect.maxX - edge) / DESK_SNAP + 1e-9) * DESK_SNAP;
+    const minZ = Math.ceil((rect.minZ + edge) / DESK_SNAP - 1e-9) * DESK_SNAP;
+    const maxZ = Math.floor((rect.maxZ - edge) / DESK_SNAP + 1e-9) * DESK_SNAP;
+    return {
+      x: Math.max(minX, Math.min(maxX, Math.round(x / DESK_SNAP) * DESK_SNAP)),
+      z: Math.max(minZ, Math.min(maxZ, Math.round(z / DESK_SNAP) * DESK_SNAP)),
+    };
+  });
+  return candidates.reduce((best, candidate) =>
+    Math.hypot(candidate.x - x, candidate.z - z) < Math.hypot(best.x - x, best.z - z)
+      ? candidate
+      : best
+  );
+}
 
 // ================= 光源（參數集中於此，預留晝夜切換） =================
 export const SUN = {
@@ -135,6 +225,7 @@ export const CAMERA = {
   walkSpeed: 2.2, // m/s
   sprintMultiplier: 2,
   lookSensitivity: 0.0042, // rad/px
+  lockSensitivity: 0.0022, // rad/px without system pointer acceleration
   wheelHeightStep: 0.07,
 };
 
@@ -255,8 +346,9 @@ export function clampRoomPosition(x: number, z: number): { x: number; z: number 
   };
 }
 
-export function clampPitchRad(pitch: number): number {
-  return Math.min(CAMERA.pitchMax, Math.max(CAMERA.pitchMin, pitch));
+export function clampPitchRad(pitch: number, seated = false): number {
+  const min = seated ? THREE.MathUtils.degToRad(-80) : CAMERA.pitchMin;
+  return Math.min(CAMERA.pitchMax, Math.max(min, pitch));
 }
 
 export function clampHeight(h: number): number {
@@ -321,6 +413,130 @@ export function shelfPlankCount(rowCount: number): number {
  */
 export function shelfPlankY(row: number, _rowCount: number): number {
   return SHELF.height - row * SHELF.pitch;
+}
+
+export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair";
+export interface Aabb extends RoomRect {
+  kind: RoomColliderKind;
+  top: number;
+  standable: boolean;
+}
+export type RoomCollider = Aabb;
+
+/** 2D 玩家碰撞採 XZ 平面 AABB；高度保留給地面/可站立物判定。 */
+const chairCos = Math.abs(Math.cos(CHAIR.yaw));
+const chairSin = Math.abs(Math.sin(CHAIR.yaw));
+const chairHalfX = (CHAIR.width * chairCos + CHAIR.depth * chairSin) / 2;
+const chairHalfZ = (CHAIR.width * chairSin + CHAIR.depth * chairCos) / 2;
+export const COLLIDERS: readonly Aabb[] = [
+  ...DESK_FOOTPRINT.map((rect) => ({ ...rect, kind: "desk" as const, top: DESK.top, standable: false })),
+  ...CABINET_FOOTPRINT.map((rect) => ({ ...rect, kind: "cabinet" as const, top: CABINET.height, standable: false })),
+  {
+    minX: Math.min(SHELF.xBack, shelfFrontX()),
+    maxX: Math.max(SHELF.xBack, shelfFrontX()),
+    minZ: SHELF.z - SHELF.width / 2,
+    maxZ: SHELF.z + SHELF.width / 2,
+    kind: "shelf",
+    top: SHELF.height,
+    standable: false,
+  },
+  {
+    minX: CHAIR.x - chairHalfX,
+    maxX: CHAIR.x + chairHalfX,
+    minZ: CHAIR.z - chairHalfZ,
+    maxZ: CHAIR.z + chairHalfZ,
+    kind: "chair",
+    top: CHAIR.seatHeight,
+    standable: false,
+  },
+];
+
+export const PLAYER_RADIUS = 0.22;
+/** Within this radius the player may pass the chair collider to reach its sit trigger. */
+export const CHAIR_APPROACH_RADIUS = Math.hypot(chairHalfX + PLAYER_RADIUS, chairHalfZ + PLAYER_RADIUS);
+
+/**
+ * 將玩家圓形近似成半徑擴張的 AABB，依最短分離軸推出障礙；距離相同時優先 X。
+ * 多輪處理桌櫃轉角的重疊 footprint；坐姿可選擇略過椅子與桌櫃以實現滑行，牆界仍由 clampRoomPosition 負責。
+ */
+export function resolveCollision(
+  x: number,
+  z: number,
+  radius = PLAYER_RADIUS,
+  ignoreChair = false,
+  ignoreDeskAndCabinet = false,
+  chairPosition?: { x: number; z: number }
+): { x: number; z: number } {
+  const start = clampRoomPosition(x, z);
+  let px = start.x;
+  let pz = start.z;
+  const colliders = COLLIDERS.filter((collider) =>
+    !(ignoreChair && collider.kind === "chair") &&
+    !(ignoreDeskAndCabinet && (collider.kind === "desk" || collider.kind === "cabinet"))
+  );
+  for (let pass = 0; pass < colliders.length; pass++) {
+    let changed = false;
+    for (const collider of colliders) {
+      const chairOffsetX = collider.kind === "chair" && chairPosition ? chairPosition.x - CHAIR.x : 0;
+      const chairOffsetZ = collider.kind === "chair" && chairPosition ? chairPosition.z - CHAIR.z : 0;
+      const minX = collider.minX + chairOffsetX - radius;
+      const maxX = collider.maxX + chairOffsetX + radius;
+      const minZ = collider.minZ + chairOffsetZ - radius;
+      const maxZ = collider.maxZ + chairOffsetZ + radius;
+      if (px <= minX || px >= maxX || pz <= minZ || pz >= maxZ) continue;
+
+      const candidates = [
+        { axis: "x" as const, value: minX, distance: px - minX },
+        { axis: "x" as const, value: maxX, distance: maxX - px },
+        { axis: "z" as const, value: minZ, distance: pz - minZ },
+        { axis: "z" as const, value: maxZ, distance: maxZ - pz },
+      ].sort((a, b) => {
+        const distance = a.distance - b.distance;
+        if (distance !== 0) return distance;
+        if (a.axis === b.axis) return 0;
+        return a.axis === "x" ? -1 : 1;
+      });
+      for (const candidate of candidates) {
+        const bounded = clampRoomPosition(
+          candidate.axis === "x" ? candidate.value : px,
+          candidate.axis === "z" ? candidate.value : pz
+        );
+        const stillOverlaps =
+          bounded.x > minX && bounded.x < maxX && bounded.z > minZ && bounded.z < maxZ;
+        if (stillOverlaps) continue;
+        px = bounded.x;
+        pz = bounded.z;
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) break;
+  }
+  return { x: px, z: pz };
+}
+
+/** 目前房間只有單一地板；獨立 helper 讓起跳/安全起立共用地面真相。 */
+export function groundHeightAt(_x: number, _z: number): number {
+  return 0;
+}
+
+export const JUMP = {
+  velocity: 3.6,
+  gravity: 11.5,
+};
+export interface JumpState {
+  offset: number;
+  velocity: number;
+  onGround: boolean;
+}
+
+/** 固定重力積分；回傳瞬態高度，不改相機的 base height。 */
+export function stepJump(state: JumpState, dt: number): JumpState {
+  if (state.onGround || dt <= 0) return state;
+  const velocity = state.velocity - JUMP.gravity * dt;
+  const offset = state.offset + state.velocity * dt - 0.5 * JUMP.gravity * dt * dt;
+  if (offset <= 0 && velocity <= 0) return { offset: 0, velocity: 0, onGround: true };
+  return { offset: Math.max(0, offset), velocity, onGround: false };
 }
 
 export interface ShelfBookItem {
@@ -398,6 +614,7 @@ export function computeShelfLayout(
       .filter(
         (b) =>
           b.cardId &&
+          b.place !== "desk" &&
           known.has(b.cardId) &&
           (b.categoryId ?? UNCATEGORIZED_ID) === cat.id
       )

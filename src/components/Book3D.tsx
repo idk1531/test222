@@ -38,7 +38,7 @@ function materialFor(hex: string): THREE.MeshStandardMaterial {
   });
 }
 
-function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
+export function makeBook(placement: ShelfBookPlacement, title: string, place: "shelf" | "desk" | "held" = "shelf"): THREE.Group {
   const g = new THREE.Group();
   g.position.set(placement.x, placement.y, placement.z);
   const d = Math.max(0.12, placement.height);
@@ -55,6 +55,7 @@ function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
   book.userData.kind = "book";
   book.userData.cardId = placement.cardId;
   book.userData.categoryId = placement.categoryId;
+  book.userData.place = place;
   g.add(book);
   // 書名標籤貼於書脊（v8.3：書牆在西牆，法向一律乘 wallSign）
   const labelTexture = makeBookLabel(title, placement.categoryHex || "#e1c797");
@@ -70,6 +71,7 @@ function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
   label.userData.kind = "book";
   label.userData.cardId = placement.cardId;
   label.userData.categoryId = placement.categoryId;
+  label.userData.place = place;
   label.castShadow = false;
   g.add(label);
   // 分類紙標籤：書脊下沿 1.4cm
@@ -78,36 +80,66 @@ function makeBook(placement: ShelfBookPlacement, title: string): THREE.Group {
     stripe.position.set((-depth / 2 - 0.004) * SHELF.wallSign, -d * 0.39, 0);
     stripe.userData.kind = "book";
     stripe.userData.cardId = placement.cardId;
+    stripe.userData.place = place;
     g.add(stripe);
   }
   const foot = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.012, t * 0.8), shapeMat);
   foot.position.set((-depth / 2 - 0.005) * SHELF.wallSign, -d * 0.46, 0);
   foot.userData.kind = "book";
   foot.userData.cardId = placement.cardId;
+  foot.userData.place = place;
   g.add(foot);
   return g;
 }
 
-/** 3D 書脊 meshes；每本書對應唯一 cardId，raycast 中以 userData.cardId 導向 HTML 預覽卡。 */
+/** Dispose the geometry/materials/textures owned by one standalone book model. */
+export function disposeBookModel(root: THREE.Object3D) {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.geometry) geometries.add(mesh.geometry);
+    const list = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+    list.forEach((material) => materials.add(material));
+  });
+  materials.forEach((material) => {
+    Object.values(material).forEach((value) => {
+      if (value instanceof THREE.Texture) textures.add(value);
+    });
+  });
+  geometries.forEach((geometry) => geometry.dispose());
+  textures.forEach((texture) => texture.dispose());
+  materials.forEach((material) => material.dispose());
+}
+
+export interface DeskBookModel {
+  placement: ShelfBookPlacement;
+  yawDeg: number;
+}
+
+/** 3D 書脊/桌上書 meshes；每本書以 userData.cardId 導回唯一筆記卡。 */
 export const Book3D: React.FC<{
   api: StudySceneApi;
   layout: ShelfLayout;
+  deskBooks: DeskBookModel[];
+  heldCardId: string | null;
   titleOf: (id: string) => string;
-  openCardIds?: Set<string>;
-}> = ({ api, layout, titleOf }) => {
+}> = ({ api, layout, deskBooks, heldCardId, titleOf }) => {
   useEffect(() => {
     const group = new THREE.Group();
     group.name = "study-books";
-    const materials: THREE.Material[] = [];
+    const materials = new Set<THREE.Material>();
     layout.rows.forEach((row) => {
       row.boards.forEach((board) => {
         board.books.forEach((placement) => {
+          if (placement.cardId === heldCardId) return;
           const book = makeBook(placement, titleOf(placement.cardId));
           book.traverse((o) => {
             const m = o as THREE.Mesh;
             if (m.material) {
               const list = Array.isArray(m.material) ? m.material : [m.material];
-              materials.push(...list);
+              list.forEach((material) => materials.add(material));
             }
           });
           group.add(book);
@@ -129,7 +161,7 @@ export const Book3D: React.FC<{
         const labelTexture = new THREE.CanvasTexture(textCanvas);
         labelTexture.colorSpace = THREE.SRGBColorSpace;
         const labelFaceMat = new THREE.MeshStandardMaterial({ map: labelTexture, roughness: 0.9, side: THREE.DoubleSide });
-        materials.push(labelFaceMat);
+        materials.add(labelFaceMat);
         // 分類櫃板標籤：站在板前緣的小卡（P1 要求保留），面向室內
         const label = new THREE.Mesh(
           new THREE.PlaneGeometry(0.18, 0.05),
@@ -147,6 +179,19 @@ export const Book3D: React.FC<{
         group.add(label);
       });
     });
+    deskBooks.forEach(({ placement, yawDeg }) => {
+      if (placement.cardId === heldCardId) return;
+      const book = makeBook(placement, titleOf(placement.cardId), "desk");
+      const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(yawDeg));
+      const layFlat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+      book.quaternion.copy(yaw).multiply(layFlat);
+      book.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        const list = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+        list.forEach((material) => materials.add(material));
+      });
+      group.add(book);
+    });
     api.scene.add(group);
     return () => {
       api.scene.remove(group);
@@ -159,6 +204,6 @@ export const Book3D: React.FC<{
         m.dispose();
       });
     };
-  }, [api, layout, titleOf]);
+  }, [api, layout, deskBooks, heldCardId, titleOf]);
   return null;
 };

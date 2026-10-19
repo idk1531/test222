@@ -3,17 +3,26 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
-import { DESK, FIDELITY } from "@/lib/room3d";
+import { CHAIR, DESK, FIDELITY } from "@/lib/room3d";
 import { attachPhotoMap } from "@/lib/roomTextures";
 
 /**
  * v8.3 P5：圖一的家具（App 原本完全沒有 →「不像」的第二主因）。
- * 全部程序化低面數＋共用材質；`userData.kind` 一律留空，
- * 因此不參與書本 raycast → HTML 預覽的手勢分流，家具只是佈景。
+ * 全部程序化低面數＋共用材質；只有椅子標記 `userData.kind="chair"` 供坐下互動，
+ * 其餘家具不參與書本 raycast → HTML 預覽的手勢分流。
  * 面數上限：桌機 ≤ 9k、手機 ≤ 6k（實測約 2.4k 三角）。
  * 逐項關閉：FIDELITY.furniture。
  */
-export const RoomFurniture: React.FC<{ api: StudySceneApi }> = ({ api }) => {
+export interface RoomFurnitureRig {
+  group: THREE.Group;
+  shell: THREE.Mesh;
+  shellMaterial: THREE.Material;
+}
+
+export const RoomFurniture: React.FC<{
+  api: StudySceneApi;
+  chairRigRef?: React.MutableRefObject<RoomFurnitureRig | null>;
+}> = ({ api, chairRigRef }) => {
   useEffect(() => {
     if (!FIDELITY.furniture) return;
     const group = new THREE.Group();
@@ -76,15 +85,17 @@ export const RoomFurniture: React.FC<{ api: StudySceneApi }> = ({ api }) => {
 
     // ---------- 皮革單椅（座高 0.42、殼寬 0.62、深 0.60、總高 0.78、4 支細金屬腳） ----------
     const chair = new THREE.Group();
-    chair.position.set(0.55, 0, 0.62);
-    chair.rotation.y = 2.55; // 面向桌
+    chair.position.set(CHAIR.x, CHAIR.y, CHAIR.z);
+    chair.rotation.y = CHAIR.yaw; // 面向桌
     // 座墊
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.075, 0.52), leather);
-    seat.position.set(0, 0.393, 0.02);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(CHAIR.seatWidth, 0.075, CHAIR.seatDepth), leather);
+    seat.position.set(0, CHAIR.seatHeight - 0.075 / 2, 0.02);
     chair.add(seat);
     // 殼：半圓柱環抱背與兩側（開口朝 +Z＝坐面）
-    const shellGeo = new THREE.CylinderGeometry(0.31, 0.335, 0.5, 20, 1, true, Math.PI / 2, Math.PI);
-    const shell = new THREE.Mesh(shellGeo, leather);
+    const shellGeo = new THREE.CylinderGeometry(CHAIR.width * 0.46, CHAIR.width / 2, 0.5, 20, 1, true, Math.PI / 2, Math.PI);
+    const shellMaterial = leather.clone();
+    shared.push(shellMaterial);
+    const shell = new THREE.Mesh(shellGeo, shellMaterial);
     shell.position.set(0, 0.54, -0.03);
     shell.scale.set(1, 1, 0.94);
     chair.add(shell);
@@ -101,7 +112,9 @@ export const RoomFurniture: React.FC<{ api: StudySceneApi }> = ({ api }) => {
       leg.rotation.set(rx, 0, rz);
       chair.add(leg);
     }
+    chair.userData.kind = "chair";
     add(chair);
+    if (chairRigRef) chairRigRef.current = { group: chair, shell, shellMaterial };
 
     // ---------- 筆電（13"／105° 夾角） ----------
     const laptop = new THREE.Group();
@@ -158,6 +171,7 @@ export const RoomFurniture: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     add(plant);
 
     return () => {
+      if (chairRigRef?.current?.group === chair) chairRigRef.current = null;
       disposers.forEach((d) => d());
       api.scene.remove(group);
       group.traverse((o) => {
@@ -166,7 +180,7 @@ export const RoomFurniture: React.FC<{ api: StudySceneApi }> = ({ api }) => {
       });
       shared.forEach((m) => m.dispose());
     };
-  }, [api]);
+  }, [api, chairRigRef]);
 
   return null;
 };

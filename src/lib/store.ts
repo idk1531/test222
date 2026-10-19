@@ -18,6 +18,7 @@ import {
   genStudyId,
   UNCATEGORIZED_ID,
   type StudyCamera,
+  type StudyDeskPosition,
 } from "./study";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
 
@@ -542,6 +543,29 @@ export const actions = {
         }),
       };
     });
+  },
+
+  /** 書本落點（瞬態拿起不寫入；只在放下/回架時持久化，不改原櫃板排序）。 */
+  setBookPlace(cardId: string, place: "shelf" | "desk", desk?: StudyDeskPosition) {
+    const validDesk = !!desk &&
+      Number.isFinite(desk.x) &&
+      Number.isFinite(desk.z) &&
+      Number.isFinite(desk.yawDeg);
+    setState((s) => ({
+      ...s,
+      studyBooks: s.studyBooks.map((book) => {
+        if (book.cardId !== cardId) return book;
+        const next = { ...book, updatedAt: new Date().toISOString() };
+        if (place === "desk" && validDesk) {
+          next.place = "desk";
+          next.desk = { ...desk! };
+        } else {
+          next.place = "shelf";
+          delete next.desk;
+        }
+        return next;
+      }),
+    }));
   },
 
   /** 確保每張卡都有對應書本（缺則補建；1:1 檢查的安全網） */

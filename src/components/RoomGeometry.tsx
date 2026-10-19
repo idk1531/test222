@@ -7,7 +7,9 @@ import type { CanvasObjectData } from "./InfiniteCanvas";
 import type { CardData } from "./KnowledgeCardNode";
 import {
   CABINET,
+  CABINET_FOOTPRINT,
   DESK,
+  DESK_FOOTPRINT,
   FIDELITY,
   MARBLE_ROUGH,
   PALETTE,
@@ -306,7 +308,6 @@ export const RoomGeometry: React.FC<{
     const H = ROOM.height;
     const T = ROOM.wall;
     const wallZ = -D / 2; // 北牆外側
-    const wallInnerZ = -D / 2 + T;
     const inward = SHELF_INWARD; // 西牆 +1（牆 → 室內）
 
     // ---- 貼圖（程序化為退回底，照片 albedo 非阻塞覆蓋） ----
@@ -601,37 +602,40 @@ export const RoomGeometry: React.FC<{
     );
 
     // ---- L 形大理石檯面（沿窗 3.4 m ＋ 東側延伸 0.8 m ＋ 沿西牆回折 1.7 m） ----
-    const deskZ = wallInnerZ + DESK.depth / 2;
-    const deskX0 = SHELF.xBack; // 自西牆內面起（−2.84），與回折段對接成 L
-    const deskX1 = winR + DESK.wingWidth;
-    group.add(
-      box(deskX1 - deskX0, DESK.thickness, DESK.depth, deskMat, (deskX0 + deskX1) / 2, DESK.top - DESK.thickness / 2, deskZ)
-    );
+    const [mainDeskFootprint, sideDeskFootprint] = DESK_FOOTPRINT;
+    const deskZ = (mainDeskFootprint.minZ + mainDeskFootprint.maxZ) / 2;
+    const deskX0 = mainDeskFootprint.minX;
+    const deskX1 = mainDeskFootprint.maxX;
+    const mainDeskTop = box(deskX1 - deskX0, DESK.thickness, mainDeskFootprint.maxZ - mainDeskFootprint.minZ, deskMat, (deskX0 + deskX1) / 2, DESK.top - DESK.thickness / 2, deskZ);
+    mainDeskTop.userData.kind = "deskSurface";
+    group.add(mainDeskTop);
     // 沿西牆回折段：與沿窗段在桌面「對接」而非重疊（避免共面 z-fighting），
     // 兩段合計沿西牆 1.70 m（DESK.depth + 1.02）
-    const sideZ0 = deskZ + DESK.depth / 2;
-    const sideZ1 = wallInnerZ + DESK.sideDepth;
-    group.add(
-      box(
-        DESK.sideX,
-        DESK.thickness,
-        DESK.sideDepth,
-        deskMat,
-        SHELF.xBack + DESK.sideX / 2,
-        DESK.top - DESK.thickness / 2,
-        (sideZ0 + sideZ1) / 2
-      )
+    const sideZ0 = sideDeskFootprint.minZ;
+    const sideZ1 = sideDeskFootprint.maxZ;
+    const sideDeskTop = box(
+      sideDeskFootprint.maxX - sideDeskFootprint.minX,
+      DESK.thickness,
+      sideZ1 - sideZ0,
+      deskMat,
+      (sideDeskFootprint.minX + sideDeskFootprint.maxX) / 2,
+      DESK.top - DESK.thickness / 2,
+      (sideZ0 + sideZ1) / 2
     );
+    sideDeskTop.userData.kind = "deskSurface";
+    group.add(sideDeskTop);
 
     // ---- 桌下落地深炭櫃（北側 4 門＋西側 2 門） ----
     const cabH = CABINET.height;
-    const cabZ0 = wallZ;
-    const cabZ1 = cabZ0 + CABINET.depth;
-    // 北向櫃自「西側回折櫃的東面」起，兩組櫃在轉角對接不互相穿插
-    const sideCabX0 = SHELF.xBack;
-    const sideCabX1 = SHELF.xBack + DESK.sideX - 0.08;
-    const cabX0 = sideCabX1;
-    const cabX1 = deskX1 - 0.12;
+    const [mainCabinetFootprint, sideCabinetFootprint] = CABINET_FOOTPRINT;
+    const cabZ0 = mainCabinetFootprint.minZ;
+    const cabZ1 = mainCabinetFootprint.maxZ;
+    // 北向櫃自「西側回折櫃的東面」起，兩組櫃在轉角對接不互相穿插。
+    // Footprint 來自 room3d.ts，幾何與玩家碰撞共用此真相。
+    const sideCabX0 = sideCabinetFootprint.minX;
+    const sideCabX1 = sideCabinetFootprint.maxX;
+    const cabX0 = mainCabinetFootprint.minX;
+    const cabX1 = mainCabinetFootprint.maxX;
     group.add(
       box(cabX1 - cabX0, cabH, CABINET.depth, charcoalMat, (cabX0 + cabX1) / 2, cabH / 2, (cabZ0 + cabZ1) / 2)
     );
@@ -641,8 +645,8 @@ export const RoomGeometry: React.FC<{
       group.add(box(doorW, cabH - 0.02, 0.018, doorMat, dx, cabH / 2, cabZ1 + 0.009));
     }
     // 西側回折段下的櫃體（2 門；比桌板內縮 0.08，南端對齊北向櫃前緣）
-    const sideCabZ0 = wallInnerZ + 0.02;
-    const sideCabZ1 = cabZ1;
+    const sideCabZ0 = sideCabinetFootprint.minZ;
+    const sideCabZ1 = sideCabinetFootprint.maxZ;
     group.add(
       box(sideCabX1 - sideCabX0, cabH, sideCabZ1 - sideCabZ0, charcoalMat, (sideCabX0 + sideCabX1) / 2, cabH / 2, (sideCabZ0 + sideCabZ1) / 2)
     );

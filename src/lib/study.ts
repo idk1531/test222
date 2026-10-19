@@ -18,11 +18,21 @@ export interface StudyCategory {
   updatedAt: string;
 }
 
+export interface StudyDeskPosition {
+  x: number;
+  z: number;
+  yawDeg: number;
+}
+
 export interface StudyBookLayout {
   cardId: string; // 必須等於 CardData.id（1:1）
   categoryId: string | null; // null = 未分類
   orderInShelf: number; // 同櫃板內的排列序（0 起）
   spineColor?: string; // 未設定時依序回退：畫布節點 style.accentColor → 形狀預設色
+  /** v8.4 選填：缺省＝在書架上（舊資料完全不變） */
+  place?: "shelf" | "desk";
+  /** 僅 place === "desk" 有意義；房間座標系，公尺 */
+  desk?: StudyDeskPosition;
   updatedAt: string;
 }
 
@@ -278,6 +288,22 @@ export function packBoards<T>(
  * - studyLayout：補齊視角（夾限）與層數。
  * 舊資料不能掉：此函式只補齊、不刪除卡片內容。
  */
+function normalizeBookPlace(book: StudyBookLayout): StudyBookLayout {
+  if (book.place !== "desk") return book;
+  const desk = book.desk as StudyDeskPosition | undefined;
+  if (
+    desk &&
+    Number.isFinite(desk.x) &&
+    Number.isFinite(desk.z) &&
+    Number.isFinite(desk.yawDeg)
+  ) return book;
+
+  // Do not synthesize a desk coordinate: malformed/incomplete placement safely returns to the shelf.
+  const shelfBook = { ...book, place: "shelf" as const };
+  delete shelfBook.desk;
+  return shelfBook;
+}
+
 export function ensureStudyState<T extends StudyMigratable>(s: T): T & StudyStateFields {
   const now = new Date().toISOString();
 
@@ -314,7 +340,7 @@ export function ensureStudyState<T extends StudyMigratable>(s: T): T & StudyStat
   const rawBooks = Array.isArray(s.studyBooks) ? s.studyBooks.filter((b: any) => b && b.cardId) : [];
   const byCard = new Map<string, StudyBookLayout>();
   for (const b of rawBooks) {
-    if (!byCard.has(b.cardId)) byCard.set(b.cardId, b as StudyBookLayout);
+    if (!byCard.has(b.cardId)) byCard.set(b.cardId, normalizeBookPlace(b as StudyBookLayout));
   }
   const cards = Array.isArray(s.cards) ? s.cards.filter((c: any) => c && c.id) : [];
   const grouped = new Map<string, StudyBookLayout[]>();

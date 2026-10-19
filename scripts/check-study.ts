@@ -1,4 +1,5 @@
 // v8.0 書房驗證腳本（npx tsx scripts/check-study.ts）
+import assert from "node:assert/strict";
 // 檢查：①卡↔書 1:1 ②書本排序/分類不影響畫布座標 ③刪分類書回未分類 ④舊檔遷移補齊。
 // 不動審查引擎（inspect.ts）與種子資料（seedData.ts）；與 scripts/audit.ts 分開。
 import {
@@ -9,7 +10,9 @@ import {
   getExportPayload,
   resetToSeed,
 } from "../src/lib/store";
-import { clampCamera, ensureStudyState, UNCATEGORIZED_ID, UNCATEGORIZED_NAME } from "../src/lib/study";
+import { clampCamera, ensureStudyState, makeBookForCard, UNCATEGORIZED_ID, UNCATEGORIZED_NAME } from "../src/lib/study";
+import { computeShelfLayout } from "../src/lib/room3d";
+import { resolveAction } from "../src/lib/roomActions";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -23,6 +26,74 @@ function check(name: string, cond: boolean, detail = "") {
 
 const snapshotCanvas = () =>
   JSON.stringify(getState().canvasObjects.map((o) => ({ id: o.id, x: o.x, y: o.y })));
+
+// ---------- v8.4 落點選填欄位／放置 action ----------
+console.log("v8.4 書本落點選填欄位");
+{
+  const freshBook = makeBookForCard("v84-fresh");
+  check("新建書不寫 place（舊資料語意保持缺省）", !Object.prototype.hasOwnProperty.call(freshBook, "place"));
+  const malformed = ensureStudyState({
+    cards: [{ id: "legacy-desk", title: "舊卡" }],
+    studyBooks: [{ cardId: "legacy-desk", categoryId: null, orderInShelf: 7, place: "desk" }],
+  } as any);
+  check("desk 缺座標時防禦性退回 shelf 且不造預設值", malformed.studyBooks[0].place === "shelf" && !malformed.studyBooks[0].desk);
+
+  const legacy = ensureStudyState({
+    cards: [{ id: "legacy-shelf", title: "舊書" }, { id: "desk-book", title: "桌上書" }],
+    studyBooks: [
+      { cardId: "legacy-shelf", categoryId: null, orderInShelf: 0 },
+      { cardId: "desk-book", categoryId: null, orderInShelf: 1, place: "desk", desk: { x: 0, z: -1.9, yawDeg: 15 } },
+    ],
+  } as any);
+  const shelfLayout = computeShelfLayout(legacy.studyCategories, legacy.studyBooks, legacy.cards, () => "#8a6440");
+  const visibleShelfIds = shelfLayout.rows.flatMap((row) => row.boards.flatMap((board) => board.books.map((book) => book.cardId)));
+  check("缺 place 的舊書仍在架上", visibleShelfIds.includes("legacy-shelf"));
+  check("place=desk 的書不進 computeShelfLayout", !visibleShelfIds.includes("desk-book"));
+}
+{
+  resetToSeed();
+  const before = getState();
+  const book = before.studyBooks[0];
+  const originalOrder = book.orderInShelf;
+  const canvasBefore = JSON.stringify(before.canvasObjects.map((o) => ({ id: o.id, x: o.x, y: o.y, width: o.width, height: o.height })));
+  actions.setBookPlace(book.cardId, "desk", { x: 0.12, z: -1.92, yawDeg: 30 });
+  const onDesk = getState().studyBooks.find((b) => b.cardId === book.cardId)!;
+  check("放桌不改 orderInShelf", onDesk.orderInShelf === originalOrder);
+  check("放桌只增加選填 desk 欄位", onDesk.place === "desk" && onDesk.desk?.x === 0.12 && onDesk.desk.z === -1.92);
+  check("放桌不動畫布座標/尺寸", JSON.stringify(getState().canvasObjects.map((o) => ({ id: o.id, x: o.x, y: o.y, width: o.width, height: o.height }))) === canvasBefore);
+  actions.setBookPlace(book.cardId, "shelf");
+  const onShelf = getState().studyBooks.find((b) => b.cardId === book.cardId)!;
+  check("回架保留原 orderInShelf 並清除桌面位置", onShelf.orderInShelf === originalOrder && onShelf.place === "shelf" && !onShelf.desk);
+
+  const booksBeforePick = JSON.stringify(getState().studyBooks);
+  const canvasBeforePick = JSON.stringify(getState().canvasObjects.map((o) => ({ id: o.id, x: o.x, y: o.y, width: o.width, height: o.height })));
+  const pickAction = resolveAction("book", "KeyE", {
+    mode: "room", flying: false, held: null, seated: false, bookOnDesk: false,
+    hitDeskSurface: false, seatedCanStand: true, cardId: book.cardId,
+  });
+  check("拿起只返回瞬態 pickUp action", pickAction.type === "pickUp" && pickAction.cardId === book.cardId);
+  check("拿起不寫 store/orderInShelf/畫布座標", JSON.stringify(getState().studyBooks) === booksBeforePick && JSON.stringify(getState().canvasObjects.map((o) => ({ id: o.id, x: o.x, y: o.y, width: o.width, height: o.height }))) === canvasBeforePick);
+  resetToSeed();
+}
+
+// ---------- v8.4 桌上書開卡契約：只開 modal、不碰畫布/相機 ----------
+{
+  resetToSeed();
+  const book = getState().studyBooks[0];
+  actions.setBookPlace(book.cardId, "desk", { x: 0, z: -1.92, yawDeg: 0 });
+  const cameraBefore = structuredClone(getState().studyLayout.camera);
+  const canvasBefore = getState().canvasObjects.map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }));
+  const workMode = false;
+  const action = resolveAction("book", "click", {
+    mode: "room", flying: false, held: null, seated: false, bookOnDesk: true,
+    hitDeskSurface: false, seatedCanStand: true, cardId: book.cardId,
+  });
+  check("桌上書左鍵只產生 openCard(from=desk)", action.type === "openCard" && action.cardId === book.cardId && action.from === "desk");
+  assert.deepEqual(getState().studyLayout.camera, cameraBefore);
+  assert.deepEqual(getState().canvasObjects.map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height })), canvasBefore);
+  check("桌上開卡契約：camera/canvasObjects deep-equal 且 workMode=false", !workMode);
+  resetToSeed();
+}
 
 // ---------- ① 種子資料：卡↔書 1:1 ----------
 console.log("① 卡↔書 1:1");
@@ -98,6 +169,7 @@ console.log("④ 遷移補齊（模擬 v7.1 匯入）");
   } as any;
   const migrated = applySchemaMigrations(legacy);
   check("遷移後每張舊卡都有書", migrated.cards.every((c: any) => migrated.studyBooks.some((b: any) => b.cardId === c.id)));
+  check("舊檔無 place 的語意保持缺省", migrated.studyBooks.every((b: any) => !Object.prototype.hasOwnProperty.call(b, "place")));
   check("遷移後補上保留分類", migrated.studyCategories.some((c: any) => c.id === UNCATEGORIZED_ID));
   check("舊卡內容不掉", migrated.cards.length === 2 && migrated.cards[0].title === "舊卡A");
   check("shelfRows/視角欄位存在", typeof migrated.studyLayout.shelfRows === "number" && typeof migrated.studyLayout.camera.yaw === "number");
