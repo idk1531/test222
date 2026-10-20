@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { ArrowUp, ArrowDown, BookOpen, Library, RotateCcw, Tags, X } from "lucide-react";
+import { ArrowUp, ArrowDown, BookOpen, Eye, Hand, Library, RotateCcw, Tags, X } from "lucide-react";
 import { DeskWorkView } from "./DeskWorkView";
 import { StudyScene, type StudySceneApi } from "./StudyScene";
 import { RoomGeometry } from "./RoomGeometry";
@@ -12,6 +12,7 @@ import { HeldBook } from "./HeldBook";
 import { ShelfDecor } from "./ShelfDecor";
 import { RoomFurniture, type RoomFurnitureRig } from "./RoomFurniture";
 import { CameraRig, type CameraRigHandle, type CameraRigInteractionState, type RoomActionMeta } from "./CameraRig";
+import { VoxelCharacter } from "./VoxelCharacter";
 import { Joystick, type JoystickVector } from "./Joystick";
 import { StudyCategoryPanel } from "./StudyCategoryPanel";
 import type { InfiniteCanvasProps } from "./InfiniteCanvas";
@@ -22,10 +23,12 @@ import {
   DESK,
   detectQuality,
   shelfBookDims,
+  type PlayerPose,
   type SceneQuality,
   type ShelfBookPlacement,
+  type ViewMode,
 } from "@/lib/room3d";
-import { resolveSpineColor, desaturateColor, type StudyCamera, type StudyBookLayout } from "@/lib/study";
+import { DEFAULT_CAMERA, resolveSpineColor, desaturateColor, type StudyCamera, type StudyBookLayout } from "@/lib/study";
 import type { RoomAction } from "@/lib/roomActions";
 
 export type StudyRoomViewProps = Omit<InfiniteCanvasProps, "backgroundConfig" | "apiRef"> & {
@@ -69,6 +72,21 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   const [seated, setSeated] = useState(false);
   const [chairInTrigger, setChairInTrigger] = useState(false);
   const [pointerLocked, setPointerLocked] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("first");
+  const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
+  const [isTouch, setIsTouch] = useState(false);
+  const playerRef = useRef<PlayerPose>({
+    x: state.studyLayout.camera.x ?? 0.9,
+    z: state.studyLayout.camera.z ?? 1.55,
+    eyeY: state.studyLayout.camera.height ?? 1.5,
+    jumpOffset: 0,
+    yaw: (state.studyLayout.camera.yaw * Math.PI) / 180,
+    pitch: (state.studyLayout.camera.pitch * Math.PI) / 180,
+    moving: false,
+    onGround: true,
+    seated: false,
+    visible: false,
+  });
   const [roomHint, setRoomHint] = useState("");
   const hintTimeoutRef = useRef<number | null>(null);
   const cardModalOpen = !!props.cardModalOpen;
@@ -83,6 +101,13 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   }, []);
 
   useEffect(() => { cameraRef.current = state.studyLayout.camera; }, [state.studyLayout.camera]);
+  useEffect(() => {
+    const query = window.matchMedia("(pointer: coarse)");
+    const update = () => setIsTouch(query.matches || navigator.maxTouchPoints > 0);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
   useEffect(() => () => {
     if (hintTimeoutRef.current !== null) window.clearTimeout(hintTimeoutRef.current);
   }, []);
@@ -152,6 +177,14 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     setWorkMode(false);
     joystickRef.current = { x: 0, y: 0 };
   }, []);
+
+  const toggleViewMode = useCallback(() => {
+    const next: ViewMode = viewMode === "first" ? "third" : "first";
+    setViewMode(next);
+    showRoomHint(next === "third"
+      ? "第三人稱 · V／按鈕切回第一人稱"
+      : "第一人稱 · V／按鈕切換第三人稱");
+  }, [viewMode, showRoomHint]);
 
   const handleOpenCard = (card: CardData) => {
     setPreview(null);
@@ -227,6 +260,8 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     if (action.type === "noop") {
       if (interactionRef.current.heldCardId && (meta.key === "click" || meta.key === "KeyE") && !meta.hitDeskSurface) {
         showRoomHint("把準心對準桌面");
+      } else if (!interactionRef.current.heldCardId && meta.key === "KeyE" && meta.hit !== "book") {
+        showRoomHint("把準心對準書本再按拿起");
       }
       return;
     }
@@ -302,9 +337,10 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
             />
             <WindowLight api={api} />
             <Book3D api={api} layout={layout} deskBooks={deskBookModels} heldCardId={heldCardId} titleOf={titleOf} />
-            <HeldBook api={api} cardId={heldCardId} placement={heldBookPlacement} title={titleOf(heldCardId || "")} />
+            <HeldBook api={api} cardId={heldCardId} placement={heldBookPlacement} title={titleOf(heldCardId || "")} viewMode={viewMode} playerRef={playerRef} />
             <ShelfDecor api={api} layout={layout} />
             <RoomFurniture api={api} chairRigRef={chairRigRef} />
+            <VoxelCharacter api={api} playerRef={playerRef} viewMode={viewMode} />
             <CameraRig
               api={api}
               initialCamera={state.studyLayout.camera}
@@ -318,6 +354,10 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               onRoomAction={handleRoomAction}
               onPointerLockChange={setPointerLocked}
               onChairTriggerChange={setChairInTrigger}
+              onFocusChange={setFocusedCardId}
+              viewMode={viewMode}
+              onToggleView={toggleViewMode}
+              playerRef={playerRef}
             />
           </>
         )}
@@ -346,23 +386,39 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
       {/* 房間 HUD */}
       {!workMode && (
         <>
-          {pointerLocked && (
-            <div aria-hidden="true" className="study-room-reticle pointer-events-none absolute inset-0 z-30 grid place-items-center print:hidden">
-              <span className="h-[3px] w-[3px] rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.8),0_0_4px_rgba(0,0,0,0.8)]" />
-            </div>
-          )}
+          {/* 準心在房間模式一律顯示：桌機按 E 是以畫面中心射線拾取，
+              若只在 Pointer Lock 時顯示，玩家會不知道 E 到底對準哪裡。 */}
+          <div aria-hidden="true" className="study-room-reticle pointer-events-none absolute inset-0 z-30 grid place-items-center print:hidden">
+            <span className={`grid place-items-center rounded-full border border-white/55 bg-black/10 shadow-[0_0_4px_rgba(0,0,0,0.55)] ${pointerLocked || viewMode === "third" || isTouch ? "h-5 w-5" : "h-3.5 w-3.5"}`}>
+              <span className="h-[3px] w-[3px] rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.85)]" />
+            </span>
+          </div>
           <div
             className="absolute right-3 top-3 z-40 flex items-center gap-1.5 rounded-xl border border-stone-300/75 bg-[#faf5ea]/94 p-1.5 shadow-lg backdrop-blur-md sm:right-4 sm:top-4"
             data-no-orbit="true"
             onPointerDown={(e) => e.stopPropagation()}
           >
             <span className="hidden rounded-lg bg-white/70 px-2 py-1.5 text-[11px] font-medium text-stone-700 sm:inline">
-              拖曳環顧 · WASD 走動 · E 拿書
+              {viewMode === "third" ? "第三人稱" : "第一人稱"} · 拖曳環顧 · WASD · E 拿書 · V 視角
             </span>
+            {isTouch && (
+              <button
+                type="button"
+                onClick={toggleViewMode}
+                className="touch-target flex min-h-10 items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-stone-700 hover:bg-stone-200/70"
+                title={viewMode === "first" ? "切換第三人稱" : "切換第一人稱"}
+                aria-pressed={viewMode === "third"}
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>{viewMode === "first" ? "第三人稱" : "第一人稱"}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
-                const c = { ...cameraRef.current, yaw: -20, pitch: -2, x: 0.9, z: 1.55, height: 1.5 };
+                // 重置必須回到與首次進房相同的參考圖取景；
+                // 舊版在此硬編碼 yaw -20，與 DEFAULT_CAMERA 脫鉤。
+                const c = { ...cameraRef.current, ...DEFAULT_CAMERA };
                 persistCamera(c);
                 // Reset 透過事件交給 rig 保持相機內部狀態一致。
                 window.dispatchEvent(new CustomEvent("study-room-reset-camera", { detail: c }));
@@ -392,14 +448,79 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               <Tags className="h-3.5 w-3.5" /><span className="hidden sm:inline">分類</span>
             </button>
           </div>
-          <div className="absolute bottom-4 right-3 z-20 rounded-lg bg-[#faf5ea]/80 px-2.5 py-1.5 text-[10px] text-stone-600 shadow-sm backdrop-blur-sm sm:bottom-5 sm:right-5">
+          <div className="absolute bottom-4 right-3 z-20 hidden rounded-lg bg-[#faf5ea]/80 px-2.5 py-1.5 text-[10px] text-stone-600 shadow-sm backdrop-blur-sm sm:bottom-5 sm:right-5 sm:block">
             <span>{pointerLocked ? "準心已鎖定 · Esc 解除 · " : "桌機點擊鎖定準心 · Esc 解除 · "}</span>
-            點書本直接開卡 · Shift+點擊／右鍵／長按預覽 · 點紙面進工作視角
+            V 切換第一／第三人稱 · 點書本開卡 · Shift+點擊／右鍵／長按預覽
           </div>
           {roomHint
             ? <div role="status" aria-live="polite" className="pointer-events-none absolute bottom-14 left-1/2 z-40 -translate-x-1/2 rounded-lg bg-stone-900/90 px-3 py-2 text-xs font-semibold text-white shadow-lg">{roomHint}</div>
-            : heldCardId && <div className="pointer-events-none absolute bottom-14 left-1/2 z-30 -translate-x-1/2 rounded-lg border border-amber-300 bg-[#faf5ea]/92 px-3 py-2 text-xs font-semibold text-stone-800 shadow-lg">手持「{titleOf(heldCardId)}」· 對準桌面點擊／E 放下 · Q 回架</div>}
+            : heldCardId && <div className={`pointer-events-none absolute left-1/2 z-30 w-max max-w-[min(92vw,460px)] -translate-x-1/2 rounded-lg border border-amber-300 bg-[#faf5ea]/95 px-3 py-2 text-center text-xs font-semibold text-stone-800 shadow-lg ${isTouch ? "top-[max(76px,calc(env(safe-area-inset-top)+76px))] sm:top-auto sm:bottom-14" : "bottom-14"}`}>
+              <Hand className="mr-1 inline h-3.5 w-3.5" />
+              手持「{titleOf(heldCardId)}」· {isTouch ? "對準桌面按「放到桌上」· 「放回書架」可回架" : "對準桌面 E／點擊放下 · Q 回架"}
+            </div>}
+          {focusedCardId && !heldCardId && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="pointer-events-none absolute bottom-[max(196px,calc(env(safe-area-inset-bottom)+196px))] left-1/2 z-40 w-max max-w-[min(92vw,420px)] -translate-x-1/2 rounded-lg border border-amber-300 bg-[#faf5ea]/95 px-3 py-1.5 text-center text-xs font-semibold text-stone-800 shadow-lg sm:bottom-24"
+            >
+              《{titleOf(focusedCardId)}》· {isTouch ? "按右側「拿起」" : "E 拿起 · 點擊開卡"}
+            </div>
+          )}
+          {isTouch && !heldCardId && !focusedCardId && (
+            <div className="pointer-events-none absolute bottom-[max(196px,calc(env(safe-area-inset-bottom)+196px))] left-1/2 z-20 w-max max-w-[92vw] -translate-x-1/2 rounded-md bg-stone-900/45 px-2 py-1 text-center text-[10px] font-medium text-white/90">
+              拖曳環顧 · 搖桿走動 · 準心對書再按「拿起」
+            </div>
+          )}
           <Joystick onChange={(v) => { joystickRef.current = v; }} />
+          {isTouch && heldCardId && (
+            <div
+              data-no-orbit="true"
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute right-3 bottom-[max(96px,calc(env(safe-area-inset-bottom)+96px))] z-40 flex w-[116px] flex-col gap-1.5"
+            >
+              <p className="rounded-md bg-stone-900/70 px-2 py-1 text-center text-[10px] font-semibold text-white">手持中</p>
+              <button
+                type="button"
+                onClick={() => rigRef.current?.performRoomKey?.("KeyE")}
+                className="touch-target flex min-h-10 items-center justify-center gap-1 rounded-xl border border-amber-300 bg-[#faf5ea]/96 px-2 py-2 text-xs font-bold text-stone-800 shadow-lg"
+              >
+                <Hand className="h-4 w-4" />放到桌上
+              </button>
+              <button
+                type="button"
+                onClick={() => rigRef.current?.performRoomKey?.("KeyQ")}
+                className="touch-target flex min-h-10 items-center justify-center gap-1 rounded-xl border border-stone-300 bg-white/95 px-2 py-2 text-xs font-bold text-stone-700 shadow-lg"
+              >
+                <Library className="h-4 w-4" />放回書架
+              </button>
+            </div>
+          )}
+          {isTouch && !heldCardId && (
+            <button
+              type="button"
+              data-no-orbit="true"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => rigRef.current?.performRoomKey?.("KeyE")}
+              className="touch-target absolute right-3 bottom-[max(96px,calc(env(safe-area-inset-bottom)+96px))] z-40 flex min-h-10 w-[116px] items-center justify-center gap-1 rounded-xl border border-amber-300 bg-[#faf5ea]/95 px-3 py-2 text-xs font-bold text-stone-800 shadow-lg"
+              aria-label="拿起準心對準的書本"
+            >
+              <BookOpen className="h-4 w-4" />拿起
+            </button>
+          )}
+          {isTouch && !seated && (
+            <button
+              type="button"
+              data-no-orbit="true"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => rigRef.current?.jump?.()}
+              className="touch-target absolute bottom-[max(16px,env(safe-area-inset-bottom))] right-4 z-40 flex h-16 w-16 min-h-10 flex-col items-center justify-center rounded-full border border-white/80 bg-[#faf5ea]/90 text-stone-800 shadow-[0_8px_22px_rgba(40,30,20,.22)] backdrop-blur-sm active:bg-amber-100"
+              aria-label="跳躍"
+            >
+              <ArrowUp className="h-5 w-5" />
+              <span className="text-[10px] font-bold leading-none">跳躍</span>
+            </button>
+          )}
           {(chairInTrigger || seated) && (
             <button
               type="button"

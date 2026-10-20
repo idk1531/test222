@@ -7,8 +7,11 @@ import {
   MARBLE_ROUGH, MATCH_VIEW, PLAYER_RADIUS, ROOM, SHELF, SHELF_INWARD, SIT,
   SUN, TEXTURES, WINDOW, clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
-  resolveCollision, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump,
+  resolveCollision, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
+  yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
 } from "../src/lib/room3d";
+import { DEFAULT_CAMERA } from "../src/lib/study";
+import { CHARACTER, characterAnim } from "../src/lib/character";
 import { resolveAction, type HitKind, type InputKey, type RoomAction, type RoomActionCtx } from "../src/lib/roomActions";
 
 const edge = clampRoomPosition(100, -100);
@@ -128,21 +131,22 @@ assert.equal(match.z, MATCH_VIEW.z);
 assert.equal(ROOM.height, 2.75);
 assert.ok(WINDOW.sill > DESK.top && WINDOW.sill - DESK.top < 0.15, "窗台應略高於桌板（同一塊大理石墊高）");
 assert.ok(WINDOW.top - WINDOW.sill > 1.6, "窗洞高度需保留大面積採光");
-assert.equal(WINDOW.mullions, 1); // 單中挺
+assert.equal(WINDOW.mullions, 2); // v8.5 附圖：大窗分成三格
 assert.equal(WINDOW.bars, 0);
 assert.ok(TEXTURES.floor === "marble", "v8.3 地坪必須切到淺灰大理石");
-assert.ok(MARBLE_ROUGH.desk < 0.4 && MARBLE_ROUGH.floor < 0.4, "大理石需低粗糙度才有柔反射");
+assert.ok(MARBLE_ROUGH.desk < 0.45, "桌板需保留柔反射");
+assert.ok(MARBLE_ROUGH.floor > 0.5 && MARBLE_ROUGH.floor < 0.8, "地坪需比桌板更霧，避免變成整片鏡面");
 assert.equal(FIDELITY.shelfWallSign, -1);
-// 層板堆疊：最上層板頂 = 2.42，往下每 0.40 一排，至少 4 排
-assert.equal(shelfPlankCount(1), 4);
+// 層板堆疊：最上層板頂 = SHELF.height，往下每 0.335 一排，至少 5 排
+assert.equal(shelfPlankCount(1), 5);
 assert.equal(shelfPlankCount(6), 6);
-assert.ok(Math.abs(shelfPlankY(0, 4) - 2.42) < 1e-9);
-assert.ok(Math.abs(shelfPlankY(3, 4) - 1.22) < 1e-9);
-for (let r = 1; r < 4; r++) {
-  assert.ok(Math.abs(shelfPlankY(r - 1, 4) - shelfPlankY(r, 4) - SHELF.pitch) < 1e-9);
+assert.ok(Math.abs(shelfPlankY(0, 5) - SHELF.height) < 1e-9);
+assert.ok(Math.abs(shelfPlankY(4, 5) - (SHELF.height - 4 * SHELF.pitch)) < 1e-9);
+for (let r = 1; r < 5; r++) {
+  assert.ok(Math.abs(shelfPlankY(r - 1, 5) - shelfPlankY(r, 5) - SHELF.pitch) < 1e-9);
 }
-// 底層板高於腰高檯面（板下仍看得到檯面與矮擱板）
-assert.ok(shelfPlankY(3, 4) > SHELF.ledge.top + 0.2);
+// 最底層板仍高於腰高檯面（板下看得到檯面與矮擱板）
+assert.ok(shelfPlankY(4, 5) > SHELF.ledge.top + 0.1);
 // 書脊面在牆與室內之間，且朝 +X
 assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
 
@@ -235,6 +239,32 @@ assert.deepEqual(resolveAction("none", "KeyF", { ...baseActionCtx, seated: true,
 assert.deepEqual(resolveAction("none", "Space", { ...baseActionCtx, seated: true }), { type: "noop" });
 assert.deepEqual(resolveAction("book", "click", { ...baseActionCtx, mode: "work" }), { type: "noop" });
 assert.deepEqual(resolveAction("book", "click", { ...baseActionCtx, flying: true }), { type: "noop" });
+// 手持書：E 對準另一本書不得「換拿」；只有命中桌面才放下。Q 與準心無關。
+assert.deepEqual(
+  resolveAction("book", "KeyE", { ...baseActionCtx, held: actionCardId, hitDeskSurface: false }),
+  { type: "noop" },
+  "手持書時對準另一本書按 E 不可換拿"
+);
+assert.deepEqual(
+  resolveAction("book", "KeyE", { ...baseActionCtx, held: actionCardId, hitDeskSurface: true }),
+  { type: "putOnDesk", ...deskPointClamped, yawDeg: 30 },
+  "手持書時對準桌面按 E 需放下"
+);
+assert.deepEqual(
+  resolveAction("book", "KeyQ", { ...baseActionCtx, held: actionCardId }),
+  { type: "returnToShelf" },
+  "手持書時 Q 不受準心命中物件影響"
+);
+assert.deepEqual(
+  resolveAction("none", "KeyQ", { ...baseActionCtx, held: actionCardId }),
+  { type: "returnToShelf" },
+  "手持書時 Q 在空白處也要回架"
+);
+assert.deepEqual(
+  resolveAction("book", "KeyF", { ...baseActionCtx, held: actionCardId, seated: true }),
+  { type: "stand" },
+  "手持書且坐下時 F 仍需起立"
+);
 
 const outsideDesk = clampToDesk(100, -100);
 assert.ok(Math.abs(outsideDesk.x / DESK_SNAP - Math.round(outsideDesk.x / DESK_SNAP)) < 1e-9);
@@ -244,5 +274,150 @@ assert.ok(DESK_FOOTPRINT.some((r) =>
   outsideDesk.z >= r.minZ + 0.1 - 1e-9 && outsideDesk.z <= r.maxZ - 0.1 + 1e-9
 ), "clampToDesk must keep the book center inside the L-shaped tabletop");
 console.log("  ✓ resolveAction 35/35 cells, modifier/source variants, work/flight guards, and desk snapping");
+
+// ---- v8.5 視角方向回歸：往左拖曳＝視線往左（不得再反轉）----
+{
+  const sensitivity = CAMERA.lookSensitivity;
+  const startYaw = 0; // 望向 −Z（北）
+  const right = forwardFromYawPitch(yawFromLookDelta(startYaw, 120, sensitivity), 0);
+  const left = forwardFromYawPitch(yawFromLookDelta(startYaw, -120, sensitivity), 0);
+  assert.ok(right.x > 0.4, "往右拖曳時 forward.x 必須為正（視線轉向東／畫面右方）");
+  assert.ok(left.x < -0.4, "往左拖曳時 forward.x 必須為負（視線轉向西／畫面左方）");
+  // 畫面右方向 = forward × up，符號與「右拖＝右轉」一致
+  const screenRight = new THREE.Vector3().crossVectors(forwardFromYawPitch(startYaw, 0), new THREE.Vector3(0, 1, 0));
+  assert.ok(screenRight.x > 0.9, "yaw=0 時畫面右方必須是 +X");
+  assert.ok(screenRight.dot(right) > 0.4, "右拖後視線需落在原本的畫面右半邊");
+  // Pointer Lock 使用同一組符號（e.movementX 與拖曳 dx 同方向）
+  const locked = yawFromLookDelta(startYaw, 40, CAMERA.lockSensitivity);
+  const dragged = yawFromLookDelta(startYaw, 40, CAMERA.lookSensitivity);
+  assert.equal(Math.sign(locked), Math.sign(dragged));
+  // 往下拖／往下移＝視線往下（pitch 變小）
+  assert.ok(pitchFromLookDelta(0, 80, sensitivity) < 0);
+  assert.ok(pitchFromLookDelta(0, -80, sensitivity) > 0);
+  // 180° 轉身後左右仍然一致（不能只在 yaw=0 成立）
+  const turned = Math.PI;
+  // 面向南（+Z）時，畫面左方 = 東（+X）；往左拖曳必須轉向 +X。
+  const turnedLeft = forwardFromYawPitch(yawFromLookDelta(turned, -120, sensitivity), 0);
+  assert.ok(turnedLeft.x > 0, "轉身 180° 後往左拖曳，視線必須轉向面南時的左側（+X）");
+}
+console.log("  ✓ 視角方向回歸：拖曳與 Pointer Lock 左拖＝左轉、右拖＝右轉");
+
+// ---- v8.5 第三人稱相機：站在角色後方、遇牆縮短、不進家具 ----
+{
+  const pose = { x: 0, z: 0, eyeY: 1.5, jumpOffset: 0 };
+  const behind = resolveThirdPersonCamera(pose, 0, 0);
+  assert.ok(behind.z > 0.8, "面向北時第三人稱相機需退到南側（+Z）");
+  // over-the-shoulder：面向北時右肩在 +X，角色因此落在畫面左側而不擋住準心。
+  assert.ok(behind.x > 0.2 && behind.x < 0.6, "第三人稱相機需有右肩偏移");
+  assert.ok(behind.y > 1.8, "第三人稱相機需高於角色頭頂（不可貼在後腦）");
+  assert.ok(behind.y < ROOM.height, "第三人稱相機不可穿出天花板");
+  const nearWall = resolveThirdPersonCamera({ x: 0, z: 2.2, eyeY: 1.5, jumpOffset: 0 }, 0, 0);
+  const dist = Math.hypot(nearWall.x, nearWall.z - 2.2);
+  assert.ok(dist < THIRD_PERSON.distance + 1e-9);
+  assert.ok(!COLLIDERS.some((collider) =>
+    nearWall.y < collider.top + 0.12 &&
+    nearWall.x > collider.minX - 0.18 && nearWall.x < collider.maxX + 0.18 &&
+    nearWall.z > collider.minZ - 0.18 && nearWall.z < collider.maxZ + 0.18
+  ), "第三人稱相機不得落在書架／桌子等家具內");
+  assert.ok(nearWall.z < ROOM.depth / 2 - THIRD_PERSON.wallMargin + 1e-9, "第三人稱相機必須留在房間內");
+  // 面西時相機在東側；面南時相機在北側（符號不可反）
+  const faceWest = resolveThirdPersonCamera(pose, Math.PI / 2, 0);
+  assert.ok(faceWest.x < -0.5, "面西時相機退到東側前需先確認方向：right = forward × up");
+  const faceSouth = resolveThirdPersonCamera(pose, Math.PI, 0);
+  assert.ok(faceSouth.z < -0.5, "面南時相機需退到北側（−Z）");
+  // 牆角回歸：玩家貼在東南角時，相機不得被拉進角色頭部（實際預覽曾整個人物消失）。
+  const cornerPose = { x: 2.16, z: 1.84, eyeY: 1.55, jumpOffset: 0 };
+  const corner = resolveThirdPersonCamera(cornerPose, -Math.PI / 4, -0.1);
+  const cornerDist = Math.hypot(corner.x - cornerPose.x, corner.y - cornerPose.eyeY, corner.z - cornerPose.z);
+  assert.ok(cornerDist > 1.0, "牆角第三人稱仍需保持可視距離，不可貼在角色身上");
+  assert.ok(Math.hypot(corner.x - cornerPose.x, corner.z - cornerPose.z) > 0.25, "牆角相機至少要離開頭部水平 0.25 m");
+  assert.ok(corner.y > 2.0, "牆角需抬高相機越過角色頭頂");
+  assert.ok(corner.x > -ROOM.width / 2 && corner.x < ROOM.width / 2, "牆角相機仍需在房內（X）");
+  assert.ok(corner.z > -ROOM.depth / 2 && corner.z < ROOM.depth / 2, "牆角相機仍需在房內（Z）");
+  assert.ok(!COLLIDERS.some((collider) =>
+    corner.y < collider.top + 0.12 &&
+    corner.x > collider.minX - 0.18 && corner.x < collider.maxX + 0.18 &&
+    corner.z > collider.minZ - 0.18 && corner.z < collider.maxZ + 0.18
+  ), "牆角相機不得落在家具內");
+  // 初始機位必須留給第三人稱足夠後退空間（否則一按 V 就貼臉）。
+  const start = resolveThirdPersonCamera(
+    { x: DEFAULT_CAMERA.x!, z: DEFAULT_CAMERA.z!, eyeY: DEFAULT_CAMERA.height!, jumpOffset: 0 },
+    THREE.MathUtils.degToRad(DEFAULT_CAMERA.yaw),
+    THREE.MathUtils.degToRad(DEFAULT_CAMERA.pitch)
+  );
+  const startDist = Math.hypot(start.x - DEFAULT_CAMERA.x!, start.z - DEFAULT_CAMERA.z!);
+  assert.ok(startDist > 1.2, "初始相機位置需讓第三人稱退到 1.2 m 以上");
+}
+console.log("  ✓ 第三人稱相機：後方跟隨、牆面縮短、避開家具、牆角不貼臉");
+
+// ---- 第一人稱 view model：站直時不得佔住畫面，低頭才出現 ----
+{
+  const level = firstPersonViewVisibility(0, false);
+  assert.equal(level.arms, false, "站直時不顯示前臂");
+  assert.equal(level.chest, false, "站直時不顯示胸口");
+  const down = firstPersonViewVisibility(-0.35, false);
+  assert.equal(down.arms, true, "低頭時需看見手臂");
+  assert.equal(down.chest, false, "小幅低頭只露出手臂");
+  const deep = firstPersonViewVisibility(-0.75, false);
+  assert.equal(deep.chest, true, "低頭夠深時需看見軀幹");
+  assert.equal(firstPersonViewVisibility(0, true).arms, true, "手持書時需有手掌");
+  // 幾何上：水平視線時，胸口與手臂頂端都在垂直視錐之外。
+  // view model 掛在相機空間：pitch 不會移動它，因此「站直時看不到」只能靠 pitch 閘門；
+  // 幾何本身必須落在視錐內，否則低頭時會被裁掉（v8.6 前的實際 bug）。
+  const halfH = Math.tan(THREE.MathUtils.degToRad(CAMERA.fov / 2)) * Math.abs(VIEW_MODEL.chest.z);
+  assert.ok(VIEW_MODEL.chest.y + VIEW_MODEL.chest.height / 2 > -halfH, "胸口頂端必須在視錐內（低頭才看得見身體）");
+  assert.ok(VIEW_MODEL.chest.y - VIEW_MODEL.chest.height / 2 < -halfH, "胸口下緣要超出畫面，避免變成漂浮方塊");
+  const armHalfH = Math.tan(THREE.MathUtils.degToRad(CAMERA.fov / 2)) * Math.abs(VIEW_MODEL.arm.z);
+  assert.ok(VIEW_MODEL.arm.y + VIEW_MODEL.arm.width / 2 > -armHalfH, "手臂必須在視錐內（低頭才看得見手）");
+  assert.equal(firstPersonViewVisibility(0).arms, false, "站直（pitch 0）不得露出前臂");
+  assert.equal(firstPersonViewVisibility(0).chest, false, "站直（pitch 0）不得露出胸口");
+  assert.equal(firstPersonViewVisibility(-0.6).arms, true, "低頭必須露出前臂");
+  assert.equal(firstPersonViewVisibility(-0.6).chest, true, "低頭必須露出胸口");
+}
+console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看見手臂／軀幹");
+
+// ---- v8.5 跳躍閘門與角色動作 ----
+{
+  const base = { mode: "room" as const, flying: false, uiOpen: false, seated: false, onGround: true, typing: false };
+  assert.equal(canJump(base), true);
+  assert.equal(canJump({ ...base, seated: true }), false);
+  assert.equal(canJump({ ...base, typing: true }), false);
+  assert.equal(canJump({ ...base, mode: "work" }), false);
+  assert.equal(canJump({ ...base, flying: true }), false);
+  assert.equal(canJump({ ...base, uiOpen: true }), false);
+  assert.equal(canJump({ ...base, onGround: false }), false);
+  assert.ok(CHARACTER.eyeHeight > 1.4 && CHARACTER.eyeHeight < 1.75, "角色眼高需接近真人");
+  const idle = characterAnim({ phase: 0, moving: false });
+  const walkA = characterAnim({ phase: Math.PI / 2, moving: true });
+  const walkB = characterAnim({ phase: (3 * Math.PI) / 2, moving: true });
+  const jumpAnim = characterAnim({ phase: 0, moving: false, airborne: true });
+  const sitAnim = characterAnim({ phase: 0, moving: false, seated: true });
+  assert.ok(Math.abs(idle.leftLeg) < 0.1 && Math.abs(idle.rightLeg) < 0.1, "待機時雙腿接近直立");
+  assert.ok(walkA.leftLeg > 0.3 && walkA.rightLeg < -0.3, "行走時雙腿反相擺動");
+  assert.ok(walkB.leftLeg < -0.3 && walkB.rightLeg > 0.3, "行走半步後擺動方向反轉");
+  assert.ok(jumpAnim.bodyDrop === 0 && jumpAnim.leftLeg !== idle.leftLeg, "跳躍有獨立姿勢");
+  assert.ok(sitAnim.bodyDrop < 0, "坐下時身體下降");
+  assert.notDeepEqual(idle, sitAnim);
+  const holdAnim = characterAnim({ phase: 0, moving: false, holding: true });
+  assert.ok(holdAnim.rightArm < -0.9 && holdAnim.leftArm < -0.4, "手持書時雙臂需抬到胸前");
+  // 第一人稱手持書錨點：直式在畫面中央偏左、橫式在右下，且都在相機前方。
+  const portraitAnchor = firstPersonHeldAnchor(390 / 844, 58);
+  const landscapeAnchor = firstPersonHeldAnchor(1440 / 900, 62);
+  assert.ok(portraitAnchor.z < 0 && landscapeAnchor.z < 0);
+  assert.ok(portraitAnchor.x < 0, "直式手持書需偏左，避開右側操作按鈕");
+  assert.ok(landscapeAnchor.x > 0.1, "橫式手持書需偏右，不遮住準心");
+  assert.ok(Math.abs(portraitAnchor.y) < 0.3 && Math.abs(landscapeAnchor.y) < 0.3);
+  // 直式手機加寬視野，橫式維持 62°；手持書錨點要跟著 fov 走。
+  assert.equal(roomFovFor(1440 / 900), 62);
+  assert.ok(roomFovFor(390 / 844) > 74, "直式手機房間視野需加寬到 74° 以上");
+  const wideAnchor = firstPersonHeldAnchor(390 / 844, roomFovFor(390 / 844));
+  assert.ok(wideAnchor.x < 0 && wideAnchor.z < 0);
+  // 第三人稱手持書：右手在角色右側、胸前高度、身體前方。
+  const hand = thirdPersonHandOffset(1.62);
+  assert.ok(hand.x > 0.2, "右手需在角色右側");
+  assert.ok(hand.y > 0.9 && hand.y < 1.3, "右手需落在胸前高度");
+  assert.ok(hand.z < -0.3, "右手需在角色前方（-Z）");
+}
+console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
 console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產 / v8.3 西牆書牆＋對照視角＋層板堆疊 / v8.4 actions, AABB, jump, sit)");

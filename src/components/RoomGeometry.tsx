@@ -6,11 +6,13 @@ import type { StudySceneApi } from "./StudyScene";
 import type { CanvasObjectData } from "./InfiniteCanvas";
 import type { CardData } from "./KnowledgeCardNode";
 import {
+  BLINDS,
   CABINET,
   CABINET_FOOTPRINT,
   DESK,
   DESK_FOOTPRINT,
   FIDELITY,
+  LOOK,
   MARBLE_ROUGH,
   PALETTE,
   ROOM,
@@ -158,14 +160,6 @@ function drawMarble(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillStyle = "rgba(120,118,112,0.45)";
   ctx.fillRect(0, 0, w, 1.4);
   ctx.fillRect(w / 2, 0, 1.4, h);
-}
-
-/** 透光橫紋簾 alphaMap 退回底：3px 亮 / 6px 暗（與 blind-slats.jpg 同節奏） */
-function drawBlindSlats(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  ctx.fillStyle = "#1a1a1a";
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "#ffffff";
-  for (let y = 0; y < h; y += 9) ctx.fillRect(0, y, w, 3);
 }
 
 /** 板下暖光暈：由上（亮）到下（透明）的垂直漸層 */
@@ -346,61 +340,86 @@ export const RoomGeometry: React.FC<{
 
     // ---- 材質 ----
     const wallMat = new THREE.MeshStandardMaterial({
-      color: PALETTE.wall,
+      color: LOOK.wall,
       map: wallTex,
-      roughness: 0.96,
+      roughness: 0.95,
       metalness: 0,
-      envMapIntensity: 0.12, // 環境反射只留一點，維持暗部
+      envMapIntensity: 0.04, // 環境反射只留一點，避免牆面染上窗外綠色
     });
     // 書牆背牆：深褐微水泥（color 與程序化底相乘；照片 albedo 載入時 tint 拉回近白）
     const westMat = new THREE.MeshStandardMaterial({
-      color: "#6b5647",
+      color: LOOK.shelfBack,
       map: westTex,
       roughness: 1,
       metalness: 0,
-      envMapIntensity: 0.1,
+      envMapIntensity: 0.015,
     });
     const ceilMat = new THREE.MeshStandardMaterial({
-      color: PALETTE.cream,
+      color: "#f4f0e8",
       roughness: 1,
-      envMapIntensity: 0.12,
+      metalness: 0,
+      // 天花交給環境光；不要自發光，否則整片會變成奶油綠。
+      envMapIntensity: 0.015,
     });
     const floorMat = new THREE.MeshStandardMaterial({
-      color: floorIsMarble ? "#ffffff" : "#e8d7b8",
+      color: floorIsMarble ? LOOK.floorTint : "#e8d7b8",
       map: floorTex,
       roughness: floorIsMarble ? MARBLE_ROUGH.floor : 0.72,
       metalness: floorIsMarble ? MARBLE_ROUGH.metalness : 0.02,
     });
-    if (floorIsMarble) floorMat.envMapIntensity = MARBLE_ROUGH.envIntensityFloor;
+    if (floorIsMarble) floorMat.envMapIntensity = 0.04;
     // 桌板／窗台／西牆回折段：同一塊大理石（圖一的 L 形連續檯面）
     const deskMat = new THREE.MeshStandardMaterial({
-      color: "#ffffff",
+      color: LOOK.deskTint,
       map: marbleTex,
       roughness: MARBLE_ROUGH.desk,
       metalness: MARBLE_ROUGH.metalness,
       envMapIntensity: MARBLE_ROUGH.envIntensityDesk,
     });
-    const frameMat = new THREE.MeshStandardMaterial({ color: "#f7f3ea", roughness: 0.45 });
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: "#b8b0a3",
+      roughness: 0.5,
+      envMapIntensity: 0.15,
+    });
+    // 附圖的層板是近黑胡桃木：albedo 淡木紋 × 深色 tint
     const plankMat = new THREE.MeshStandardMaterial({
-      color: "#2f2822",
+      color: LOOK.shelfWood,
       map: plankTex,
-      roughness: 0.55,
+      roughness: 0.52,
+      metalness: 0.03,
+    });
+    // 書牆背板：打光的古銅色石材（附圖層板後方那一面被 LED 洗亮的牆）。
+    const shelfBackMat = new THREE.MeshStandardMaterial({
+      color: LOOK.shelfBack,
+      map: marbleTex,
+      roughness: 0.8,
+      metalness: 0,
+      emissive: new THREE.Color("#6a3f1c"),
+      emissiveIntensity: 0.3,
     });
     const charcoalMat = new THREE.MeshStandardMaterial({
-      color: "#35383b",
-      roughness: 0.62,
-      envMapIntensity: 0.35,
+      color: LOOK.cabinet,
+      roughness: 0.66,
+      envMapIntensity: 0.22,
     });
-    const doorMat = new THREE.MeshStandardMaterial({ color: "#3b3e42", roughness: 0.58 });
+    const doorMat = new THREE.MeshStandardMaterial({ color: LOOK.cabinetDoor, roughness: 0.6, envMapIntensity: 0.2 });
     const darkBarMat = new THREE.MeshStandardMaterial({ color: "#2b2b2b", roughness: 0.6 });
+    // 腰高長檯面：附圖是深色石材板（不是大理石），只有窗側檯面是淺灰石。
+    const ledgeTopMat = new THREE.MeshStandardMaterial({
+      color: LOOK.ledge,
+      map: plankTex,
+      roughness: 0.34,
+      metalness: 0.08,
+      envMapIntensity: 0.4,
+    });
     const initialPaperTexture = canvasTexture(640, 400, (c, w, h) =>
       drawDeskPreview(c, w, h, objects, cards)
     );
     paperTextureRef.current = initialPaperTexture;
     const paperMat = new THREE.MeshStandardMaterial({
-      color: "#ffffff",
+      color: "#efe6d6",
       map: initialPaperTexture,
-      roughness: 0.92,
+      roughness: 0.95,
     });
     disposers.push(() => {
       wallMat.dispose();
@@ -414,6 +433,8 @@ export const RoomGeometry: React.FC<{
       doorMat.dispose();
       darkBarMat.dispose();
       paperMat.dispose();
+      shelfBackMat.dispose();
+      ledgeTopMat.dispose();
       paperTextureRef.current?.dispose();
       paperTextureRef.current = null;
       paperRef.current = null;
@@ -428,50 +449,65 @@ export const RoomGeometry: React.FC<{
     ) => {
       disposers.push(attachPhotoMap(mat, key, { anisotropy: aniso, ...opts }));
     };
-    photo(wallMat, "plaster", { repeat: TEXTURES.repeat.wall });
+    photo(wallMat, "plaster", { repeat: TEXTURES.repeat.wall, tint: LOOK.wallTint });
     photo(westMat, "microcement", {
       repeat: TEXTURES.repeat.microcement,
-      tint: "#f4efe8", // 微水泥 albedo 已是成品深褐，避免再乘一次 #6b5647
+      tint: "#cbb49b", // 微水泥 albedo 已是深褐，牆面只需微微提亮
+    });
+    photo(shelfBackMat, "marble", {
+      repeat: [2.6, 1.2],
+      tint: LOOK.shelfBackTint, // 背板要亮：照片 albedo × 近白 tint
     });
     photo(
       floorMat,
       floorIsMarble ? "marble" : "oak",
       floorIsMarble
-        ? { repeat: TEXTURES.repeat.floorMarble, tint: "#f2f2ef" }
+        ? { repeat: TEXTURES.repeat.floorMarble, tint: LOOK.floorTint }
         : { repeat: TEXTURES.repeat.floorOak }
     );
-    photo(deskMat, "marble", { repeat: TEXTURES.repeat.desk, tint: "#ffffff" });
-    photo(plankMat, "walnut", { repeat: TEXTURES.repeat.shelf, tint: "#a8937d" });
+    photo(deskMat, "marble", { repeat: TEXTURES.repeat.desk, tint: LOOK.deskTint });
+    photo(plankMat, "walnut", { repeat: TEXTURES.repeat.shelf, tint: LOOK.shelfWoodTint });
 
     // ---- 地板／天花 ----
     group.add(box(W + 0.48, 0.1, D + 0.48, floorMat, 0, -0.05, 0, { cast: false }));
-    group.add(box(W + 0.48, 0.1, D + 0.48, ceilMat, 0, H + 0.05, 0, { receive: false }));
+    // 附圖：淺暖白平頂天花＋沿牆一圈窄燈槽＋兩個方形嵌燈。
+    // v8.6 不再做 16 cm 深的大面積上凹（實際預覽會出現突兀的白色斜帶）。
+    const ceilingOpts = { cast: false, receive: false } as const;
+    group.add(box(W + 0.4, 0.08, D + 0.4, ceilMat, 0, H + 0.04, 0, ceilingOpts));
+    // 牆頂收邊的細陰影線，讓平頂與牆面有交界（不是一整片發光）。
+    const shadowGapMat = new THREE.MeshStandardMaterial({ color: "#8b8378", roughness: 1 });
+    disposers.push(() => shadowGapMat.dispose());
+    for (const side of [-1, 1]) {
+      group.add(box(W + 0.2, 0.012, 0.012, shadowGapMat, 0, H - 0.006, side * (D / 2 - 0.006), { cast: false, receive: false }));
+      group.add(box(0.012, 0.012, D + 0.2, shadowGapMat, side * (W / 2 - 0.006), H - 0.006, 0, { cast: false, receive: false }));
+    }
 
     // ---- 發光材質：天花燈槽＋層板燈帶 ----
-    const coveMat = new THREE.MeshBasicMaterial({ color: "#ffdcae" });
-    const ledMat = new THREE.MeshBasicMaterial({ color: "#ffcf96" });
-    const lampMat = new THREE.MeshBasicMaterial({ color: "#ffe7c4" });
+    const coveMat = new THREE.MeshBasicMaterial({ color: "#ffddb2" });
+    const ledMat = new THREE.MeshBasicMaterial({ color: LOOK.ledSoft, toneMapped: false });
+    const lampMat = new THREE.MeshBasicMaterial({ color: LOOK.ledSoft, toneMapped: false });
     disposers.push(() => {
       coveMat.dispose();
       ledMat.dispose();
       lampMat.dispose();
     });
-    const coveY = H - 0.08;
-    const coveInset = 0.18; // 燈槽在牆頂退 0.18
-    group.add(box(W - 0.5, 0.024, 0.05, coveMat, 0, coveY, D / 2 - coveInset, { cast: false, receive: false }));
-    group.add(box(W - 0.5, 0.024, 0.05, coveMat, 0, coveY, -D / 2 + coveInset, { cast: false, receive: false }));
-    group.add(box(0.05, 0.024, D - 0.5, coveMat, W / 2 - coveInset, coveY, 0, { cast: false, receive: false }));
-    group.add(box(0.05, 0.024, D - 0.5, coveMat, -W / 2 + coveInset, coveY, 0, { cast: false, receive: false }));
+    // 燈槽：貼著牆頂、距牆 9 cm 的連續暖光，從下方只看到一條細亮線。
+    const coveY = H - 0.016;
+    const coveInset = 0.09;
+    group.add(box(W - 2 * coveInset, 0.008, 0.022, coveMat, 0, coveY, -D / 2 + coveInset, { cast: false, receive: false }));
+    group.add(box(W - 2 * coveInset, 0.008, 0.022, coveMat, 0, coveY, D / 2 - coveInset, { cast: false, receive: false }));
+    group.add(box(0.022, 0.008, D - 2 * coveInset, coveMat, W / 2 - coveInset, coveY, 0, { cast: false, receive: false }));
+    group.add(box(0.022, 0.008, D - 2 * coveInset, coveMat, -W / 2 + coveInset, coveY, 0, { cast: false, receive: false }));
 
-    // 2 個方形黑嵌燈（靠北窗側）
-    const lampMatBlack = new THREE.MeshStandardMaterial({ color: "#141414", roughness: 0.7 });
+    // 2 個方形嵌燈（靠北窗側），深色外框＋暖白發光面
+    const lampMatBlack = new THREE.MeshStandardMaterial({ color: "#2a2621", roughness: 0.75 });
     disposers.push(() => lampMatBlack.dispose());
     for (const [lx, lz] of [
-      [0.4, -0.6],
-      [1.5, 0.9],
+      [0.55, -0.75],
+      [-0.55, 1.15],
     ] as const) {
-      group.add(box(0.09, 0.012, 0.09, lampMatBlack, lx, H - 0.006, lz, { cast: false }));
-      group.add(box(0.05, 0.006, 0.05, lampMat, lx, H - 0.014, lz, { cast: false, receive: false }));
+      group.add(box(0.13, 0.014, 0.13, lampMatBlack, lx, H - 0.007, lz, { cast: false }));
+      group.add(box(0.085, 0.006, 0.085, lampMat, lx, H - 0.016, lz, { cast: false, receive: false }));
     }
 
     // ---- 牆體 ----
@@ -543,50 +579,92 @@ export const RoomGeometry: React.FC<{
     group.add(glass);
     disposers.push(() => glass.material.dispose());
 
-    // ---- 透光橫紋簾（圖一：紗簾蓋窗上段 42%、簾底深色桿） ----
-    const blindH = winH * 0.42;
+    // ---- 橫向百葉（附圖：上段遮光、下段透空；每片都是實體薄板，會投出條狀柔影） ----
+    const blindH = winH * BLINDS.cover;
     const blindW = WINDOW.width - 2 * f - 0.02;
     const blindTop = winY1 - f;
     const blindBottom = blindTop - blindH;
-    const slatTex = canvasTexture(64, 256, drawBlindSlats, { srgb: false });
-    slatTex.wrapS = slatTex.wrapT = THREE.RepeatWrapping;
-    slatTex.repeat.set(1, 0.22); // 1024 貼圖約 113 條 → 取 22% ≒ 25 條橫紋
-    disposers.push(() => slatTex.dispose());
-    const blindMat = new THREE.MeshStandardMaterial({
-      color: "#efe9dd",
-      roughness: 1,
+    const slatMat = new THREE.MeshStandardMaterial({
+      color: BLINDS.color,
+      roughness: 0.95,
       metalness: 0,
       transparent: true,
-      opacity: 0.62,
-      alphaMap: slatTex,
+      opacity: 0.94, // 半透光：窗外綠意會從簾片間透出來（附圖的柔亮百葉）
+      emissive: new THREE.Color("#fff3dd"),
+      emissiveIntensity: 0.04,
       side: THREE.DoubleSide,
-      emissive: new THREE.Color("#fff4dd"),
-      emissiveIntensity: 0.22,
-      depthWrite: false,
     });
-    disposers.push(() => blindMat.dispose());
-    if (FIDELITY.blind === "screen") {
-      group.add(
-        box(blindW, blindH, 0.012, blindMat, WINDOW.cx, blindBottom + blindH / 2, winZ + 0.12, {
-          cast: false,
-          receive: false,
-        })
-      );
-      // 注意：push 的是 attachPhotoMap 回傳的 dispose，不是「dispose 時才去載圖」
-      disposers.push(
-        attachPhotoMap(blindMat, "blind", {
-          anisotropy: aniso,
-          tileable: false,
-          srgb: false,
-          slot: "alphaMap",
-        })
-      );
-    } else {
-      // v8.2 退回：不透明布簾
-      const cloth = blindMat.clone();
-      cloth.alphaMap = null;
-      cloth.opacity = 0.95;
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: "#efe9dc",
+      roughness: 0.85,
+      emissive: new THREE.Color("#fff6e6"),
+      emissiveIntensity: 0.16,
+    });
+    disposers.push(() => {
+      slatMat.dispose();
+      bladeMat.dispose();
+    });
+    // 簾片：一片一片的薄板（桌機 22 片、手機 14 片），比 alphaMap 更接近附圖的立體感。
+    const blindGroup = new THREE.Group();
+    blindGroup.name = "window-blinds";
+    const slatCount = Math.max(10, Math.floor(blindH / BLINDS.slatPitch));
+    const slatStep = blindH / slatCount;
+    const slatGeometry = new THREE.BoxGeometry(blindW, BLINDS.slatThickness, BLINDS.slatDepth);
+    const slatTilt = THREE.MathUtils.degToRad(BLINDS.tiltDeg);
+    for (let i = 0; i < slatCount; i++) {
+      const slat = new THREE.Mesh(slatGeometry, slatMat);
+      slat.position.set(WINDOW.cx, blindBottom + slatStep * (i + 0.5), winZ + 0.12);
+      slat.rotation.x = slatTilt;
+      slat.castShadow = true;
+      slat.receiveShadow = false;
+      blindGroup.add(slat);
+    }
+    // 每 6 片加深一條細橫線：遠看就是附圖百葉的節奏（不額外增加 draw call）
+    const lineMat = new THREE.MeshStandardMaterial({ color: BLINDS.cordColor, roughness: 0.9 });
+    disposers.push(() => lineMat.dispose());
+    const lineGeometry = new THREE.BoxGeometry(blindW, 0.004, 0.002);
+    for (let i = BLINDS.cordEvery; i < slatCount; i += BLINDS.cordEvery) {
+      const line = new THREE.Mesh(lineGeometry, lineMat);
+      line.position.set(WINDOW.cx, blindBottom + slatStep * i, winZ + 0.152);
+      blindGroup.add(line);
+    }
+    disposers.push(() => lineGeometry.dispose());
+    // 三條垂直拉繩（穿過簾片）
+    const cordGeometry = new THREE.BoxGeometry(0.004, blindH, 0.004);
+    disposers.push(() => cordGeometry.dispose());
+    for (const k of [-0.32, 0, 0.32]) {
+      const cord = new THREE.Mesh(cordGeometry, lineMat);
+      cord.position.set(WINDOW.cx + k * blindW, blindBottom + blindH / 2, winZ + 0.15);
+      blindGroup.add(cord);
+    }
+    // 兩側垂直導軌＋簾片支撐線
+    for (const side of [-1, 1]) {
+      const guide = box(0.012, blindH, 0.03, bladeMat, WINDOW.cx + side * (blindW / 2 - 0.006), blindBottom + blindH / 2, winZ + 0.135, { cast: false, receive: false });
+      blindGroup.add(guide);
+    }
+    // 簾底深色底桿（附圖最明顯的水平深色線）
+    const railMat = new THREE.MeshStandardMaterial({ color: LOOK.valance, roughness: 0.5, metalness: 0.15 });
+    disposers.push(() => railMat.dispose());
+    blindGroup.add(
+      box(blindW + 0.03, BLINDS.railHeight, 0.06, railMat, WINDOW.cx, blindBottom - BLINDS.railHeight / 2, winZ + 0.13, {
+        cast: true,
+        receive: false,
+      })
+    );
+    // 簾盒（附圖窗頂深色橫帶）＋ 天花側收邊
+    blindGroup.add(
+      box(WINDOW.width + 0.08, 0.11, 0.2, railMat, WINDOW.cx, winY1 + 0.055, winZ + 0.14, {
+        cast: true,
+        receive: false,
+      })
+    );
+    group.add(blindGroup);
+    disposers.push(() => slatGeometry.dispose());
+    if (FIDELITY.blind === "cloth") {
+      // 退回 v8.2 的不透明布簾（同一位置整片蓋住）
+      const cloth = new THREE.MeshStandardMaterial({ color: "#efe9dd", roughness: 1 });
       disposers.push(() => cloth.dispose());
+      blindGroup.visible = false;
       group.add(
         box(blindW, blindH, 0.014, cloth, WINDOW.cx, blindBottom + blindH / 2, winZ + 0.12, {
           cast: false,
@@ -594,12 +672,6 @@ export const RoomGeometry: React.FC<{
         })
       );
     }
-    group.add(
-      box(blindW + 0.03, 0.026, 0.032, darkBarMat, WINDOW.cx, blindBottom, winZ + 0.128, {
-        cast: false,
-        receive: false,
-      })
-    );
 
     // ---- L 形大理石檯面（沿窗 3.4 m ＋ 東側延伸 0.8 m ＋ 沿西牆回折 1.7 m） ----
     const [mainDeskFootprint, sideDeskFootprint] = DESK_FOOTPRINT;
@@ -617,13 +689,38 @@ export const RoomGeometry: React.FC<{
       sideDeskFootprint.maxX - sideDeskFootprint.minX,
       DESK.thickness,
       sideZ1 - sideZ0,
-      deskMat,
+      ledgeTopMat,
       (sideDeskFootprint.minX + sideDeskFootprint.maxX) / 2,
       DESK.top - DESK.thickness / 2,
       (sideZ0 + sideZ1) / 2
     );
     sideDeskTop.userData.kind = "deskSurface";
     group.add(sideDeskTop);
+    // 附圖的檯面是厚石板的視覺：前緣加一條 7 cm 垂直封邊（同大理石），避免看起來像薄片。
+    group.add(
+      box(
+        deskX1 - deskX0,
+        0.1,
+        0.03,
+        deskMat,
+        (deskX0 + deskX1) / 2,
+        DESK.top - DESK.thickness - 0.05,
+        mainDeskFootprint.maxZ - 0.015,
+        { cast: true }
+      )
+    );
+    group.add(
+      box(
+        0.03,
+        0.1,
+        sideZ1 - sideZ0,
+        deskMat,
+        sideDeskFootprint.maxX - 0.015,
+        DESK.top - DESK.thickness - 0.05,
+        (sideZ0 + sideZ1) / 2,
+        { cast: true }
+      )
+    );
 
     // ---- 桌下落地深炭櫃（北側 4 門＋西側 2 門） ----
     const cabH = CABINET.height;
@@ -640,10 +737,19 @@ export const RoomGeometry: React.FC<{
       box(cabX1 - cabX0, cabH, CABINET.depth, charcoalMat, (cabX0 + cabX1) / 2, cabH / 2, (cabZ0 + cabZ1) / 2)
     );
     const doorW = (cabX1 - cabX0 - CABINET.gap * (CABINET.doors + 1)) / CABINET.doors;
+    // 櫃門縫：每片門以細縫分離，並在門板下緣留一道反光線（附圖的深色櫃體細節）
+    const gapMat = new THREE.MeshStandardMaterial({ color: "#191a19", roughness: 0.9 });
+    const kickMat = new THREE.MeshStandardMaterial({ color: "#26251f", roughness: 0.8 });
+    disposers.push(() => {
+      gapMat.dispose();
+      kickMat.dispose();
+    });
     for (let i = 0; i < CABINET.doors; i++) {
       const dx = cabX0 + CABINET.gap + doorW / 2 + i * (doorW + CABINET.gap);
       group.add(box(doorW, cabH - 0.02, 0.018, doorMat, dx, cabH / 2, cabZ1 + 0.009));
+      group.add(box(0.01, cabH - 0.03, 0.022, gapMat, dx + doorW / 2 + CABINET.gap / 2, cabH / 2, cabZ1 + 0.011, { cast: false }));
     }
+    group.add(box(cabX1 - cabX0, 0.055, 0.03, kickMat, (cabX0 + cabX1) / 2, 0.028, cabZ1 + 0.012, { cast: false }));
     // 西側回折段下的櫃體（2 門；比桌板內縮 0.08，南端對齊北向櫃前緣）
     const sideCabZ0 = sideCabinetFootprint.minZ;
     const sideCabZ1 = sideCabinetFootprint.maxZ;
@@ -659,17 +765,50 @@ export const RoomGeometry: React.FC<{
 
     // ---- 桌面紙面（畫布載體；房間模式顯示預覽，可點擊進入工作視角） ----
     const paper = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.2, DESK.depth - 0.24),
+      new THREE.PlaneGeometry(1.7, DESK.depth - 0.26),
       paperMat
     );
     paper.rotation.x = -Math.PI / 2;
     // 紙面靠桌左半（閃開窗台大理石與右側的筆電／小物／盆栽）
-    paper.position.set(-1.1, DESK.top + 0.001, deskZ + 0.06);
+    paper.position.set(-1.35, DESK.top + 0.001, deskZ + 0.03);
     paper.castShadow = false;
     paper.receiveShadow = true;
     paper.userData.kind = "deskCanvas";
     group.add(paper);
     paperRef.current = paper;
+
+    // ---- 附圖的地毯：椅子與書桌前一塊淺米色地毯（不參與 raycast） ----
+    {
+      const rugW = 2.55;
+      const rugD = 1.85;
+      const rugTex = canvasTexture(256, 192, (c, w, h) => {
+        c.fillStyle = "#b3a793";
+        c.fillRect(0, 0, w, h);
+        for (let i = 0; i < 3600; i++) {
+          c.fillStyle = Math.random() > 0.5 ? "rgba(255,250,240,0.05)" : "rgba(74,58,40,0.08)";
+          c.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+        }
+        c.strokeStyle = "rgba(92,76,56,0.35)";
+        c.lineWidth = 3;
+        c.strokeRect(8, 8, w - 16, h - 16);
+      });
+      const rugMat = new THREE.MeshStandardMaterial({
+        map: rugTex,
+        color: "#e0d4c0",
+        roughness: 0.99,
+        metalness: 0,
+      });
+      const rug = new THREE.Mesh(new THREE.PlaneGeometry(rugW, rugD), rugMat);
+      rug.rotation.x = -Math.PI / 2;
+      rug.position.set(0.05, 0.008, 0.6);
+      rug.receiveShadow = true;
+      rug.castShadow = false;
+      group.add(rug);
+      disposers.push(() => {
+        rugTex.dispose();
+        rugMat.dispose();
+      });
+    }
 
     // ---- 西牆書牆：懸浮薄層板（無側板／頂板／底座） ----
     const sx = SHELF.xBack;
@@ -698,11 +837,11 @@ export const RoomGeometry: React.FC<{
       );
       // 板下暖光暈（貼在背牆上，0.28 m 高）
       const glow = new THREE.Mesh(
-        new THREE.PlaneGeometry(plankLen - 0.1, 0.28),
+        new THREE.PlaneGeometry(plankLen - 0.06, 0.34),
         new THREE.MeshBasicMaterial({
           map: glowTex,
           transparent: true,
-          opacity: 0.55,
+          opacity: 0.5,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           side: THREE.DoubleSide,
@@ -710,7 +849,8 @@ export const RoomGeometry: React.FC<{
         })
       );
       glow.rotation.y = inward * (Math.PI / 2); // 面朝室內
-      glow.position.set(SHELF.xBack + inward * 0.006, py - SHELF.plank - 0.14, SHELF.z);
+      // 退到木作背板前 1 cm，避免與背板 z-fighting。
+      glow.position.set(SHELF.xBack + inward * 0.024, py - SHELF.plank - 0.17, SHELF.z);
       glow.castShadow = false;
       glow.receiveShadow = false;
       group.add(glow);
@@ -718,6 +858,66 @@ export const RoomGeometry: React.FC<{
         (glow.material as THREE.Material).dispose();
       });
     }
+
+    // ---- 書牆木作框架（附圖：頂封板＋兩端立板＋深色背板，整面像一體成形的木作） ----
+    const frameThickness = 0.045;
+    const frameDepth = SHELF.depth + 0.02;
+    const plankTop = shelfPlankY(0, planks);
+    // 頂封板拉到天花下方 3.5 cm；最上層書（22–26 cm）剛好收在封板下。
+    const frameTop = Math.min(ROOM.height - 0.035, plankTop + 0.14);
+    // 打光的石材背板：附圖層板之間是「被 LED 洗亮的石牆」，不是黑木。
+    group.add(
+      box(
+        0.014,
+        frameTop,
+        SHELF.width,
+        shelfBackMat,
+        sx + inward * 0.007,
+        frameTop / 2,
+        SHELF.z,
+        { cast: false }
+      )
+    );
+    group.add(
+      box(
+        frameDepth,
+        Math.max(0.06, frameTop - plankTop),
+        SHELF.width,
+        plankMat,
+        sx + inward * (frameDepth / 2),
+        (plankTop + frameTop) / 2,
+        SHELF.z,
+        { cast: true }
+      )
+    );
+    // 兩端立板落地：v8.5 只做到 1.18 m，書牆看起來像懸空層板架。
+    for (const zEnd of [SHELF.z - SHELF.width / 2, SHELF.z + SHELF.width / 2 - frameThickness]) {
+      group.add(
+        box(
+          frameDepth,
+          frameTop,
+          frameThickness,
+          plankMat,
+          sx + inward * (frameDepth / 2),
+          frameTop / 2,
+          zEnd + frameThickness / 2,
+          { cast: true }
+        )
+      );
+    }
+    // 頂封板下方的暖色洗牆燈條（附圖天花與書牆交界的柔光）
+    group.add(
+      box(
+        0.014,
+        0.02,
+        SHELF.width - 0.12,
+        ledMat,
+        sx + inward * (frameDepth - 0.02),
+        frameTop - 0.035,
+        SHELF.z,
+        { cast: false, receive: false }
+      )
+    );
 
     // ---- 腰高長檯面＋檯面下矮擱板（圖一左牆下半） ----
     if (FIDELITY.ledge) {
@@ -727,10 +927,35 @@ export const RoomGeometry: React.FC<{
           L.depth,
           L.thickness,
           L.z1 - L.z0,
-          plankMat,
+          ledgeTopMat,
           sx + inward * (L.depth / 2),
           L.top - L.thickness / 2,
           (L.z0 + L.z1) / 2
+        )
+      );
+      // 檯面前緣的近黑木作收邊（附圖的長檯面是石材板＋深色木封邊）
+      group.add(
+        box(
+          0.02,
+          L.thickness,
+          L.z1 - L.z0,
+          plankMat,
+          sx + inward * (L.depth - 0.01),
+          L.top - L.thickness / 2,
+          (L.z0 + L.z1) / 2
+        )
+      );
+      // 檯面下洗牆燈帶（附圖最亮的一條水平光）
+      group.add(
+        box(
+          0.012,
+          0.02,
+          L.z1 - L.z0 - 0.12,
+          ledMat,
+          sx + inward * (L.depth - 0.03),
+          L.top - L.thickness - 0.012,
+          (L.z0 + L.z1) / 2,
+          { cast: false, receive: false }
         )
       );
       // 與沿西牆 L 形檯面（0.78）之間的 14 cm 立面：同一塊大理石，讀成連續檯面的一階

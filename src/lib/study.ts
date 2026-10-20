@@ -81,12 +81,18 @@ export const UNCATEGORIZED_COLOR = "#a8a29e";
  * pitch 夾限 −70°～+40°（避免穿地／穿天花）。
  */
 export const CAMERA_LIMITS = { pitchMin: -70, pitchMax: 40 };
+/**
+ * v8.5：初始取景對齊附圖（站東南側、望向西北：左側書牆、右側窗景、桌面與椅子入鏡）。
+ * 只影響「第一次進書房」與「重置視角」；已存在的使用者相機不被覆寫。
+ */
 export const DEFAULT_CAMERA: StudyCamera = {
-  yaw: -20, // 望向窗景（略偏西）
-  pitch: -2,
-  x: 0.9,
-  z: 1.55,
-  height: 1.5,
+  // 附圖機位：站在房間南側偏東、面向西北，左側書牆＋右側窗同框。
+  // 不再貼東南角：第三人稱相機才有 1.8 m 以上的後退空間。
+  yaw: -35,
+  pitch: -8,
+  x: 0.78,
+  z: 0.86,
+  height: 1.55,
 };
 
 /** 分類預設色票（低飽和暖色系） */
@@ -366,7 +372,12 @@ export function ensureStudyState<T extends StudyMigratable>(s: T): T & StudyStat
   const num = (v: unknown, fallback: number) =>
     Number.isFinite(Number(v)) ? Number(v) : fallback;
   const camera = {
-    ...clampCamera(num(rawCam?.yaw, 0), num(rawCam?.pitch, 0)),
+    // 新使用者（沒有 rawCam）必須沿用 DEFAULT_CAMERA 的朝向，不能退回 yaw 0；
+    // 否則調整初始取景時只會改到常數、實際畫面永遠面向北牆。
+    ...clampCamera(
+      num(rawCam?.yaw, DEFAULT_CAMERA.yaw),
+      num(rawCam?.pitch, DEFAULT_CAMERA.pitch)
+    ),
     x: num(rawCam?.x, DEFAULT_CAMERA.x ?? 0.9),
     z: num(rawCam?.z, DEFAULT_CAMERA.z ?? 1.55),
     height: num(rawCam?.height, DEFAULT_CAMERA.height ?? 1.5),

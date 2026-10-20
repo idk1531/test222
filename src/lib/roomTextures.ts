@@ -25,6 +25,8 @@ export interface AttachOptions {
   tint?: string;
   /** 材質異向性過濾上限；一般傳 renderer.capabilities.getMaxAnisotropy() 的較小值 */
   anisotropy?: number;
+  /** 單張照片的取樣範圍（窗景只取庭園下緣，避免窗內看到一片深色樹冠） */
+  uv?: { repeat?: [number, number]; offset?: [number, number] };
   /**
    * true（預設）＝SRGBColorSpace（albedo）；
    * false＝NoColorSpace（alphaMap／遮罩類貼圖，v8.3 的橫紋簾與葉片剪影）。
@@ -76,6 +78,8 @@ export function attachPhotoMap(
       const wrap = opts.tileable === false ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
       tex.wrapS = tex.wrapT = wrap;
       if (opts.repeat) tex.repeat.set(opts.repeat[0], opts.repeat[1]);
+      if (opts.uv?.repeat) tex.repeat.set(opts.uv.repeat[0], opts.uv.repeat[1]);
+      if (opts.uv?.offset) tex.offset.set(opts.uv.offset[0], opts.uv.offset[1]);
       tex.needsUpdate = true;
       const slot = opts.slot === "alphaMap" ? "alphaMap" : "map";
       const old = mat[slot];
