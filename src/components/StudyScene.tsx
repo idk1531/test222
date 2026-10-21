@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   CAMERA,
+  roomFovFor,
   FIDELITY,
   type SceneQuality,
   projectToScreen,
@@ -78,28 +79,31 @@ export const StudyScene: React.FC<StudySceneProps> = ({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.22; // v8.3：圖一的亮窗／暗書牆高對比
+    renderer.toneMappingExposure = 0.96; // v8.6：中性曝光，保留木作暗部與窗光的層次
 
     // ---- scene / camera ----
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#e6ded2");
+    scene.background = new THREE.Color("#cfc8bc");
     // v8.3：大理石的柔反射——同一張窗外庭園圖做 PMREM envMap（手機跳過）。
     let disposeEnv: () => void = () => {};
     if (FIDELITY.envMap && !quality.mobile) {
-      // 全域環境反射：牆面與天花以 envMapIntensity 壓低，大理石另給 0.5／0.35
-      scene.environmentIntensity = 1;
+      // v8.5：環境貼圖只留給大理石的反應（0.45）。v8.3 的 1.0 會讓天花與牆面染上庭園的綠色。
+      scene.environmentIntensity = 0.12;
       disposeEnv = attachEnvironment(renderer, "garden", (env) => {
         scene.environment = env;
       });
     }
+    const initialAspect = container.clientWidth / container.clientHeight;
     const camera = new THREE.PerspectiveCamera(
-      CAMERA.fov,
-      container.clientWidth / container.clientHeight,
+      roomFovFor(initialAspect),
+      initialAspect,
       CAMERA.near,
       CAMERA.far
     );
     camera.position.set(0.9, 1.5, 1.55);
     camera.lookAt(0, 1.2, -2);
+    // 第一人稱手持書是 camera 的子物件；camera 必須在場景圖內才會被渲染。
+    scene.add(camera);
 
     const st = internalRef.current;
     const tick = (now: number) => {
@@ -129,6 +133,8 @@ export const StudyScene: React.FC<StudySceneProps> = ({
       if (w > 0 && h > 0) {
         renderer.setSize(w, h);
         camera.aspect = w / h;
+        // 直式手機需要更寬的垂直視野，否則只看到窗戶的一小角。
+        camera.fov = roomFovFor(camera.aspect);
         camera.updateProjectionMatrix();
       }
     });

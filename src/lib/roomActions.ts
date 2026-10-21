@@ -69,6 +69,18 @@ export function resolveAction(hit: HitKind, key: InputKey, ctx: RoomActionCtx): 
   // Flight and work mode intentionally accept no room actions.
   if (ctx.mode === "work" || ctx.flying) return NOOP;
 
+  // 坐下時 F 一律起立（即使手上拿著書、或準心對著另一本書）。
+  if (ctx.seated && key === "KeyF") return { type: "stand" };
+
+  // 手持書時的動作與「準心剛好打在手持書上」脫鉤：
+  // Q／右鍵／Shift＝回架，E／點擊＝只有對準桌面才放下。
+  // 舊版只要準心落在另一本書上，E 會直接換拿那一本（前一場實際預覽重現），
+  // 且 Q 依賴射線命中手持書，錯過就默默失敗。
+  if (ctx.held) {
+    if (key === "KeyQ" || key === "rightClick" || key === "shiftClick") return { type: "returnToShelf" };
+    if (key === "KeyE" || key === "click") return putOnDesk(ctx);
+  }
+
   switch (hit) {
     case "book":
       if (key === "click") return withCard("openCard", ctx.cardId, ctx);

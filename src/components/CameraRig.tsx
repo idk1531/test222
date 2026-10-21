@@ -14,8 +14,11 @@ import {
   CHAIR_APPROACH_RADIUS,
   DESK,
   DESK_FOOTPRINT,
+  canJump,
   easeInOutCubic,
   forwardFromYawPitch,
+  yawFromLookDelta,
+  pitchFromLookDelta,
   clampHeight,
   clampPitchRad,
   clampRoomPosition,
@@ -24,9 +27,15 @@ import {
   JUMP,
   PLAYER_RADIUS,
   resolveCollision,
+  resolveThirdPersonCamera,
+  roomFovFor,
   ROOM,
   SIT,
   stepJump,
+  THIRD_PERSON,
+  thirdPersonDistance,
+  type PlayerPose,
+  type ViewMode,
 } from "@/lib/room3d";
 import type { StudySceneApi } from "./StudyScene";
 import type { RoomFurnitureRig } from "./RoomFurniture";
@@ -60,6 +69,7 @@ interface Pose {
   x: number;
   z: number;
   height: number;
+  eyeHeight: number;
 }
 
 type CameraMode = "room" | "work";
@@ -68,6 +78,10 @@ export interface CameraRigHandle {
   enterWorkView: () => void;
   exitWorkView: () => void;
   interactWithChair?: () => void;
+  /** 與 Space 相同的跳躍（手機跳躍按鈕共用同一條路徑）。 */
+  jump?: () => void;
+  /** 手機情境按鈕：以畫面中央準心觸發房間按鍵（E＝拿起／放下、Q＝回架）。 */
+  performRoomKey?: (key: InputKey) => void;
   mode: CameraMode;
   flying: boolean;
 }
@@ -90,7 +104,13 @@ export const CameraRig: React.FC<{
   onRoomAction: (action: RoomAction, meta: RoomActionMeta) => void;
   onPointerLockChange?: (locked: boolean) => void;
   onChairTriggerChange?: (inTrigger: boolean) => void;
-}> = ({ api, initialCamera, joystickRef, onEnterWork, onExitWork, rigRef, persistCamera, interactionRef, chairRigRef, onRoomAction, onPointerLockChange, onChairTriggerChange }) => {
+  /** 準心目前對到的資料書（給「E 拿起」提示用；null = 沒有） */
+  onFocusChange?: (cardId: string | null) => void;
+  /** 第一／第三人稱；只影響相機與人物呈現，不寫入 schema。 */
+  viewMode?: ViewMode;
+  onToggleView?: () => void;
+  playerRef?: React.MutableRefObject<PlayerPose>;
+}> = ({ api, initialCamera, joystickRef, onEnterWork, onExitWork, rigRef, persistCamera, interactionRef, chairRigRef, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, viewMode = "first", onToggleView, playerRef }) => {
   const camera = api.camera;
   const initialPosition = clampRoomPosition(initialCamera.x ?? 0.9, initialCamera.z ?? 1.55);
   const stateRef = useRef({
@@ -108,7 +128,15 @@ export const CameraRig: React.FC<{
     flying: false,
   });
   const keysRef = useRef(new Set<string>());
-  const pointerRef = useRef<{ id: number; x: number; y: number; moved: boolean; longPressFired: boolean } | null>(null);
+  const pointerRef = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    longPressFired: boolean;
+  } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const roomPoseRef = useRef<Pose | null>(null);
   const flightRef = useRef<{
@@ -123,6 +151,9 @@ export const CameraRig: React.FC<{
   const actionCallbackRef = useRef(onRoomAction);
   const pointerLockCallbackRef = useRef(onPointerLockChange);
   const chairTriggerCallbackRef = useRef(onChairTriggerChange);
+  const focusCallbackRef = useRef(onFocusChange);
+  const focusCardRef = useRef<string | null>(null);
+  const lastFocusCheckRef = useRef(0);
   const previousChairTriggerRef = useRef(false);
   const interactWithChairRef = useRef<() => void>(() => {});
   const seatTransitionRef = useRef<{
@@ -139,14 +170,34 @@ export const CameraRig: React.FC<{
   const modeRef = useRef<CameraMode>("room");
   const flyingRef = useRef(false);
   const wasMovingRef = useRef(false);
+  const movingRef = useRef(false);
+  const viewModeRef = useRef<ViewMode>(viewMode);
+  const toggleViewRef = useRef(onToggleView);
+  const localPoseRef = useRef<PlayerPose | null>(null);
+  const poseRef = playerRef ?? localPoseRef;
+  const jumpRef = useRef<() => void>(() => {});
+  const performKeyRef = useRef<(key: InputKey) => void>(() => {});
   useEffect(() => {
     persistRef.current = persistCamera;
     callbackRef.current = { onEnterWork, onExitWork };
     actionCallbackRef.current = onRoomAction;
     pointerLockCallbackRef.current = onPointerLockChange;
     chairTriggerCallbackRef.current = onChairTriggerChange;
-  }, [persistCamera, onEnterWork, onExitWork, onRoomAction, onPointerLockChange, onChairTriggerChange]);
+    focusCallbackRef.current = onFocusChange;
+    toggleViewRef.current = onToggleView;
+  }, [persistCamera, onEnterWork, onExitWork, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, onToggleView]);
+  // View mode lives outside the schema; snapping once keeps the toggle from sweeping through the room.
+  const viewModeChangedRef = useRef(viewMode);
   const interactWithChair = () => interactWithChairRef.current();
+  const makeRigHandle = (flying: boolean): CameraRigHandle => ({
+    enterWorkView: () => beginFlight("work"),
+    exitWorkView: () => beginFlight("room"),
+    interactWithChair,
+    jump: () => jumpRef.current(),
+    performRoomKey: (key: InputKey) => performKeyRef.current(key),
+    mode: modeRef.current,
+    flying,
+  });
 
   const getPose = (): Pose => ({
     position: camera.position.clone(),
@@ -158,6 +209,7 @@ export const CameraRig: React.FC<{
     x: stateRef.current.x,
     z: stateRef.current.z,
     height: stateRef.current.height,
+    eyeHeight: stateRef.current.eyeHeight,
   });
 
   const applyPose = (p: Pose) => {
@@ -171,20 +223,74 @@ export const CameraRig: React.FC<{
       x: p.x,
       z: p.z,
       height: p.height,
-      eyeHeight: p.position.y - groundHeightAt(p.x, p.z) - stateRef.current.jumpOffset,
+      // 第三人稱的相機不在眼睛位置，直接沿用起飛前視高（v8.4 的回歸 pose 仍精確）。
+      eyeHeight: viewModeRef.current === "third"
+        ? p.eyeHeight
+        : p.position.y - groundHeightAt(p.x, p.z) - stateRef.current.jumpOffset,
       yaw: p.yaw,
       pitch: p.pitch,
     };
   };
 
-  const pointRoomCamera = () => {
+  /**
+   * 房間相機：第一人稱固定在眼睛；第三人稱退到角色後上方並平滑跟隨。
+   * 兩者共用同一 yaw/pitch（拖曳方向因此完全一致）。
+   */
+  const pointRoomCamera = (dt = 1 / 60, snap = false) => {
     const s = stateRef.current;
-    const forward = forwardFromYawPitch(s.yaw, s.pitch);
     camera.up.set(0, 1, 0);
-    camera.position.set(s.x, groundHeightAt(s.x, s.z) + s.eyeHeight + s.jumpOffset, s.z);
-    camera.lookAt(camera.position.clone().add(forward));
+    const eyeY = groundHeightAt(s.x, s.z) + s.eyeHeight + s.jumpOffset;
+    // 房間視野依 aspect 調整（直式手機加寬），但座位轉場與飛行各自控制 fov。
+    if (!seatTransitionRef.current && !flightRef.current) {
+      const portrait = camera.aspect < THIRD_PERSON.portraitAspect;
+      const targetFov = roomFovFor(camera.aspect) + (viewModeRef.current === "third"
+        ? (portrait ? THIRD_PERSON.fovBoostPortrait : THIRD_PERSON.fovBoost)
+        : 0);
+      if (Math.abs(camera.fov - targetFov) > 0.01) {
+        camera.fov = targetFov;
+        camera.updateProjectionMatrix();
+      }
+    }
+    if (viewModeRef.current === "third" && modeRef.current === "room" && !flightRef.current) {
+      const portrait = camera.aspect < THIRD_PERSON.portraitAspect;
+      const target = resolveThirdPersonCamera(
+        { x: s.x, z: s.z, eyeY: s.eyeHeight, jumpOffset: s.jumpOffset },
+        s.yaw,
+        s.pitch,
+        thirdPersonDistance(camera.aspect, 1)
+      );
+      const desired = new THREE.Vector3(target.x, target.y, target.z);
+      if (snap) camera.position.copy(desired);
+      else camera.position.lerp(desired, 1 - Math.exp(-12 * Math.min(dt, 0.05)));
+      const forward = forwardFromYawPitch(s.yaw, s.pitch);
+      const right = new THREE.Vector3(Math.cos(s.yaw), 0, Math.sin(s.yaw));
+      // 角色放在畫面左側：視線目標往右肩外側偏，並降低到胸口高度，
+      // 讓頭到腳都在畫面內（只看得到後腦勺時，走路／跳躍動畫等於看不到）。
+      const look = new THREE.Vector3(
+        s.x,
+        eyeY - (portrait ? THIRD_PERSON.portraitLookDrop : THIRD_PERSON.lookDrop),
+        s.z
+      )
+        .addScaledVector(forward, portrait ? THIRD_PERSON.portraitLookAhead : THIRD_PERSON.lookAhead)
+        .addScaledVector(right, portrait ? THIRD_PERSON.portraitAimShoulder : THIRD_PERSON.aimShoulder);
+      camera.lookAt(look);
+      camera.updateMatrixWorld();
+      return;
+    }
+    camera.position.set(s.x, eyeY, s.z);
+    camera.lookAt(camera.position.clone().add(forwardFromYawPitch(s.yaw, s.pitch)));
     camera.updateMatrixWorld();
   };
+
+  // 切換視角時只調整相機，不動 schema／畫布；第一幀直接對位避免穿過房間。
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+    if (viewModeChangedRef.current === viewMode) return;
+    viewModeChangedRef.current = viewMode;
+    pointRoomCamera(1, true);
+    // pointRoomCamera 讀取 refs，不需列入依賴。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
 
   const storeCamera = () => {
     const s = stateRef.current;
@@ -229,7 +335,7 @@ export const CameraRig: React.FC<{
     flightRef.current = { start, end, startedAt: performance.now(), duration: 520, to };
     flyingRef.current = true;
     stateRef.current.flying = true;
-    if (rigRef) rigRef.current = { enterWorkView: () => beginFlight("work"), exitWorkView: () => beginFlight("room"), mode: modeRef.current, flying: true };
+    if (rigRef) rigRef.current = makeRigHandle(true);
   };
 
   useEffect(() => {
@@ -252,6 +358,15 @@ export const CameraRig: React.FC<{
       return held || tagged;
     };
 
+    const isPlayerPart = (object: THREE.Object3D) => {
+      let current: THREE.Object3D | null = object;
+      while (current) {
+        if (current.userData.kind === "player") return true;
+        current = current.parent;
+      }
+      return false;
+    };
+
     const raycast = (clientX?: number, clientY?: number, forceCenter = false) => {
       const rect = canvas.getBoundingClientRect();
       // Pointer Lock freezes client coordinates; the reticle and raycast both stay at screen center.
@@ -261,6 +376,8 @@ export const CameraRig: React.FC<{
         pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       }
+      // 第一／第三人稱都以「相機中心」為射線，畫面準心才會與實際可互動目標一致。
+      // 第三人稱的角色沒有 userData.kind，不會擋住後方的書本／桌面。
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(api.scene.children, true);
       let bookTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
@@ -268,6 +385,8 @@ export const CameraRig: React.FC<{
       let paperTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
       let deskTarget: THREE.Vector3 | null = null;
       for (const intersection of hits) {
+        // 相機就在角色軀幹內：玩家的 mesh 不可以參與互動射線（也不會回傳 dist 0 的雜訊）。
+        if (isPlayerPart(intersection.object)) continue;
         const object = findSemanticObject(intersection.object);
         if (!object) continue;
         const kind = object.userData.kind;
@@ -314,6 +433,44 @@ export const CameraRig: React.FC<{
       };
     };
 
+    /**
+     * 觸控用的「準心輔助」：手指無法像滑鼠一樣精準對到 3 cm 寬的書脊，
+     * 中心射線沒中就再取一圈小偏移，回傳最近的一本書（桌機不使用，避免誤抓）。
+     */
+    const raycastBookAssist = () => {
+      const center = raycast(undefined, undefined, true);
+      if (center.hit === "book" || center.hit === "heldBook") return center;
+      const offsets: Array<[number, number]> = [
+        [0, -0.07], [0, -0.14], [0, 0.07], [0, 0.14],
+        [-0.06, -0.07], [0.06, -0.07], [-0.06, 0.07], [0.06, 0.07],
+      ];
+      let best: ReturnType<typeof raycast> | null = null;
+      for (const [ox, oy] of offsets) {
+        pointer.set(ox, oy);
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects(api.scene.children, true);
+        for (const intersection of hits) {
+          const object = findSemanticObject(intersection.object);
+          if (!object) continue;
+          if (object.userData.kind !== "book" || !object.userData.cardId) continue;
+          // 只採用輔助圈內最近的一本，並保留桌面/椅子等資訊
+          if (!best) {
+            best = {
+              hit: "book",
+              cardId: object.userData.cardId as string,
+              bookOnDesk: object.userData.place === "desk",
+              hitDeskSurface: center.hitDeskSurface,
+              deskPoint: center.deskPoint,
+              worldPoint: { x: intersection.point.x, y: intersection.point.y, z: intersection.point.z },
+            };
+          }
+          break;
+        }
+        if (best) break;
+      }
+      return best ?? center;
+    };
+
     const beginSeatTransition = (toSeated: boolean) => {
       const current = stateRef.current;
       const shellMaterial = chairRigRef.current?.shellMaterial;
@@ -328,7 +485,7 @@ export const CameraRig: React.FC<{
         fromEyeY: current.eyeHeight,
         toEyeY: toSeated ? SIT.eyeY : clampHeight(current.height),
         fromFov: camera.fov,
-        toFov: toSeated ? SIT.fov : CAMERA.fov,
+        toFov: toSeated ? SIT.fov : roomFovFor(camera.aspect),
         fromOpacity,
         toOpacity: toSeated ? SIT.fadeOpacity : 1,
       };
@@ -360,7 +517,8 @@ export const CameraRig: React.FC<{
       hitOverride?: HitKind
     ) => {
       if (modeRef.current !== "room" || flyingRef.current || interactionRef.current.uiOpen) return;
-      const target = raycast(clientX, clientY, forceCenter);
+      const coarse = window.matchMedia("(pointer: coarse)").matches;
+      const target = forceCenter && coarse ? raycastBookAssist() : raycast(clientX, clientY, forceCenter);
       const heldId = interactionRef.current.heldCardId;
       const actionHit = key === "KeyF" && interactionRef.current.seated
         ? "none"
@@ -403,6 +561,23 @@ export const CameraRig: React.FC<{
       });
     };
     interactWithChairRef.current = () => performInteraction("KeyF", undefined, undefined, true, "chair");
+    const jumpIfPossible = () => {
+      const active = document.activeElement as HTMLElement | null;
+      // 輸入框聚焦時不跳（與鍵盤 Space 同一條規則）。
+      const typing = !!active?.closest("input,textarea,select,[contenteditable='true'],[role='textbox']");
+      if (!canJump({
+        mode: modeRef.current,
+        flying: flyingRef.current,
+        uiOpen: interactionRef.current.uiOpen,
+        seated: interactionRef.current.seated,
+        onGround: stateRef.current.onGround,
+        typing,
+      })) return;
+      stateRef.current.jumpVelocity = JUMP.velocity;
+      stateRef.current.onGround = false;
+    };
+    jumpRef.current = jumpIfPossible;
+    performKeyRef.current = (key: InputKey) => performInteraction(key, undefined, undefined, true);
 
     const requestRoomPointerLock = () => {
       if (
@@ -429,8 +604,14 @@ export const CameraRig: React.FC<{
         flyingRef.current ||
         interactionRef.current.uiOpen
       ) return;
-      stateRef.current.yaw -= e.movementX * CAMERA.lockSensitivity;
-      stateRef.current.pitch = clampPitchRad(stateRef.current.pitch - e.movementY * CAMERA.lockSensitivity, interactionRef.current.seated);
+      // Pointer Lock 與拖曳共用同一組符號：往右移＝視線往右（yaw 增加）。
+      stateRef.current.yaw = yawFromLookDelta(stateRef.current.yaw, e.movementX, CAMERA.lockSensitivity);
+      stateRef.current.pitch = pitchFromLookDelta(
+        stateRef.current.pitch,
+        e.movementY,
+        CAMERA.lockSensitivity,
+        interactionRef.current.seated
+      );
       pointRoomCamera();
       const now = performance.now();
       if (now - lastLockedPersistRef.current >= 150) {
@@ -450,15 +631,24 @@ export const CameraRig: React.FC<{
       const target = e.target as HTMLElement | null;
       if (target?.closest("[data-no-orbit],button,input,textarea,select,a,[contenteditable='true']")) return;
       if (modeRef.current !== "room" || flyingRef.current || interactionRef.current.uiOpen || (e.pointerType === "mouse" && e.button !== 0)) return;
-      const pointerState = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, longPressFired: false };
+      const pointerState = {
+        id: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        startX: e.clientX,
+        startY: e.clientY,
+        moved: false,
+        longPressFired: false,
+      };
       pointerRef.current = pointerState;
       canvas.setPointerCapture?.(e.pointerId);
       if (e.pointerType === "touch") {
+        // 長按＝預覽。只要手指有位移就取消，否則慢速拖曳會被誤判成長按而鎖住視角。
         longPressTimerRef.current = window.setTimeout(() => {
           if (pointerRef.current !== pointerState || pointerState.moved) return;
           pointerState.longPressFired = true;
           performInteraction("shiftClick", pointerState.x, pointerState.y);
-        }, 450);
+        }, 520);
       }
     };
     const onPointerMove = (e: PointerEvent) => {
@@ -467,15 +657,22 @@ export const CameraRig: React.FC<{
       if (!p || p.id !== e.pointerId || modeRef.current !== "room" || flyingRef.current) return;
       const dx = e.clientX - p.x;
       const dy = e.clientY - p.y;
-      if (Math.abs(dx) + Math.abs(dy) > 2) {
+      // 以「起始點」累計位移判定長按取消：低帧率裝置上指標事件可能整批延遲抵達，
+      // 若只看單一事件位移，長按計時器可能先一步觸發，視角就再也轉不動。
+      if (Math.abs(e.clientX - p.startX) + Math.abs(e.clientY - p.startY) > 1.5) clearLongPress();
+      if (Math.abs(dx) + Math.abs(dy) > 1.5) {
         p.moved = true;
-        clearLongPress();
       }
       p.x = e.clientX;
       p.y = e.clientY;
       if (p.moved && !p.longPressFired) {
-        stateRef.current.yaw -= dx * CAMERA.lookSensitivity;
-        stateRef.current.pitch = clampPitchRad(stateRef.current.pitch - dy * CAMERA.lookSensitivity, interactionRef.current.seated);
+        stateRef.current.yaw = yawFromLookDelta(stateRef.current.yaw, dx, CAMERA.lookSensitivity);
+        stateRef.current.pitch = pitchFromLookDelta(
+          stateRef.current.pitch,
+          dy,
+          CAMERA.lookSensitivity,
+          interactionRef.current.seated
+        );
         pointRoomCamera();
       }
     };
@@ -507,23 +704,34 @@ export const CameraRig: React.FC<{
       return !!el?.closest("input,textarea,select,[contenteditable='true'],[role='textbox']");
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
       if (
         modeRef.current !== "room" ||
         flyingRef.current ||
         interactionRef.current.uiOpen ||
-        isTypingTarget(e.target) ||
-        !!target?.closest("[data-no-orbit],button,a,select")
+        isTypingTarget(e.target)
       ) return;
+      // 只排除輸入框／contenteditable。HUD 按鈕被點擊後仍保留焦點，
+      // 若在這裡忽略所有 button，E／Q／V 會突然失效（實際預覽重現過）。
       const key = e.key.toLowerCase();
+      if (key === "v") {
+        if (e.repeat) return;
+        e.preventDefault();
+        toggleViewRef.current?.();
+        return;
+      }
+      // Space = 跳躍；與對準什麼物件無關（坐下時由 jumpIfPossible 擋掉）。
+      if (key === " ") {
+        if (e.repeat) return;
+        e.preventDefault();
+        jumpIfPossible();
+        return;
+      }
       const actionKey: InputKey | null = key === "e" ? "KeyE"
         : key === "q" ? "KeyQ"
         : key === "f" ? "KeyF"
-        : key === " " ? "Space"
         : null;
       if (actionKey) {
         if (e.repeat) return;
-        if (actionKey === "Space" && interactionRef.current.seated) return;
         e.preventDefault();
         performInteraction(actionKey, undefined, undefined, true);
         return;
@@ -629,7 +837,7 @@ export const CameraRig: React.FC<{
             callbackRef.current.onExitWork();
             storeCamera();
           }
-          if (rigRef) rigRef.current = { enterWorkView: () => beginFlight("work"), exitWorkView: () => beginFlight("room"), interactWithChair, mode: modeRef.current, flying: false };
+          if (rigRef) rigRef.current = makeRigHandle(false);
         }
         return;
       }
@@ -688,6 +896,7 @@ export const CameraRig: React.FC<{
       side += joy.x;
       const len = Math.hypot(forward, side);
       if (len > 1) { forward /= len; side /= len; }
+      movingRef.current = len > 0.02;
       if (len > 0.02) {
         wasMovingRef.current = true;
         const seatedNow = interactionRef.current.seated;
@@ -721,13 +930,44 @@ export const CameraRig: React.FC<{
           storeCamera();
         }
       }
+      const nowState = stateRef.current;
+      poseRef.current = {
+        x: nowState.x,
+        z: nowState.z,
+        eyeY: nowState.eyeHeight,
+        jumpOffset: nowState.jumpOffset,
+        yaw: nowState.yaw,
+        pitch: nowState.pitch,
+        moving: movingRef.current,
+        onGround: nowState.onGround,
+        seated: interactionRef.current.seated,
+        visible: modeRef.current === "room" && !flyingRef.current,
+        holding: !!interactionRef.current.heldCardId,
+      };
+      // 第三人稱每幀平滑跟隨；第一人稱只在移動/跳躍時重設相機（維持既有行為）。
+      if (viewModeRef.current === "third") pointRoomCamera(dt);
+      // 準心聚焦提示：每 120 ms 才做一次 raycast，避免拖慢手機。
+      const nowMs = performance.now();
+      if (nowMs - lastFocusCheckRef.current > 120) {
+        lastFocusCheckRef.current = nowMs;
+        let focused: string | null = null;
+        if (!interactionRef.current.uiOpen && !interactionRef.current.heldCardId) {
+          const coarse = window.matchMedia("(pointer: coarse)").matches;
+          const target = coarse ? raycastBookAssist() : raycast();
+          focused = target.hit === "book" ? target.cardId ?? null : null;
+        }
+        if (focused !== focusCardRef.current) {
+          focusCardRef.current = focused;
+          focusCallbackRef.current?.(focused);
+        }
+      }
       // 微弱日光/陰影外觀由固定光源負責；此處只維持時間供其他效果使用。
       void t;
     });
 
     // 初始化：以持久化位置/朝向還原相機
     pointRoomCamera();
-    if (rigRef) rigRef.current = { enterWorkView: () => beginFlight("work"), exitWorkView: () => beginFlight("room"), interactWithChair, mode: "room", flying: false };
+    if (rigRef) rigRef.current = makeRigHandle(false);
 
     return () => {
       removeFrame();

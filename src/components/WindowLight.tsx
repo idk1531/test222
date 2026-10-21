@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
-import { AMBIENT, PALETTE, ROOM, SUN, WINDOW } from "@/lib/room3d";
+import { AMBIENT, PALETTE, ROOM, SHELF, SHELF_INWARD, SHELF_WASH, SUN, WINDOW, WINDOW_FILL } from "@/lib/room3d";
 import { attachPhotoMap } from "@/lib/roomTextures";
 
 /**
@@ -27,6 +27,8 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     g.add(hemi);
     const ambient = new THREE.AmbientLight(AMBIENT.ambientColor, AMBIENT.ambientIntensity);
     g.add(ambient);
+    // 天花不另外加點光源：近距離點光會在平頂打出不自然的光斑（實測），
+    // 亮度交給半球光與窗光。
 
     // 日光源放於窗洞內側少許，確保光線能穿過窗洞入室；窗框實體形成地板/桌面影條。
     const sun = new THREE.DirectionalLight(SUN.color, SUN.intensity);
@@ -46,74 +48,74 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     sun.shadow.radius = api.quality.mobile ? SUN.shadowRadius.mobile : SUN.shadowRadius.desktop;
     g.add(sun, sun.target);
 
+    // v8.5：窗外柔光補光（無陰影）。附圖是「大面亮窗把光灑進來」的柔和感，
+    // 不是單一硬直射光；手機只留一盞以省成本。
+    const fill = new THREE.DirectionalLight(WINDOW_FILL.color, api.quality.mobile ? WINDOW_FILL.intensityMobile : WINDOW_FILL.intensityDesktop);
+    fill.position.set(WINDOW_FILL.position.x, WINDOW_FILL.position.y, WINDOW_FILL.position.z);
+    fill.position.copy(WINDOW_FILL.position);
+    fill.target.position.copy(WINDOW_FILL.target);
+    fill.castShadow = false;
+    g.add(fill, fill.target);
+
+    // 嵌燈：向下投射的窄角 SpotLight，照亮桌面與椅子，避免點光源在天花打出白斑。
+    const downlightCount = api.quality.mobile ? 1 : 2;
+    for (let i = 0; i < downlightCount; i++) {
+      const spot = new THREE.SpotLight(
+        "#ffe4c2",
+        api.quality.mobile ? 0.5 : 0.72,
+        6.2,
+        Math.PI / 4.2,
+        0.92,
+        1.4
+      );
+      spot.position.set(-0.7 + i * 1.8, ROOM.height - 0.08, 0.15 + (i % 2) * 0.7);
+      spot.target.position.set(-0.9 + i * 1.6, 0, 1.1 + (i % 2) * 0.5);
+      spot.castShadow = false;
+      g.add(spot, spot.target);
+    }
+
+    // v8.5：書牆暖色洗牆光（附圖層板下的 LED 溢光）。
+    const washIntensity = api.quality.mobile ? SHELF_WASH.intensityMobile : SHELF_WASH.intensityDesktop;
+    for (const z of SHELF_WASH.z) {
+      const wash = new THREE.PointLight(SHELF_WASH.color, washIntensity, SHELF_WASH.distance, 2);
+      wash.position.set(SHELF.xBack + SHELF_INWARD * SHELF_WASH.xOffset, SHELF_WASH.y, z);
+      wash.castShadow = false;
+      g.add(wash);
+    }
+
     // ---- 窗外景片：天空遠景、遠樹冠、中景樹、近灌木、草地 ----
     // v8.3：窗景「近過曝」——純白底色＋toneMapped:false，讓窗外突破 1.0 拉開明暗對比
     const skyMat = new THREE.MeshBasicMaterial({ color: "#ffffff", toneMapped: false });
-    const sky = new THREE.Mesh(new THREE.PlaneGeometry(15, 7), skyMat);
-    sky.position.set(WINDOW.cx, 2.1, outsideZ - 3.1);
+    // v8.6：窗外要比室內亮一階（參考照的庭園是透光的晨霧綠），維持 toneMapped:false 直接拉高 albedo。
+    skyMat.color.setRGB(1.16, 1.2, 1.12);
+    // 以庭園照片作為主要窗景；尺寸與位置讓窗洞剛好看到「草坪＋綠籬＋樹林」，
+    // 不再用低面數球體擋在照片前面（實際預覽看起來像卡通樹）。
+    // v8.6：窗加寬到 4.9 m 後，原本 6 m 寬的景片不再覆蓋整個窗洞，
+    // 左側會露出空白（實際預覽是窗內一片死白）。景片必須比窗洞寬、也更高。
+    const sky = new THREE.Mesh(new THREE.PlaneGeometry(16, 8), skyMat);
+    sky.position.set(WINDOW.cx, 2.4, outsideZ - 1.2);
     g.add(sky);
     // v8.2：遠景換照片級庭園（單張、不平貼）。分層樹冠／灌木景片留在前方提供視差與投影。
     const skyDisposer = attachPhotoMap(skyMat, "garden", {
       tileable: false,
-      tint: "#ffffff",
+      tint: "#ffffff", // 晨霧庭園原圖已偏亮，不再壓暗
       anisotropy: Math.min(8, api.renderer.capabilities.getMaxAnisotropy()),
+      // 只取原圖下緣（草坪＋綠籬＋樹林），窗外才不會對到整片深色樹冠。
+      uv: { repeat: [1, 0.58], offset: [0, 0.02] },
     });
     disposers.push(skyDisposer);
-    const farMat = new THREE.MeshStandardMaterial({ color: "#9dbb98", roughness: 1 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: "#6f966b", roughness: 0.92 });
-    const leafLight = new THREE.MeshStandardMaterial({ color: "#91ae7e", roughness: 0.95 });
-    const shrubMat = new THREE.MeshStandardMaterial({ color: "#769369", roughness: 0.96 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: "#8a6949", roughness: 0.95 });
-    const grassMat = new THREE.MeshStandardMaterial({ color: "#b0b88b", roughness: 0.94 });
-    const groundMat = new THREE.MeshStandardMaterial({ color: "#c7c19b", roughness: 0.98 });
+    const farMat = new THREE.MeshStandardMaterial({ color: "#8fb08a", roughness: 1 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: "#5d8459", roughness: 0.92 });
+    const leafLight = new THREE.MeshStandardMaterial({ color: "#7d9e6a", roughness: 0.95 });
+    const shrubMat = new THREE.MeshStandardMaterial({ color: "#63835a", roughness: 0.96 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: "#7d5f42", roughness: 0.95 });
+    const grassMat = new THREE.MeshStandardMaterial({ color: "#9aa87a", roughness: 0.94 });
+    const groundMat = new THREE.MeshStandardMaterial({ color: "#b6b291", roughness: 0.98 });
     const mats = [farMat, leafMat, leafLight, shrubMat, trunkMat, grassMat, groundMat];
     disposers.push(() => { skyMat.dispose(); mats.forEach((m) => m.dispose()); });
 
-    // 背景樹帶（遠景淡化）
-    for (let i = 0; i < 9; i++) {
-      const x = WINDOW.cx - 4.2 + i * 1.05;
-      const y = 1.1 + Math.sin(i * 1.7) * 0.16;
-      const r = 0.52 + (i % 3) * 0.11;
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), farMat);
-      mesh.position.set(x, y, outsideZ - 2.1 - (i % 2) * 0.24);
-      mesh.scale.set(1.3, 0.82, 0.42);
-      mesh.castShadow = false;
-      g.add(mesh);
-    }
-    // 庭園樹：枝幹＋分層樹冠（柔和色差）
-    for (let i = 0; i < 5; i++) {
-      const x = WINDOW.cx - 2.8 + i * 1.38;
-      const baseY = -0.02;
-      const tall = 1.55 + (i % 3) * 0.25;
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.075, tall * 0.68, 7), trunkMat);
-      trunk.position.set(x, baseY + tall * 0.32, outsideZ - 0.35);
-      trunk.castShadow = false;
-      g.add(trunk);
-      for (let j = 0; j < 4; j++) {
-        const r = 0.38 + ((i + j) % 3) * 0.08;
-        const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), j % 2 ? leafMat : leafLight);
-        crown.position.set(
-          x + Math.sin(j * 2.4 + i) * 0.27,
-          baseY + tall * 0.62 + Math.cos(j * 1.8) * 0.21,
-          outsideZ - 0.34 - (j % 2) * 0.16
-        );
-        crown.scale.set(1.1, 0.82, 0.85);
-        crown.castShadow = false;
-        g.add(crown);
-      }
-    }
-    // 近景灌木與草地分層
-    for (let i = 0; i < 13; i++) {
-      const x = WINDOW.cx - 3.2 + i * 0.52;
-      const shrub = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.26 + (i % 3) * 0.045, 1),
-        i % 2 ? shrubMat : leafMat
-      );
-      shrub.position.set(x, 0.22 + (i % 3) * 0.055, outsideZ + 0.05);
-      shrub.scale.set(1.4, 0.72, 0.62);
-      shrub.castShadow = false;
-      g.add(shrub);
-    }
+    // 窗外只留照片景片＋最底層草地；照片本身有足夠的層次與視差，
+    // 低面數樹冠會破壞附圖的寫實感（實測會擋住整片窗景）。
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(14, 9), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(WINDOW.cx, -0.03, outsideZ + 0.6);
@@ -132,7 +134,7 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
         const material = new THREE.MeshBasicMaterial({
           color: PALETTE.sun,
           transparent: true,
-          opacity: 0.075 - i * 0.012,
+          opacity: 0.032 - i * 0.006,
           depthWrite: false,
           side: THREE.DoubleSide,
         });
@@ -145,7 +147,7 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
       }
       g.add(shafts);
       // ≤200 顆低亮塵埃粒子，只桌機開啟
-      const count = 140;
+      const count = 70;
       const positions = new Float32Array(count * 3);
       for (let i = 0; i < count; i++) {
         positions[i * 3] = WINDOW.cx - 1.6 + Math.random() * 2.6;
@@ -158,10 +160,12 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
         color: "#fff3d6",
         size: 0.012,
         transparent: true,
-        opacity: 0.34,
+        opacity: 0.18,
         depthWrite: false,
       });
       const dust = new THREE.Points(geo, mat);
+      // 粒子只用來做光柱塵埃，不參與 raycast（否則相機旁會出現大量距離 0 的命中）。
+      dust.raycast = () => {};
       g.add(dust);
       disposers.push(() => { geo.dispose(); mat.dispose(); });
       const unbind = api.addFrameCallback((_dt, t) => {

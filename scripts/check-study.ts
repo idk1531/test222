@@ -10,7 +10,7 @@ import {
   getExportPayload,
   resetToSeed,
 } from "../src/lib/store";
-import { clampCamera, ensureStudyState, makeBookForCard, UNCATEGORIZED_ID, UNCATEGORIZED_NAME } from "../src/lib/study";
+import { DEFAULT_CAMERA, clampCamera, ensureStudyState, makeBookForCard, UNCATEGORIZED_ID, UNCATEGORIZED_NAME } from "../src/lib/study";
 import { computeShelfLayout } from "../src/lib/room3d";
 import { resolveAction } from "../src/lib/roomActions";
 
@@ -173,7 +173,9 @@ console.log("④ 遷移補齊（模擬 v7.1 匯入）");
   check("遷移後補上保留分類", migrated.studyCategories.some((c: any) => c.id === UNCATEGORIZED_ID));
   check("舊卡內容不掉", migrated.cards.length === 2 && migrated.cards[0].title === "舊卡A");
   check("shelfRows/視角欄位存在", typeof migrated.studyLayout.shelfRows === "number" && typeof migrated.studyLayout.camera.yaw === "number");
-  check("舊相機自動補走動位置與視高", migrated.studyLayout.camera.x === 0.9 && migrated.studyLayout.camera.z === 1.55 && migrated.studyLayout.camera.height === 1.5);
+  check("舊相機自動補走動位置與視高", migrated.studyLayout.camera.x === DEFAULT_CAMERA.x && migrated.studyLayout.camera.z === DEFAULT_CAMERA.z && migrated.studyLayout.camera.height === DEFAULT_CAMERA.height);
+  // 回歸：沒有 rawCam 時 yaw/pitch 也必須沿用 DEFAULT_CAMERA（曾誤用 0，導致永遠面向北牆）。
+  check("新使用者的初始 yaw/pitch 對齊參考圖", migrated.studyLayout.camera.yaw === DEFAULT_CAMERA.yaw && migrated.studyLayout.camera.pitch === DEFAULT_CAMERA.pitch);
   const wrapped = clampCamera(725, -90);
   check("yaw 360° 連續正規化、pitch 限制 −70°", wrapped.yaw === 5 && wrapped.pitch === -70);
   console.log(`  （遷移 ${migrated.cards.length} 張卡 → ${migrated.studyBooks.length} 本書、${migrated.studyCategories.length} 個分類）`);
