@@ -901,25 +901,32 @@ export function firstPersonViewVisibility(pitch: number, holding = false): { arm
  * 讓角色仍在畫面中，而不是把相機塞進角色後腦（實際預覽會整個人物消失）。
  */
 export const THIRD_PERSON = {
-  distance: 2.35,
-  minDistance: 1.05,
-  rise: 0.55,
-  shoulder: 0.36,
-  lookAhead: 1.4,
+  distance: 2.5,
+  // v8.6：1.05 m 時人物後腦會佔掉畫面中央一大塊（實際預覽），退到 1.45 m 才看得到全身。
+  minDistance: 1.5,
+  rise: 0.72,
+  shoulder: 0.4,
+  // 視線目標再往右、往前帶：角色因此更靠畫面左側，不會擋住桌面與窗。
+  lookAhead: 1.75,
   wallMargin: 0.24,
   /** 直式手機（aspect < 0.85）拉遠：窄視野下角色才不會佔滿畫面 */
-  portraitDistance: 2.95,
+  portraitDistance: 3.0,
   portraitAspect: 0.85,
   /** 貼牆時的抬高階梯（公尺）：越高越能越過角色頭頂看前方 */
   jamLift: [0.42, 0.78, 1.12],
   /** 第三人稱額外視野（度）：角色與房間能同時入鏡，第一人稱不受影響 */
-  fovBoost: 12,
+  // v8.6：貼牆時相機只能退 1.4 m，若不加寬視野，後腦會佔掉畫面中央（實際預覽）。
+  fovBoost: 20,
   /** 直式手機的加寬幅度較小（房間視野本來就加寬到 80°） */
-  fovBoostPortrait: 5,
+  fovBoostPortrait: 8,
   /** 準心對準角色右肩外側，角色因此落在畫面左側且不會擋住互動目標（公尺） */
-  aimShoulder: 0.34,
+  aimShoulder: 0.46,
+  /** 直式手機：水平視角只有約 44°，角色必須推得更靠左，否則胸口佔滿畫面中央 */
+  portraitAimShoulder: 0.92,
+  portraitLookAhead: 2.05,
+  portraitLookDrop: 0.9,
   /** 視線目標比眼睛低多少（公尺）：讓全身與腿部動作入鏡 */
-  lookDrop: 0.45,
+  lookDrop: 0.6,
 };
 
 /** 依畫面長寬比給第三人稱距離（手機直式退更遠）。 */

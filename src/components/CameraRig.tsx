@@ -252,6 +252,7 @@ export const CameraRig: React.FC<{
       }
     }
     if (viewModeRef.current === "third" && modeRef.current === "room" && !flightRef.current) {
+      const portrait = camera.aspect < THIRD_PERSON.portraitAspect;
       const target = resolveThirdPersonCamera(
         { x: s.x, z: s.z, eyeY: s.eyeHeight, jumpOffset: s.jumpOffset },
         s.yaw,
@@ -265,9 +266,13 @@ export const CameraRig: React.FC<{
       const right = new THREE.Vector3(Math.cos(s.yaw), 0, Math.sin(s.yaw));
       // 角色放在畫面左側：視線目標往右肩外側偏，並降低到胸口高度，
       // 讓頭到腳都在畫面內（只看得到後腦勺時，走路／跳躍動畫等於看不到）。
-      const look = new THREE.Vector3(s.x, eyeY - THIRD_PERSON.lookDrop, s.z)
-        .addScaledVector(forward, THIRD_PERSON.lookAhead)
-        .addScaledVector(right, THIRD_PERSON.aimShoulder);
+      const look = new THREE.Vector3(
+        s.x,
+        eyeY - (portrait ? THIRD_PERSON.portraitLookDrop : THIRD_PERSON.lookDrop),
+        s.z
+      )
+        .addScaledVector(forward, portrait ? THIRD_PERSON.portraitLookAhead : THIRD_PERSON.lookAhead)
+        .addScaledVector(right, portrait ? THIRD_PERSON.portraitAimShoulder : THIRD_PERSON.aimShoulder);
       camera.lookAt(look);
       camera.updateMatrixWorld();
       return;
