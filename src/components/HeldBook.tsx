@@ -30,24 +30,31 @@ export const HeldBook: React.FC<{
     const initial = firstPersonHeldAnchor(api.camera.aspect, api.camera.fov);
     group.position.set(initial.x, initial.y, initial.z);
     // 封面貼在書的 +Z 面，group 直接面向相機（不可再繞 Y 轉 180°，否則只看得到封底）。
-    group.rotation.set(-0.22, 0.26, 0.12);
-    group.scale.setScalar(initial.scale * 1.18);
+    group.rotation.set(-0.24, 0.3, 0.08);
+    group.scale.setScalar(initial.scale);
     group.add(makeBook({ ...placement, x: 0, y: 0, z: 0 }, title, "held"));
     // 第一人稱：書下方一定要有手掌／袖口，否則書像浮在半空中。
     if (viewMode === "first") {
       const handGroup = new THREE.Group();
       const skin = new THREE.MeshStandardMaterial({ color: "#d9a46f", roughness: 0.86 });
       const sleeve = new THREE.MeshStandardMaterial({ color: "#2f6f6a", roughness: 0.9 });
-      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.07, 0.1), skin);
-      palm.position.set(0.005, -0.155, 0.055);
-      const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.028, 0.055), skin);
-      fingers.position.set(0.005, -0.128, 0.085);
-      const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.098, 0.11, 0.1), sleeve);
-      wrist.position.set(0.02, -0.245, 0.1);
-      wrist.rotation.x = -0.2;
-      const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.104, 0.03, 0.104), new THREE.MeshStandardMaterial({ color: "#245753", roughness: 0.9 }));
-      cuff.position.set(0.02, -0.19, 0.095);
-      handGroup.add(palm, fingers, wrist, cuff);
+      // 掌根托在書的下緣、手指扣住封面下緣，前臂往右下延伸出畫面。
+      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.088, 0.075, 0.095), skin);
+      palm.position.set(0.052, -0.142, 0.05);
+      palm.rotation.z = -0.18;
+      const fingers = new THREE.Mesh(new THREE.BoxGeometry(0.082, 0.03, 0.062), skin);
+      fingers.position.set(0.052, -0.098, 0.072);
+      fingers.rotation.z = -0.18;
+      const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.034, 0.05), skin);
+      thumb.position.set(-0.005, -0.12, 0.072);
+      thumb.rotation.z = 0.3;
+      const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.13, 0.095), sleeve);
+      wrist.position.set(0.075, -0.235, 0.075);
+      wrist.rotation.set(-0.28, 0, -0.28);
+      const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.032, 0.1), new THREE.MeshStandardMaterial({ color: "#245753", roughness: 0.9 }));
+      cuff.position.set(0.062, -0.185, 0.078);
+      cuff.rotation.z = -0.22;
+      handGroup.add(palm, fingers, thumb, wrist, cuff);
       handGroup.traverse((o) => {
         o.userData.kind = "player";
         const mesh = o as THREE.Mesh;
@@ -59,7 +66,7 @@ export const HeldBook: React.FC<{
       group.add(handGroup);
     }
     // 書面要看得清：小範圍補光只服務手持書，不改變房間主光。
-    const bookLight = new THREE.PointLight("#ffe8c4", 0.7, 1.6, 2);
+    const bookLight = new THREE.PointLight("#ffe8c4", 0.32, 1.4, 2);
     bookLight.position.set(0, 0.16, 0.22);
     group.add(bookLight);
     api.camera.add(group);
@@ -78,23 +85,25 @@ export const HeldBook: React.FC<{
         const hand = thirdPersonHandOffset(1.62);
         const forward = new THREE.Vector3(Math.sin(pose.yaw), 0, -Math.cos(pose.yaw));
         const right = new THREE.Vector3(Math.cos(pose.yaw), 0, Math.sin(pose.yaw));
+        // 第三人稱相機在角色後方：書若只放在胸前會被軀幹整個遮住（實際預覽看不到）。
+        // 因此往右手外側再推 0.16 m、略抬高，站在背後也看得到手上的書。
         world
           .set(pose.x, 0, pose.z)
-          .addScaledVector(right, hand.x * scale)
-          .addScaledVector(forward, -hand.z * scale)
-          .setY(Math.max(0, pose.jumpOffset) + (hand.y - (pose.seated ? 0.2 : 0)) * scale);
+          .addScaledVector(right, (hand.x + 0.14) * scale)
+          .addScaledVector(forward, -hand.z * 0.9 * scale)
+          .setY(Math.max(0, pose.jumpOffset) + (hand.y + 0.12 - (pose.seated ? 0.2 : 0)) * scale);
         api.camera.updateMatrixWorld();
         group.position.copy(api.camera.worldToLocal(world.clone()));
-        group.scale.setScalar(0.95);
+        group.scale.setScalar(0.9);
         // 書面朝鏡頭（group 是相機子物件，+Z 才是面向鏡頭）。
         group.rotation.set(-0.18, 0.32, 0.14);
         // 角色右臂抬起時，手掌位置會比軀幹更靠前；書放在手掌上方一點。
-        group.position.y += 0.04;
+        group.position.y += 0.02;
       } else {
         const anchor = anchorForAspect();
         group.position.set(anchor.x, anchor.y + Math.sin(t * 1.9) * 0.006, anchor.z);
         // 手持書要清楚可見：比錨點再放大 18%，並保留呼吸般的微幅擺動。
-        group.scale.setScalar(anchor.scale * 1.18);
+        group.scale.setScalar(anchor.scale);
         group.rotation.set(-0.22, 0.26 + Math.sin(t * 0.9) * 0.02, 0.12);
       }
     });

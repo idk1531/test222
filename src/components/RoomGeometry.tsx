@@ -367,7 +367,10 @@ export const RoomGeometry: React.FC<{
       roughness: floorIsMarble ? MARBLE_ROUGH.floor : 0.72,
       metalness: floorIsMarble ? MARBLE_ROUGH.metalness : 0.02,
     });
-    if (floorIsMarble) floorMat.envMapIntensity = 0.04;
+    if (floorIsMarble) {
+      floorMat.envMapIntensity = MARBLE_ROUGH.envIntensityFloor;
+      floorMat.metalness = 0;
+    }
     // 桌板／窗台／西牆回折段：同一塊大理石（圖一的 L 形連續檯面）
     const deskMat = new THREE.MeshStandardMaterial({
       color: LOOK.deskTint,
@@ -377,9 +380,10 @@ export const RoomGeometry: React.FC<{
       envMapIntensity: MARBLE_ROUGH.envIntensityDesk,
     });
     const frameMat = new THREE.MeshStandardMaterial({
-      color: "#b8b0a3",
-      roughness: 0.5,
-      envMapIntensity: 0.15,
+      color: "#ded8cc",
+      roughness: 0.44,
+      metalness: 0.05,
+      envMapIntensity: 0.18,
     });
     // 附圖的層板是近黑胡桃木：albedo 淡木紋 × 深色 tint
     const plankMat = new THREE.MeshStandardMaterial({
@@ -394,8 +398,8 @@ export const RoomGeometry: React.FC<{
       map: marbleTex,
       roughness: 0.8,
       metalness: 0,
-      emissive: new THREE.Color("#6a3f1c"),
-      emissiveIntensity: 0.3,
+      emissive: new THREE.Color("#5d472f"),
+      emissiveIntensity: 0.07,
     });
     const charcoalMat = new THREE.MeshStandardMaterial({
       color: LOOK.cabinet,
@@ -408,9 +412,9 @@ export const RoomGeometry: React.FC<{
     const ledgeTopMat = new THREE.MeshStandardMaterial({
       color: LOOK.ledge,
       map: plankTex,
-      roughness: 0.34,
-      metalness: 0.08,
-      envMapIntensity: 0.4,
+      roughness: 0.66,
+      metalness: 0.02,
+      envMapIntensity: 0.05,
     });
     const initialPaperTexture = canvasTexture(640, 400, (c, w, h) =>
       drawDeskPreview(c, w, h, objects, cards)
@@ -475,7 +479,7 @@ export const RoomGeometry: React.FC<{
     const ceilingOpts = { cast: false, receive: false } as const;
     group.add(box(W + 0.4, 0.08, D + 0.4, ceilMat, 0, H + 0.04, 0, ceilingOpts));
     // 牆頂收邊的細陰影線，讓平頂與牆面有交界（不是一整片發光）。
-    const shadowGapMat = new THREE.MeshStandardMaterial({ color: "#8b8378", roughness: 1 });
+    const shadowGapMat = new THREE.MeshStandardMaterial({ color: "#b3aa9d", roughness: 1 });
     disposers.push(() => shadowGapMat.dispose());
     for (const side of [-1, 1]) {
       group.add(box(W + 0.2, 0.012, 0.012, shadowGapMat, 0, H - 0.006, side * (D / 2 - 0.006), { cast: false, receive: false }));
@@ -491,13 +495,39 @@ export const RoomGeometry: React.FC<{
       ledMat.dispose();
       lampMat.dispose();
     });
-    // 燈槽：貼著牆頂、距牆 9 cm 的連續暖光，從下方只看到一條細亮線。
-    const coveY = H - 0.016;
-    const coveInset = 0.09;
-    group.add(box(W - 2 * coveInset, 0.008, 0.022, coveMat, 0, coveY, -D / 2 + coveInset, { cast: false, receive: false }));
-    group.add(box(W - 2 * coveInset, 0.008, 0.022, coveMat, 0, coveY, D / 2 - coveInset, { cast: false, receive: false }));
-    group.add(box(0.022, 0.008, D - 2 * coveInset, coveMat, W / 2 - coveInset, coveY, 0, { cast: false, receive: false }));
-    group.add(box(0.022, 0.008, D - 2 * coveInset, coveMat, -W / 2 + coveInset, coveY, 0, { cast: false, receive: false }));
+    // 附圖的平頂沿牆有一圈退縮的燈槽（soffit）：外圈天花降 10 cm，
+    // 內緣藏一條暖光，從房間看是一圈「上亮下暗」的階梯，而不是貼牆的一條線。
+    const soffitW = 0.3;
+    const soffitDrop = 0.08;
+    // 降板比平頂略深一階（附圖的燈槽外圈不是純白），否則會變成一整條發光白帶。
+    const soffitMat = new THREE.MeshStandardMaterial({
+      color: "#ddd7cc",
+      roughness: 1,
+      metalness: 0,
+      envMapIntensity: 0.012,
+    });
+    disposers.push(() => soffitMat.dispose());
+    const soffitY = H - soffitDrop;
+    const addSoffit = (cx: number, cz: number, sx: number, sz: number) => {
+      // 單一塊降板：底面與內側垂直面由同一個盒子提供，燈槽才有 10 cm 的深度。
+      group.add(box(sx, soffitDrop, sz, soffitMat, cx, soffitY + soffitDrop / 2, cz, { cast: false, receive: false }));
+    };
+    addSoffit(0, D / 2 - soffitW / 2, W, soffitW);
+    addSoffit(0, -D / 2 + soffitW / 2, W, soffitW);
+    addSoffit(W / 2 - soffitW / 2, 0, soffitW, D - 2 * soffitW);
+    addSoffit(-W / 2 + soffitW / 2, 0, soffitW, D - 2 * soffitW);
+    // 燈槽：退縮 8 cm 的暗縫＋縫底的暖光（附圖天花與牆面之交的細亮線）
+    const coveInset = soffitW;
+    const coveY = soffitY + 0.004;
+    const coveLights: Array<[number, number, number, number, number, number]> = [
+      [W - 2 * coveInset, 0.014, 0.014, 0, coveY, -D / 2 + coveInset + 0.05],
+      [W - 2 * coveInset, 0.014, 0.014, 0, coveY, D / 2 - coveInset - 0.05],
+      [0.014, 0.014, D - 2 * coveInset, W / 2 - coveInset - 0.05, coveY, 0],
+      [0.014, 0.014, D - 2 * coveInset, -W / 2 + coveInset + 0.05, coveY, 0],
+    ];
+    for (const [sx, sy, sz, cx, cy, cz] of coveLights) {
+      group.add(box(sx, sy, sz, coveMat, cx, cy, cz, { cast: false, receive: false }));
+    }
 
     // 2 個方形嵌燈（靠北窗側），深色外框＋暖白發光面
     const lampMatBlack = new THREE.MeshStandardMaterial({ color: "#2a2621", roughness: 0.75 });
@@ -651,9 +681,9 @@ export const RoomGeometry: React.FC<{
         receive: false,
       })
     );
-    // 簾盒（附圖窗頂深色橫帶）＋ 天花側收邊
+    // 簾盒（附圖窗頂深色細橫帶）＋ 天花側收邊
     blindGroup.add(
-      box(WINDOW.width + 0.08, 0.11, 0.2, railMat, WINDOW.cx, winY1 + 0.055, winZ + 0.14, {
+      box(WINDOW.width + 0.06, BLINDS.valanceHeight, 0.19, railMat, WINDOW.cx, winY1 + BLINDS.valanceHeight / 2 - 0.005, winZ + 0.14, {
         cast: true,
         receive: false,
       })
@@ -689,7 +719,7 @@ export const RoomGeometry: React.FC<{
       sideDeskFootprint.maxX - sideDeskFootprint.minX,
       DESK.thickness,
       sideZ1 - sideZ0,
-      ledgeTopMat,
+      deskMat,
       (sideDeskFootprint.minX + sideDeskFootprint.maxX) / 2,
       DESK.top - DESK.thickness / 2,
       (sideZ0 + sideZ1) / 2
@@ -782,7 +812,7 @@ export const RoomGeometry: React.FC<{
       const rugW = 2.55;
       const rugD = 1.85;
       const rugTex = canvasTexture(256, 192, (c, w, h) => {
-        c.fillStyle = "#b3a793";
+        c.fillStyle = "#b8ab97";
         c.fillRect(0, 0, w, h);
         for (let i = 0; i < 3600; i++) {
           c.fillStyle = Math.random() > 0.5 ? "rgba(255,250,240,0.05)" : "rgba(74,58,40,0.08)";
@@ -794,7 +824,7 @@ export const RoomGeometry: React.FC<{
       });
       const rugMat = new THREE.MeshStandardMaterial({
         map: rugTex,
-        color: "#e0d4c0",
+        color: "#efe6d6",
         roughness: 0.99,
         metalness: 0,
       });
@@ -841,7 +871,7 @@ export const RoomGeometry: React.FC<{
         new THREE.MeshBasicMaterial({
           map: glowTex,
           transparent: true,
-          opacity: 0.5,
+          opacity: 0.32,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           side: THREE.DoubleSide,
@@ -864,7 +894,7 @@ export const RoomGeometry: React.FC<{
     const frameDepth = SHELF.depth + 0.02;
     const plankTop = shelfPlankY(0, planks);
     // 頂封板拉到天花下方 3.5 cm；最上層書（22–26 cm）剛好收在封板下。
-    const frameTop = Math.min(ROOM.height - 0.035, plankTop + 0.14);
+    const frameTop = Math.min(ROOM.height - 0.025, plankTop + 0.1);
     // 打光的石材背板：附圖層板之間是「被 LED 洗亮的石牆」，不是黑木。
     group.add(
       box(

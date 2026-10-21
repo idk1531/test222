@@ -62,7 +62,7 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     for (let i = 0; i < downlightCount; i++) {
       const spot = new THREE.SpotLight(
         "#ffe4c2",
-        api.quality.mobile ? 0.85 : 1.25,
+        api.quality.mobile ? 0.5 : 0.72,
         6.2,
         Math.PI / 4.2,
         0.92,

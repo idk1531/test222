@@ -135,7 +135,7 @@ assert.equal(WINDOW.mullions, 2); // v8.5 附圖：大窗分成三格
 assert.equal(WINDOW.bars, 0);
 assert.ok(TEXTURES.floor === "marble", "v8.3 地坪必須切到淺灰大理石");
 assert.ok(MARBLE_ROUGH.desk < 0.45, "桌板需保留柔反射");
-assert.ok(MARBLE_ROUGH.floor > 0.5 && MARBLE_ROUGH.floor < 0.8, "地坪需比桌板更霧，避免變成整片鏡面");
+assert.ok(MARBLE_ROUGH.floor > 0.6 && MARBLE_ROUGH.floor <= 1, "地坪需比桌板更霧，避免變成整片鏡面");
 assert.equal(FIDELITY.shelfWallSign, -1);
 // 層板堆疊：最上層板頂 = SHELF.height，往下每 0.335 一排，至少 5 排
 assert.equal(shelfPlankCount(1), 5);

@@ -41,11 +41,14 @@ function makeHeldCover(title: string, accent: string): THREE.CanvasTexture {
   const ctx = canvas.getContext("2d");
   if (ctx) {
     const text = title || "未命名";
+    // 封面底色：分類色的深階（不是粉彩），再壓上米白紙面。
     ctx.fillStyle = accent;
     ctx.fillRect(0, 0, 512, 512);
     // 內頁紙面：暖白＋細邊框（附圖的書封是米白紙質）
-    ctx.fillStyle = "#f6efdf";
+    ctx.fillStyle = "#efe6d2";
     ctx.fillRect(18, 18, 476, 476);
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.fillRect(18, 18, 476, 40);
     ctx.strokeStyle = "rgba(74,58,38,0.34)";
     ctx.lineWidth = 4;
     ctx.strokeRect(18, 18, 476, 476);

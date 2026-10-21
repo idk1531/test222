@@ -33,7 +33,7 @@ export const RoomFurniture: React.FC<{
 
     const leather = new THREE.MeshStandardMaterial({
       color: LOOK.chairFabric,
-      roughness: 0.82, // v8.5：附圖的布面椅，比皮革更霧
+      roughness: 0.85, // v8.5：附圖的布面椅，比皮革更霧
       metalness: 0.01,
     });
     const steel = new THREE.MeshStandardMaterial({
@@ -52,11 +52,11 @@ export const RoomFurniture: React.FC<{
     const potMat = new THREE.MeshStandardMaterial({ color: "#211f1d", roughness: 0.72 });
     const stemMat = new THREE.MeshStandardMaterial({ color: "#3c4a34", roughness: 0.8 });
     const leafMat = new THREE.MeshStandardMaterial({
-      color: "#6f955f",
-      roughness: 0.62,
+      color: "#5f8257",
+      roughness: 0.7,
       metalness: 0,
-      emissive: new THREE.Color("#33452a"),
-      emissiveIntensity: 0.5,
+      emissive: new THREE.Color("#2c3f24"),
+      emissiveIntensity: 0.22,
       side: THREE.DoubleSide,
       transparent: false,
       alphaTest: 0.45,
@@ -89,43 +89,65 @@ export const RoomFurniture: React.FC<{
     chair.position.set(CHAIR.x, CHAIR.y, CHAIR.z);
     chair.rotation.y = CHAIR.yaw; // 面向桌
     const fabricMat = leather; // 共用淺米色布料材質
-    // 座墊（圓角薄墊，前緣略垂）
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(CHAIR.seatWidth, 0.08, CHAIR.seatDepth), fabricMat);
-    seat.position.set(0, CHAIR.seatHeight - 0.04, 0.03);
+    // 座面：圓形（不是方盒）。方盒的四角會穿出圓形殼，實際預覽看起來像多出一塊板子。
+    const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.295, 0.285, 0.07, 28), fabricMat);
+    seat.scale.set(1, 1, 0.92);
+    seat.position.set(0, CHAIR.seatHeight - 0.035, -0.01);
+    seat.castShadow = true;
+    seat.receiveShadow = true;
     chair.add(seat);
-    const seatFront = new THREE.Mesh(new THREE.BoxGeometry(CHAIR.seatWidth - 0.03, 0.07, 0.05), fabricMat);
-    seatFront.position.set(0, CHAIR.seatHeight - 0.055, 0.03 + CHAIR.seatDepth / 2 - 0.02);
-    chair.add(seatFront);
-    // 弧形殼：開口圓柱（薄壁、單面），開口朝 +Z（坐面）；坐下時這片殼淡出
+    // 弧形殼：開口圓柱（薄壁、單面），開口朝 +Z（坐面）；坐下時這片殼淡出。
+    // 附圖是「淺米色薄殼椅」：殼只包住背與兩側、上緣略外張，不是一個密閉木桶，
+    // 因此收窄包覆角（206°）並降低殼高，坐墊才看得見。
     const shellMaterial = leather.clone();
     shellMaterial.transparent = true;
     shellMaterial.side = THREE.DoubleSide;
     shared.push(shellMaterial);
-    // 開口朝 +Z（坐面）：gap 置中於 theta=0（three 的圓柱 x=r·sinθ、z=r·cosθ）。
-    const gapHalf = 0.42;
+    const gapHalf = 1.35;
     const shellGeo = new THREE.CylinderGeometry(
-      0.335,
-      0.305,
-      0.4,
-      24,
+      0.325,
+      0.3,
+      0.33,
+      28,
       1,
       true,
       gapHalf,
       Math.PI * 2 - gapHalf * 2
     );
     const shell = new THREE.Mesh(shellGeo, shellMaterial);
-    shell.position.set(0, CHAIR.seatHeight + 0.16, 0.015);
-    shell.scale.set(1, 1, 1.06);
+    shell.position.set(0, CHAIR.seatHeight + 0.135, -0.02);
+    shell.scale.set(1, 1, 1.04);
     chair.add(shell);
+    // 殼內裡：比外殼略深一階，避免單面薄殼從斜側看變成紙片。
+    const linerMaterial = leather.clone();
+    linerMaterial.color = new THREE.Color(LOOK.chairFabric).multiplyScalar(0.9);
+    linerMaterial.side = THREE.BackSide;
+    shared.push(linerMaterial);
+    const liner = new THREE.Mesh(shellGeo, linerMaterial);
+    liner.position.copy(shell.position);
+    liner.scale.set(0.955, 1, 0.99);
+    chair.add(liner);
+    // 坐墊：殼內一塊有厚度的布墊（附圖坐墊與殼同色、略深）
+    const cushionMat = leather.clone();
+    cushionMat.color = new THREE.Color(LOOK.chairFabric).multiplyScalar(0.94);
+    shared.push(cushionMat);
+    const cushion = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.265, 0.05, 28), cushionMat);
+    cushion.scale.set(1, 1, 0.92);
+    cushion.position.set(0, CHAIR.seatHeight + 0.02, -0.01);
+    cushion.castShadow = true;
+    cushion.receiveShadow = true;
+    chair.add(cushion);
     // 殼緣上緣捲邊（讓薄殼不會讀成紙片）
     const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(0.328, 0.013, 6, 24, Math.PI * 2 - gapHalf * 2),
+      new THREE.TorusGeometry(0.328, 0.011, 6, 28, Math.PI * 2 - gapHalf * 2),
       fabricMat
     );
     rim.rotation.x = -Math.PI / 2;
-    rim.rotation.z = Math.PI / 2 - gapHalf;
-    rim.position.set(0, CHAIR.seatHeight + 0.36, 0.015);
-    rim.scale.set(1, 1.06, 1);
+    // 圓柱的開口在 theta∈(−gapHalf, gapHalf)（+Z 前方）；TorusGeometry 只從 +X 起畫，
+    // 因此起始角必須是 gapHalf − π/2，否則捲邊會橫在坐面前方變成一根白色橫桿。
+    rim.rotation.z = gapHalf - Math.PI / 2;
+    rim.position.set(0, CHAIR.seatHeight + 0.3, -0.02);
+    rim.scale.set(1, 1.04, 1);
     chair.add(rim);
     // 4 支細金屬腳（Ø0.02、外八 9°）
     const legGeo = new THREE.CylinderGeometry(0.011, 0.013, 0.42, 8);
@@ -183,36 +205,49 @@ export const RoomFurniture: React.FC<{
     object.rotation.y = 0.35;
     add(object);
 
-    // ---------- 龜背竹（盆 Ø0.32、全株高約 0.95 m；附圖右側的大葉盆栽） ----------
+    // ---------- 龜背竹（附圖右側、窗前的深綠大葉盆栽） ----------
     const plant = new THREE.Group();
-    plant.position.set(1.15, DESK.top, -1.93);
-    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.22, 18), potMat);
-    pot.position.set(0, 0.11, 0);
+    plant.position.set(1.42, DESK.top, -1.98);
+    // 盆：霧面深炭、略收口，底加淺色承接盤（不是一塊黑色大水桶）
+    const potMat2 = new THREE.MeshStandardMaterial({ color: "#2c2a27", roughness: 0.86 });
+    const saucerMat = new THREE.MeshStandardMaterial({ color: "#8d8478", roughness: 0.9 });
+    shared.push(potMat2, saucerMat);
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.115, 0.2, 20), potMat2);
+    pot.position.set(0, 0.1, 0);
     plant.add(pot);
-    const rimPot = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.008, 6, 18), potMat);
+    const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.145, 0.02, 20), saucerMat);
+    saucer.position.set(0, 0.01, 0);
+    plant.add(saucer);
+    const rimPot = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.007, 6, 20), potMat2);
     rimPot.rotation.x = -Math.PI / 2;
-    rimPot.position.set(0, 0.22, 0);
+    rimPot.position.set(0, 0.2, 0);
     plant.add(rimPot);
-    // 莖從盆心向外斜伸，末端再接大葉片；葉片用 alphaMap 剪影，維持低面數。
-    const stemGeo = new THREE.CylinderGeometry(0.007, 0.01, 0.52, 6);
-    const leafGeo = new THREE.PlaneGeometry(0.46, 0.39);
-    const leafCount = 11;
+    // 土壤
+    const soil = new THREE.Mesh(new THREE.CylinderGeometry(0.122, 0.122, 0.01, 20), stemMat);
+    soil.position.set(0, 0.195, 0);
+    plant.add(soil);
+    // 莖從盆心向外斜伸，末端再接葉片；葉片用 alphaMap 剪影，維持低面數。
+    const stemGeo = new THREE.CylinderGeometry(0.006, 0.009, 0.5, 6);
+    const leafGeo = new THREE.PlaneGeometry(0.4, 0.34);
+    const leafCount = 14;
     for (let i = 0; i < leafCount; i++) {
-      const a = (i / leafCount) * Math.PI * 2 + 0.35;
-      const reach = 0.16 + (i % 3) * 0.05;
-      const lift = 0.58 + (i % 4) * 0.09;
+      const a = (i / leafCount) * Math.PI * 2 + 0.3;
+      // 三圈高度：內圈直立、外圈外張下垂（附圖的葉叢層次）
+      const tier = i % 3;
+      const reach = 0.1 + tier * 0.055 + (i % 2) * 0.02;
+      const lift = 0.5 + tier * 0.11 + (i % 4) * 0.035;
       const stem = new THREE.Mesh(stemGeo, stemMat);
-      stem.position.set(Math.sin(a) * reach * 0.45, lift * 0.7, Math.cos(a) * reach * 0.45);
-      stem.rotation.z = -Math.sin(a) * 0.55;
-      stem.rotation.x = Math.cos(a) * 0.55;
+      stem.position.set(Math.sin(a) * reach * 0.42, lift * 0.72, Math.cos(a) * reach * 0.42);
+      stem.rotation.z = -Math.sin(a) * (0.6 - tier * 0.12);
+      stem.rotation.x = Math.cos(a) * (0.6 - tier * 0.12);
       plant.add(stem);
       const leaf = new THREE.Mesh(leafGeo, leafMat);
-      leaf.position.set(Math.sin(a) * reach, lift + 0.18, Math.cos(a) * reach);
+      leaf.position.set(Math.sin(a) * reach, lift + 0.2, Math.cos(a) * reach);
       leaf.rotation.order = "YXZ";
       leaf.rotation.y = a + Math.PI / 2;
-      leaf.rotation.x = -0.5 - (i % 3) * 0.12;
-      leaf.rotation.z = Math.cos(a) * 0.18;
-      const scale = 0.95 + (i % 4) * 0.09;
+      leaf.rotation.x = -0.42 - (i % 3) * 0.14;
+      leaf.rotation.z = Math.cos(a) * 0.22;
+      const scale = 0.9 + (i % 4) * 0.08;
       leaf.scale.set(scale, scale, scale);
       plant.add(leaf);
     }

@@ -88,10 +88,10 @@ export const CAMERA_LIMITS = { pitchMin: -70, pitchMax: 40 };
 export const DEFAULT_CAMERA: StudyCamera = {
   // 附圖機位：站在房間南側偏東、面向西北，左側書牆＋右側窗同框。
   // 不再貼東南角：第三人稱相機才有 1.8 m 以上的後退空間。
-  yaw: -35,
-  pitch: -8,
-  x: 0.78,
-  z: 0.86,
+  yaw: -25,
+  pitch: -6,
+  x: 0.66,
+  z: 1.0,
   height: 1.55,
 };
 

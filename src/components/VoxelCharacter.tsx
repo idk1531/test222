@@ -91,7 +91,7 @@ export const VoxelCharacter: React.FC<{
     rightLeg: THREE.Group;
     fpHands: THREE.Group;
     fpArms: THREE.Group;
-    fpChest: THREE.Mesh;
+    fpChest: THREE.Group;
   } | null>(null);
 
   useEffect(() => {
@@ -136,6 +136,10 @@ export const VoxelCharacter: React.FC<{
     const hoodieFrontMat = own(new THREE.MeshStandardMaterial({
       map: hoodieTexture,
       roughness: 0.9,
+    }));
+    const hoodieDarkMat = own(new THREE.MeshStandardMaterial({
+      color: CHARACTER.colors.hoodieDark,
+      roughness: 0.92,
     }));
     const trousersMat = own(new THREE.MeshStandardMaterial({
       color: CHARACTER.colors.trousers,
@@ -279,11 +283,12 @@ export const VoxelCharacter: React.FC<{
       const pivot = new THREE.Group();
       // 手肘在畫面外下方，手掌略往前；座標由 VIEW_MODEL 統一。
       pivot.position.set(side * VIEW_MODEL.arm.x, VIEW_MODEL.arm.y, VIEW_MODEL.arm.z);
-      pivot.rotation.set(-0.35, side * -0.18, side * 0.2);
-      const sleeve = box(VIEW_MODEL.arm.width, VIEW_MODEL.arm.width, VIEW_MODEL.arm.length, hoodieMat, 0, 0, -0.08);
-      const cuff = box(VIEW_MODEL.arm.width + 0.008, VIEW_MODEL.arm.width + 0.008, 0.028, hoodieFrontMat, 0, 0, -0.185);
-      const hand = box(0.068, 0.072, 0.095, skinMat, 0, 0, -0.245);
-      const thumb = box(0.026, 0.03, 0.04, skinMat, side * -0.036, 0.025, -0.235);
+      // 往畫面中央收 22°、略抬：低頭時看到的是自己的前臂，而不是兩根垂直方塊。
+      pivot.rotation.set(-0.55, side * -0.34, side * 0.16);
+      const sleeve = box(VIEW_MODEL.arm.width, VIEW_MODEL.arm.width, VIEW_MODEL.arm.length, hoodieMat, 0, 0, -0.075);
+      const cuff = box(VIEW_MODEL.arm.width + 0.008, VIEW_MODEL.arm.width + 0.008, 0.026, hoodieMat, 0, 0, -0.176);
+      const hand = box(0.066, 0.07, 0.09, skinMat, 0, 0, -0.232);
+      const thumb = box(0.024, 0.028, 0.038, skinMat, side * -0.034, 0.024, -0.222);
       pivot.add(sleeve, cuff, hand, thumb);
       pivot.traverse((o) => {
         o.userData.kind = "player";
@@ -298,16 +303,28 @@ export const VoxelCharacter: React.FC<{
     const fpArms = new THREE.Group();
     fpArms.add(makeFpArm(-1), makeFpArm(1));
     const chestGeom = new THREE.BoxGeometry(VIEW_MODEL.chest.width, VIEW_MODEL.chest.height, VIEW_MODEL.chest.depth);
-    const fpChest = new THREE.Mesh(chestGeom, hoodieFrontMat);
-    fpChest.position.set(0, VIEW_MODEL.chest.y, VIEW_MODEL.chest.z);
-    fpChest.rotation.x = VIEW_MODEL.chest.tilt;
+    // 第一人稱軀幹用純色連帽布（不貼 hoodieFront 的抽繩貼圖：整片放大會變成兩條白色寬帶）。
+    const fpChest = new THREE.Mesh(chestGeom, hoodieMat);
     fpChest.castShadow = false;
     fpChest.receiveShadow = false;
     fpChest.userData.kind = "player";
-    fpHands.add(fpChest, fpArms);
+    // 領口＋拉鍊：讓低頭看到的胸口有可讀細節（不新增材質）
+    const collar = box(VIEW_MODEL.chest.width * 0.58, 0.034, 0.034, hoodieDarkMat, 0, VIEW_MODEL.chest.height / 2 - 0.008, -VIEW_MODEL.chest.depth / 2 + 0.018);
+    for (const part of [collar]) {
+      part.userData.kind = "player";
+      part.castShadow = false;
+      part.receiveShadow = false;
+    }
+    const chestGroup = new THREE.Group();
+    chestGroup.position.set(0, VIEW_MODEL.chest.y, VIEW_MODEL.chest.z);
+    chestGroup.rotation.x = VIEW_MODEL.chest.tilt;
+    fpChest.position.set(0, 0, 0);
+    collar.position.set(0, VIEW_MODEL.chest.height / 2 - 0.008, -VIEW_MODEL.chest.depth / 2 + 0.018);
+    chestGroup.add(fpChest, collar);
+    fpHands.add(chestGroup, fpArms);
     api.camera.add(fpHands);
 
-    partsRef.current = { leftArm, rightArm, leftLeg, rightLeg, fpHands, fpArms, fpChest };
+    partsRef.current = { leftArm, rightArm, leftLeg, rightLeg, fpHands, fpArms, fpChest: chestGroup };
 
     // 第一人稱：頭部隱藏，避免相機在頭顱內穿模。
     head.visible = viewMode === "third";

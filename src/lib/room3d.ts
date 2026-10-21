@@ -99,25 +99,25 @@ export const FIDELITY = {
  * 照片可調材質（albedo）與此處 tint 相乘；改這裡就能整間換色，不必翻材質建立程式。
  */
 export const LOOK = {
-  wall: "#d3cbbf", // 南／東牆：暖灰泥（附圖的灰米色，不用奶油黃）
-  wallTint: "#e9e2d6", // 照片 albedo 本身已是米灰；乘法 tint 必須近白，否則會變成土黃
-  ceiling: "#efeae1",
-  floorTint: "#b0a698", // 附圖的暖灰褐石材地坪（照片大理石 × 中灰 tint）
-  deskTint: "#c6beb3", // 淺灰大理石檯面（albedo 已是灰白，tint 只需壓掉過曝）
-  shelfWood: "#241b14", // 書牆木作：近黑胡桃（附圖層板幾乎不反光）
-  shelfWoodTint: "#8a6c52",
-  shelfBack: "#6f5b47", // 背板：打光的古銅色石材
-  shelfBackTint: "#e8d4ba",
-  ledge: "#3a2e23",
+  wall: "#d6d0c6", // 南／東牆：暖灰泥（附圖的灰米色，不用奶油黃）
+  wallTint: "#eee9e1", // 照片 albedo 本身已是米灰；乘法 tint 必須近白，否則會變成土黃
+  ceiling: "#f1ece3",
+  floorTint: "#a2988a", // 附圖的暖灰褐石材地坪（照片大理石 × 中灰 tint）
+  deskTint: "#c9c1b5", // 淺灰大理石檯面（albedo 已是灰白，tint 只需壓掉過曝）
+  shelfWood: "#4a3728", // 書牆木作：深胡桃（附圖層板暗但仍看得到木紋）
+  shelfWoodTint: "#c2a181",
+  shelfBack: "#6c5a48", // 背板：打光的古銅色石材
+  shelfBackTint: "#cfc0ae",
+  ledge: "#4a3a2b",
   valance: "#3a322a", // 窗上深色木簾盒
   bronze: "#2b2520",
   led: "#ffb46b", // 層板燈帶（暖）
   ledSoft: "#ffd9ad",
-  chairFabric: "#b0a390",
-  chairSteel: "#9a948b",
-  rug: "#7f7567", // 暖灰地毯（附圖地毯比地坪再深一階）
-  cabinet: "#4a4136",
-  cabinetDoor: "#544a3e",
+  chairFabric: "#b5a894",
+  chairSteel: "#a8a39a",
+  rug: "#8a8172", // 暖灰地毯（附圖地毯比地坪再深一階）
+  cabinet: "#3b342c",
+  cabinetDoor: "#463e34",
   deskEdge: "#9a9083",
   picFrame: "#141210",
   picMat: "#e3dacb",
@@ -127,8 +127,9 @@ export const LOOK = {
 // xBack 為背牆面 X；板材自背牆往室內長 depth；層板沿 Z 長 width。
 export const SHELF = {
   wallSign: FIDELITY.shelfWallSign,
-  z: -0.45, // 中心 Z（北端貼齊北牆內面，往南到 +1.55）
-  width: 3.95, // 沿 Z 軸寬度（v8.5：附圖的書牆幾乎整面西牆）
+  // 附圖的書牆沿整面西牆（幾乎到南北兩端）；資料書因此也更靠近房間中央。
+  z: 0.05, // 中心 Z（北端 −2.25、南端 +2.35，西牆內面 −2.44…+2.44）
+  width: 4.6, // 沿 Z 軸寬度
   height: 2.46, // 最上層板「頂面」Y（附圖量測）
   depth: 0.28, // 層板深
   plank: 0.035, // 板厚
@@ -218,9 +219,9 @@ export function clampToDesk(x: number, z: number): { x: number; z: number } {
 
 // ================= 光源（參數集中於此，預留晝夜切換） =================
 export const SUN = {
-  color: "#fff2dc", // 暖白斜陽（比 v8.5 更中性，避免整間變橘）
+  color: "#fff5e6", // 暖白斜陽（比 v8.5 更中性，避免整間變橘）
   // 附圖是「亮窗＋霧感庭園」的柔光：方向光負責可讀陰影，其餘交給窗光與環境光。
-  intensity: 2.45,
+  intensity: 2.15,
   position: new THREE.Vector3(2.1, 3.0, -ROOM.depth / 2 - 1.8),
   target: new THREE.Vector3(-0.75, 0.2, 1.25),
   shadowMap: { desktop: 2048, mobile: 1024 },
@@ -229,27 +230,27 @@ export const SUN = {
 };
 export const AMBIENT = {
   // 中性偏暖的環境光：降低整體填充，保留窗光與層板燈的明暗對比。
-  hemisphereSky: "#e4e6e4",
-  hemisphereGround: "#cfc9be",
-  hemisphereIntensity: 0.42,
-  ambientColor: "#f6eee2",
-  ambientIntensity: 0.17,
+  hemisphereSky: "#e8eae8",
+  hemisphereGround: "#d2ccc1",
+  hemisphereIntensity: 0.5,
+  ambientColor: "#f7f0e6",
+  ambientIntensity: 0.16,
 };
 
 /** 窗外柔光（無陰影補光；手機只留一盞）——讓窗邊與桌面有附圖的柔亮漸層。 */
 export const WINDOW_FILL = {
-  color: "#eef4ff",
-  intensityDesktop: 1.0,
-  intensityMobile: 0.65,
+  color: "#f2f5f8",
+  intensityDesktop: 1.1,
+  intensityMobile: 0.7,
   position: new THREE.Vector3(-0.4, 1.9, -1.3),
   target: new THREE.Vector3(-0.6, 0.75, 1.7),
 };
 
 /** 書牆暖光洗牆燈（v8.5）：三盞低強度點光源，模擬附圖層板下 LED 的暖色溢光。 */
 export const SHELF_WASH = {
-  color: "#ffb877",
-  intensityDesktop: 0.55,
-  intensityMobile: 0.4,
+  color: "#ffc28c",
+  intensityDesktop: 0.3,
+  intensityMobile: 0.22,
   distance: 2.7,
   z: [-1.7, -0.4, 0.9],
   y: 1.9,
@@ -258,14 +259,16 @@ export const SHELF_WASH = {
 
 /** 附圖的橫向百葉：上段遮蔽、下段透空，深色底桿。 */
 export const BLINDS = {
-  /** 簾片覆蓋窗洞高度比例（附圖約 45%） */
-  cover: 0.38,
-  slatPitch: 0.05,
-  slatThickness: 0.017,
-  slatDepth: 0.07,
-  tiltDeg: 34,
-  railHeight: 0.05,
-  color: "#f0e8da", // 灰米色，避免過曝成純白
+  /** 簾片覆蓋窗洞高度比例（附圖只遮上段，下面整片見景） */
+  cover: 0.31,
+  slatPitch: 0.055,
+  slatThickness: 0.015,
+  slatDepth: 0.065,
+  tiltDeg: 28,
+  railHeight: 0.042,
+  /** 窗頂簾盒高度：附圖是細窄的深色橫帶，不是一整條黑色厚板 */
+  valanceHeight: 0.075,
+  color: "#f2ece0", // 灰米色，避免過曝成純白
   /** 簾片上每 6 片一條細橫線（附圖百葉的節奏），以及 3 段垂直拉繩 */
   cordEvery: 6,
   cordColor: "#8a8274",
@@ -273,11 +276,13 @@ export const BLINDS = {
 
 /** 大理石柔反射參數（v8.3 §P4） */
 export const MARBLE_ROUGH = {
-  desk: 0.34,
-  floor: 0.58,
-  metalness: 0.05,
-  envIntensityDesk: 0.42,
-  envIntensityFloor: 0.12,
+  // 附圖檯面是「霧面淺灰石」，地坪是更霧的微水泥質感：
+  // 提高粗糙度並壓低環境反射，避免整片地板變成鏡面。
+  desk: 0.38,
+  floor: 0.94,
+  metalness: 0,
+  envIntensityDesk: 0.3,
+  envIntensityFloor: 0.03,
 };
 
 // ================= 相機 =================
@@ -811,15 +816,15 @@ export function firstPersonHeldAnchor(
 ): { x: number; y: number; z: number; scale: number } {
   const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
   const portrait = safeAspect < 0.85;
-  const depth = portrait ? -0.78 : -0.82;
+  const depth = portrait ? -0.72 : -0.76;
   const halfH = Math.tan(THREE.MathUtils.degToRad(fovDeg / 2)) * Math.abs(depth);
   const halfW = halfH * safeAspect;
   return {
     // 直式手機往左收（避開右下角的放置／回架按鈕），橫式放在右下但保留邊距。
-    x: portrait ? -0.055 : Math.min(0.28, Math.max(halfW * 0.4, 0.14)),
-    y: -halfH * (portrait ? 0.38 : 0.44),
+    x: portrait ? -0.06 : Math.min(0.24, Math.max(halfW * 0.42, 0.13)),
+    y: -halfH * (portrait ? 0.4 : 0.43),
     z: depth,
-    scale: portrait ? 0.95 : 0.8,
+    scale: portrait ? 0.72 : 0.6,
   };
 }
 
@@ -872,9 +877,9 @@ export const VIEW_MODEL = {
    * 這是「相機空間」座標，所以必須落在視錐內才看得到——
    * v8.6 之前的 y −0.46 其實在 62° 視錐下緣（≈−0.30）之外，低頭時整組被裁掉。
    */
-  arm: { x: 0.26, y: -0.27, z: -0.44, width: 0.062, length: 0.22 },
+  arm: { x: 0.245, y: -0.25, z: -0.42, width: 0.066, length: 0.2 },
   /** 胸口：貼近下緣，只露出上緣一片，讀成「低頭看到自己的身體」 */
-  chest: { y: -0.40, z: -0.5, width: 0.3, height: 0.28, depth: 0.18, tilt: 0.35 },
+  chest: { y: -0.31, z: -0.48, width: 0.3, height: 0.26, depth: 0.19, tilt: 0.42 },
   /** 低於此 pitch（rad，負值＝往下看）才顯示前臂 */
   armsBelowPitch: -0.22,
   /** 低於此 pitch 才顯示胸口 */
