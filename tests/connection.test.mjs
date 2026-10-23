@@ -379,6 +379,41 @@ test("joiner timeout starts only after confirming the Answer was returned", asyn
   assert.equal(manager.getState().connectionTimeoutActive, false);
 });
 
+test("joiner keeps Answer gathering alive when the browser fails before manual handoff", async () => {
+  let peer;
+  const manager = new connection.WebRTCConnectionManager((configuration) => {
+    peer = new FakePeerConnection(configuration);
+    const setLocalDescription = peer.setLocalDescription.bind(peer);
+    peer.setLocalDescription = async (description) => {
+      await setLocalDescription(description);
+      if (description.type === "answer") {
+        peer.connectionState = "failed";
+        peer.iceConnectionState = "disconnected";
+        peer.dispatch("connectionstatechange");
+        peer.dispatch("iceconnectionstatechange");
+      }
+    };
+    return peer;
+  });
+  const offerText = connection.serializeSessionDescription({ type: "offer", sdp: SDP });
+
+  const answerText = await manager.createAnswer(offerText, connection.DEFAULT_STUN_SERVER);
+  const answer = JSON.parse(answerText);
+  assert.equal(answer.type, "answer");
+  assert.equal(manager.getState().phase, "waiting-peer");
+  assert.equal(manager.getState().peerConnectionState, "failed");
+  assert.equal(manager.getState().iceConnectionState, "disconnected");
+  assert.equal(manager.getState().iceGatheringState, "complete");
+  assert.equal(manager.getState().localDescriptionSet, true);
+  assert.equal(manager.getState().remoteDescriptionSet, true);
+  assert.equal(manager.getState().connectionTimeoutActive, false);
+  assert.match(manager.getState().detail, /保留目前狀態/);
+
+  manager.confirmAnswerSent();
+  assert.equal(manager.getState().connectionTimeoutActive, true);
+  manager.disconnect();
+});
+
 test("terminal diagnostics retain pre-cleanup ICE and signaling states", async () => {
   const { manager, getPeer } = makeManager();
   await manager.createOffer(connection.DEFAULT_STUN_SERVER);
