@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ArrowLeft, Check, ClipboardCopy, Link2, LoaderCircle, ShieldAlert, Unplug } from "lucide-react";
 import { copyTextWithFallback } from "@/lib/clipboard";
 import {
@@ -11,7 +11,6 @@ import {
   type CandidateTypeCounts,
   type SelectedCandidatePairState,
   DEFAULT_STUN_SERVER,
-  WebRTCConnectionManager,
   connectionPhaseLabel,
   dataChannelStateLabel,
   iceConnectionStateLabel,
@@ -19,8 +18,8 @@ import {
   peerConnectionStateLabel,
   signalingStateLabel,
   type ConnectionPhase,
-  type ConnectionSnapshot,
 } from "@/lib/connection";
+import { useCollaboration } from "@/components/CollaborationProvider";
 
 function isBusy(phase: ConnectionPhase): boolean {
   return phase === "creating-offer" || phase === "creating-answer" || phase === "applying-answer";
@@ -62,24 +61,31 @@ function StateMetric({ label, value }: { label: string; value: string }) {
 }
 
 export default function ConnectionPage() {
-  const [manager] = useState(() => new WebRTCConnectionManager());
-  const [snapshot, setSnapshot] = useState<ConnectionSnapshot>(() => manager.getState());
+  const {
+    manager,
+    snapshot,
+    displayName,
+    setDisplayName,
+    guestRole,
+    setGuestRole,
+    localRole,
+    remoteParticipant,
+    contentSyncStatus,
+    signalingDrafts,
+    setSignalingDraft,
+    clearSignalingDrafts,
+    preparePairing,
+    disconnect,
+  } = useCollaboration();
+  const { offerOutput, offerInput, answerOutput, answerInput } = signalingDrafts;
+  const setOfferOutput = (value: string) => setSignalingDraft("offerOutput", value);
+  const setOfferInput = (value: string) => setSignalingDraft("offerInput", value);
+  const setAnswerOutput = (value: string) => setSignalingDraft("answerOutput", value);
+  const setAnswerInput = (value: string) => setSignalingDraft("answerInput", value);
   const [stunServer, setStunServer] = useState(DEFAULT_STUN_SERVER);
-  const [offerOutput, setOfferOutput] = useState("");
-  const [offerInput, setOfferInput] = useState("");
-  const [answerOutput, setAnswerOutput] = useState("");
-  const [answerInput, setAnswerInput] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState<"offer" | "answer" | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = manager.subscribe(setSnapshot);
-    return () => {
-      unsubscribe();
-      manager.disconnect();
-    };
-  }, [manager]);
 
   const busy = isBusy(snapshot.phase);
   const canStart = canStartNewPairing(snapshot.phase);
@@ -97,9 +103,8 @@ export default function ConnectionPage() {
   const createInvite = async () => {
     setErrorMessage("");
     setNotice("");
-    setOfferOutput("");
-    setAnswerInput("");
-    setAnswerOutput("");
+    clearSignalingDrafts();
+    preparePairing();
     try {
       const offer = await manager.createOffer(stunServer);
       setOfferOutput(offer);
@@ -114,6 +119,7 @@ export default function ConnectionPage() {
     setErrorMessage("");
     setNotice("");
     setAnswerOutput("");
+    preparePairing();
     try {
       const answer = await manager.createAnswer(offerInput, stunServer);
       setAnswerOutput(answer);
@@ -178,11 +184,8 @@ export default function ConnectionPage() {
   };
 
   const interruptConnection = () => {
-    manager.disconnect();
-    setOfferOutput("");
-    setOfferInput("");
-    setAnswerOutput("");
-    setAnswerInput("");
+    disconnect();
+    clearSignalingDrafts();
     setErrorMessage("");
     setNotice("已中斷並清除本次連線資訊；現在可以重新配對。");
     setCopied(null);
@@ -235,6 +238,19 @@ export default function ConnectionPage() {
             <span className="text-xs">未開啟 DataChannel 前不會顯示成功</span>
           </div>
           <p className="mt-2 text-sm">{statusNote}</p>
+          {snapshot.phase === "open" && (
+            <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-sm">
+              對方：<strong>{remoteParticipant?.name ?? "等待名稱資料"}</strong>
+              {remoteParticipant && <> · 權限：{remoteParticipant.role === "reader" ? "唯讀" : remoteParticipant.role === "pending" ? "等待指定" : "可編輯"}</>}
+              {localRole && <> · 你的權限：{localRole === "owner" ? "房主" : localRole === "reader" ? "唯讀" : localRole === "pending" ? "等待指定" : "可編輯"}</>}
+            </p>
+          )}
+          {snapshot.phase === "open" && (
+            <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${contentSyncStatus === "error" ? "bg-rose-100 text-rose-900" : "bg-white/70"}`}>
+              書本／筆記卡同步：<strong>{contentSyncStatus === "synced" ? "已完成" : contentSyncStatus === "error" ? "失敗；資料仍保存在本機" : "同步中"}</strong>
+              {contentSyncStatus === "synced" && " · 新增、編輯、移動、排序與刪除會直接透過 P2P 同步。"}
+            </p>
+          )}
           {waitingForIceGathering && (
             <p className="mt-1 text-xs text-slate-600">完整訊號需等候 ICE 候選收集完成；超過 {iceGatheringTimeoutSeconds} 秒會逾時，可檢查網路或 STUN 設定後重試。</p>
           )}
@@ -247,6 +263,39 @@ export default function ConnectionPage() {
                   : `A 端成功套用 Answer 後才開始 ${connectionTimeoutSeconds} 秒等待計時。`}
             </p>
           )}
+        </section>
+
+        <section className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.75fr)] sm:items-end">
+          <div>
+            <label htmlFor="display-name" className="mb-1 block text-sm font-semibold">你的書房顯示名稱</label>
+            <input
+              id="display-name"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              maxLength={24}
+              autoComplete="nickname"
+              className="min-h-10 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+              placeholder="例如：小安"
+            />
+            <p className="mt-1 text-xs text-slate-500">名稱由使用者自行填寫，不是已驗證身分。</p>
+          </div>
+          <div>
+            <label htmlFor="guest-role" className="mb-1 block text-sm font-semibold">房主邀請權限</label>
+            <select
+              id="guest-role"
+              value={guestRole}
+              onChange={(event) => setGuestRole(event.target.value === "reader" ? "reader" : "editor")}
+              disabled={pairingInProgress}
+              className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-600 disabled:bg-slate-100"
+            >
+              <option value="editor">可編輯者</option>
+              <option value="reader">唯讀者</option>
+            </select>
+            <p className="mt-1 text-xs text-slate-500">由發起端 A 決定加入端 B 的角色。</p>
+          </div>
+          <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-950 sm:col-span-2">
+            邀請是私下交換的 Offer／Answer bearer 憑證：持有並完成配對者可加入，轉傳後任何持有者都可能使用；目前沒有帳號、伺服器端撤銷或到期驗證。連線後，房主的書本／筆記卡會傳給加入者；可編輯者的本機書本／筆記卡也會按 ID 合併並傳給房主。只與可信任對象配對，勿放入不想分享的筆記。唯讀限制是客戶端約束，不能防止修改客戶端、複製內容或截圖。
+          </p>
         </section>
 
         <section className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(260px,0.6fr)] sm:items-end">
@@ -419,13 +468,13 @@ export default function ConnectionPage() {
           </div>
           <div className="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
             <h3 className="mb-1 font-bold text-slate-800">重要限制</h3>
-            <p>本工具只建立並監測資料通道，不傳送筆記、畫面、音訊或其他應用資料。WebRTC 使用 STUN 嘗試 NAT 穿透，但本方案沒有 TURN 中繼；公司防火牆、對稱 NAT 或受限行動網路可能阻擋直連，這時連線可能失敗。</p>
+            <p>DataChannel 會交換自行填寫的顯示名稱、房主指定的角色、角色位置／動作，以及書本分類／位置／排序和筆記卡內容／畫布位置。初次連線會按記錄 ID 合併兩端資料；同一張卡同時編輯時採整筆記錄的確定性版本順序決定勝者，另一端同時寫入的欄位可能被覆蓋；尚未實作欄位／文字 CRDT、游標或輸入狀態。離線修改只留在本機，重新連線合併時另一端的舊副本可能讓離線刪除復現；請以手動匯出／匯入處理離線變更。WebRTC 使用 STUN 嘗試 NAT 穿透，但本方案沒有 TURN 中繼；公司防火牆、對稱 NAT 或受限行動網路可能阻擋直連，這時連線可能失敗。</p>
             <p className="mt-2">需要 HTTPS（GitHub Pages 預設提供）或 localhost。人工訊號交換沒有伺服器代替保管邀請；兩端需同時在線，並在逾時前完成 Offer／Answer 交換。</p>
             <p className="mt-2">排查順序：先讓兩台裝置在同一 Wi-Fi 測試，再改用不同網路（例如一端行動網路）。候選類型統計與 gathering complete 都不代表路徑可達；只有 DataChannel readyState 為 open 才算成功。</p>
           </div>
         </section>
 
-        <p className="mt-4 text-center text-[11px] text-slate-500">不建立自訂後端、不使用資料庫、不寫入 localStorage；中斷或離開頁面會清除本次 SDP 與連線。</p>
+        <p className="mt-4 text-center text-[11px] text-slate-500">不建立自訂後端、不使用資料庫、不將 SDP 寫入 localStorage；跨頁切換會保留連線，直到你手動中斷或關閉分頁。</p>
       </div>
     </main>
   );

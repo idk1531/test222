@@ -21,6 +21,8 @@ import {
   type StudyDeskPosition,
 } from "./study";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
+import { applySharedContentOperationsToState, type SharedContentOperation } from "./sharedContent";
+import { getCollaborativeTextAtPath, setCollaborativeTextAtPath } from "./collaborationEditing";
 
 // v8.0：虛擬書房資料結構（分類/書本/視角）隨工作區一起保存。
 // 讀取時先找新 key，找不到再讀舊 key 遷移；舊 key 保留不刪（舊資料不能掉）。
@@ -129,6 +131,7 @@ function loadInitialState(): WorkspaceState {
 
 let state: WorkspaceState = loadInitialState();
 const listeners = new Set<() => void>();
+let collaborationReadOnly = false;
 
 function persist(next: WorkspaceState) {
   if (typeof window === "undefined") return;
@@ -157,7 +160,8 @@ function schedulePersist() {
   }, 250);
 }
 
-function setState(recipe: (s: WorkspaceState) => WorkspaceState, options: { deferPersist?: boolean } = {}) {
+function setState(recipe: (s: WorkspaceState) => WorkspaceState, options: { deferPersist?: boolean; allowReadOnly?: boolean } = {}) {
+  if (collaborationReadOnly && !options.allowReadOnly) return;
   state = recipe(state);
   state = { ...state, savedAt: new Date().toISOString() };
   if (options.deferPersist) schedulePersist();
@@ -191,6 +195,35 @@ export function subscribe(l: () => void) {
 
 export function getState(): WorkspaceState {
   return state;
+}
+
+/** Keep shared workspace mutations read-only for guests assigned the viewer role. */
+export function setCollaborationReadOnly(readOnly: boolean): void {
+  collaborationReadOnly = readOnly;
+}
+
+/** Apply a validated state received from the P2P document layer, even for a viewer. */
+export function replaceWorkspaceStateFromRemote(next: WorkspaceState): void {
+  const migrated = applySchemaMigrations(next);
+  setState(() => migrated, { allowReadOnly: true });
+}
+
+/** Apply only card/book records from a validated P2P message; unrelated local data stays local. */
+export function applySharedContentOperations(operations: SharedContentOperation[]): void {
+  if (!operations.length) return;
+  setState((current) => applySharedContentOperationsToState(current, operations), { allowReadOnly: true });
+}
+
+/** Apply a validated live text CRDT value locally without producing a record-level LWW edit. */
+export function applyCollaborativeTextUpdate(cardId: string, path: string, value: string): void {
+  setState((current) => {
+    const card = current.cards.find((item) => item.id === cardId);
+    if (!card || getCollaborativeTextAtPath(card, path) === value) return current;
+    return {
+      ...current,
+      cards: current.cards.map((item) => item.id === cardId ? setCollaborativeTextAtPath(item, path, value) : item),
+    };
+  }, { deferPersist: true, allowReadOnly: true });
 }
 
 export function useWorkspaceState(): WorkspaceState {

@@ -82,8 +82,14 @@ assert.ok(!COLLIDERS.some((collider) =>
   diagonal.x > collider.minX - PLAYER_RADIUS && diagonal.x < collider.maxX + PLAYER_RADIUS &&
   diagonal.z > collider.minZ - PLAYER_RADIUS && diagonal.z < collider.maxZ + PLAYER_RADIUS
 ), "斜向分離後不可仍與 AABB 重疊");
+const otherPlayer = { x: 0, z: 0 };
+const playerSeparation = resolveCollision(0.32, 0, PLAYER_RADIUS, false, false, undefined, otherPlayer);
+assert.ok(Math.hypot(playerSeparation.x - otherPlayer.x, playerSeparation.z - otherPlayer.z) >= PLAYER_RADIUS * 2 - 1e-9,
+  "雙人共享時不可穿過遠端玩家的水平碰撞範圍");
+assert.deepEqual(resolveCollision(1, 0, PLAYER_RADIUS, false, false, undefined, otherPlayer), { x: 1, z: 0 },
+  "遠離遠端玩家時不應被動態玩家碰撞體推動");
 assert.equal(groundHeightAt(0, 0), 0);
-console.log("  ✓ 家具 AABB footprint、桌緣碰撞、斜角滑動與平地高度");
+console.log("  ✓ 家具／遠端玩家 AABB 碰撞、桌緣、斜角滑動與平地高度");
 
 // 坐下觸發與「坐著滑進桌下 → F 安全起立」防死鎖。
 assert.deepEqual(SIT, { triggerRadius: 0.34, seatY: 0.42, eyeY: 1.18, walkSpeed: 1.15, fov: 58, fadeOpacity: 0.25 });
@@ -461,4 +467,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產 / v8.3 西牆書牆＋對照視角＋層板堆疊 / v8.4 actions, AABB, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產 / v8.3 西牆書牆＋對照視角＋層板堆疊 / v8.4 actions, furniture and remote-player AABB, jump, sit)");

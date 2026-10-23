@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { CardData } from "./KnowledgeCardNode";
 import { MathText } from "./MathText";
 import { FONT_OPTIONS, resolveFont } from "@/lib/fonts";
@@ -25,6 +25,17 @@ import {
   FourPointCheckPanel,
 } from "./CardPaperSections";
 import { CardEditContext } from "./CardPaperEditor";
+import { useCollaboration } from "@/components/CollaborationProvider";
+import {
+  collectCollaborativeTextChanges,
+  findCollaborativeTextPathByValue,
+  hasCollaborativeTextPathStructure,
+  humanizeCollaborativeTextPath,
+  setCollaborativeTextAtPath,
+  stripCollaborativeTextFields,
+  toCodePointOffset,
+  type RemoteEditingPresence,
+} from "@/lib/collaborationEditing";
 import {
   X, Sparkles, Save, Trash2, Lock, Eye, Edit3, FileText, Files, Type,
   ChevronLeft, ChevronRight, Sigma, AlertCircle, CheckCircle, AlertTriangle, ShieldCheck, KeyRound,
@@ -43,6 +54,61 @@ interface CardDetailModalProps {
 
 const UI = "'Varela Round', sans-serif";
 
+function applyCollaborativeTextSnapshot(card: CardData, snapshot: Array<{ path: string; value: string }>): CardData {
+  return snapshot.reduce((current, entry) => setCollaborativeTextAtPath(current, entry.path, entry.value), card);
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+function mergeCardDraftValue(base: unknown, local: unknown, remote: unknown): unknown {
+  if (sameJsonValue(local, remote)) return local;
+  if (sameJsonValue(local, base)) return remote;
+  if (sameJsonValue(remote, base)) return local;
+
+  if (Array.isArray(local) && Array.isArray(remote)) {
+    const stableIds = local.every((item) => item && typeof item === "object" && !Array.isArray(item) && typeof item.id === "string")
+      && remote.every((item) => item && typeof item === "object" && !Array.isArray(item) && typeof item.id === "string");
+    if (stableIds) {
+      const baseItems = new Map<string, unknown>();
+      const localItems = new Map<string, unknown>();
+      const remoteItems = new Map<string, unknown>();
+      if (Array.isArray(base)) {
+        for (const item of base) if (item && typeof item === "object" && typeof item.id === "string") baseItems.set(item.id, item);
+      }
+      for (const item of local as Array<Record<string, unknown>>) localItems.set(item.id as string, item);
+      for (const item of remote as Array<Record<string, unknown>>) remoteItems.set(item.id as string, item);
+      const order = [...remoteItems.keys(), ...[...localItems.keys()].filter((id) => !remoteItems.has(id))];
+      const merged: unknown[] = [];
+      for (const id of order) {
+        const value = mergeCardDraftValue(baseItems.get(id), localItems.get(id), remoteItems.get(id));
+        if (value !== undefined) merged.push(value);
+      }
+      return merged;
+    }
+    return local;
+  }
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (isRecord(local) && isRecord(remote)) {
+    const baseRecord = isRecord(base) ? base : {};
+    const result: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(baseRecord), ...Object.keys(local), ...Object.keys(remote)])) {
+      const merged = mergeCardDraftValue(baseRecord[key], local[key], remote[key]);
+      if (merged !== undefined) result[key] = merged;
+    }
+    return result;
+  }
+  return local;
+}
+
 export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   card,
   onClose,
@@ -52,7 +118,27 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   fontFamily = "quicksand",
   initialMode = "paper-edit",
 }) => {
-  const [formData, setFormData] = useState<CardData>(JSON.parse(JSON.stringify(card)));
+  const collaboration = useCollaboration();
+  const cardRef = useRef(card);
+  const previousCardPropRef = useRef(card);
+  const {
+    getCollaborativeTextSnapshot,
+    getRemoteEditingPresence,
+    subscribeCollaborativeText,
+    subscribeRemoteEditing,
+    publishEditingPresence,
+  } = collaboration;
+  const [formData, setFormData] = useState<CardData>(() => applyCollaborativeTextSnapshot(
+    JSON.parse(JSON.stringify(card)) as CardData,
+    getCollaborativeTextSnapshot(card.id)
+  ));
+  const formDataRef = useRef(formData);
+  const activeTextTargetRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const activeTextPathRef = useRef<string | null>(null);
+  const presenceIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [remoteEditingPresence, setRemoteEditingPresence] = useState<RemoteEditingPresence[]>(() =>
+    getRemoteEditingPresence().filter((presence) => presence.cardId === card.id && presence.active)
+  );
   const [mode, setMode] = useState<"paper-edit" | "paper-preview" | "form">(() => {
     if (initialMode === "form") return "form";
     if (initialMode === "preview" || initialMode === "paper-preview") return "paper-preview";
@@ -117,9 +203,135 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     return Array.from(map.entries()).map(([modeName, v]) => ({ modeName, ...v, cardCount: v.cards.length, eligible: v.cards.length >= 3 }));
   })();
 
-  const patch = (p: Partial<CardData>) => setFormData({ ...formData, ...p });
-  const handleSave = () => { onSave(formData); onClose(); };
-  const handleSaveAndClose = () => { onSave(formData); onClose(); onExpansionTest(formData); };
+  const setCurrentFormData = useCallback((next: CardData) => {
+    formDataRef.current = next;
+    setFormData(next);
+  }, []);
+
+  const publishTargetPresence = useCallback((target: HTMLInputElement | HTMLTextAreaElement, typing: boolean, active = true) => {
+    const currentCard = cardRef.current;
+    const path = target.dataset.collaborativeTextPath
+      || (activeTextTargetRef.current === target ? activeTextPathRef.current : null);
+    if (!path || !hasCollaborativeTextPathStructure(currentCard, path)) return;
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? start;
+    publishEditingPresence({
+      cardId: currentCard.id,
+      path,
+      position: toCodePointOffset(target.value, start),
+      selectionEnd: toCodePointOffset(target.value, end),
+      typing,
+      active,
+    });
+  }, [publishEditingPresence]);
+
+  const scheduleTargetPresence = (target: HTMLInputElement | HTMLTextAreaElement, typing: boolean) => {
+    window.setTimeout(() => {
+      if (target.isConnected) publishTargetPresence(target, typing);
+    }, 0);
+  };
+
+  const handleModalFocus = (event: React.FocusEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    if (target instanceof HTMLInputElement && !["text", "search", "url", "tel", "email", "number"].includes(target.type)) return;
+    const previousTarget = activeTextTargetRef.current;
+    if (previousTarget && previousTarget !== target) publishTargetPresence(previousTarget, false, false);
+    activeTextTargetRef.current = target;
+    activeTextPathRef.current = target.dataset.collaborativeTextPath || null;
+    if (activeTextPathRef.current) scheduleTargetPresence(target, false);
+  };
+
+  const handleModalInput = (event: React.FormEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+    if (target instanceof HTMLInputElement && !["text", "search", "url", "tel", "email", "number"].includes(target.type)) return;
+    activeTextTargetRef.current = target;
+    scheduleTargetPresence(target, true);
+    if (presenceIdleTimerRef.current) clearTimeout(presenceIdleTimerRef.current);
+    presenceIdleTimerRef.current = setTimeout(() => {
+      presenceIdleTimerRef.current = null;
+      if (activeTextTargetRef.current === target && target.isConnected) publishTargetPresence(target, false);
+    }, 1_400);
+  };
+
+  const handleModalSelection = (event: React.SyntheticEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) scheduleTargetPresence(target, false);
+  };
+
+  const handleModalBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (target !== activeTextTargetRef.current) return;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) publishTargetPresence(target, false, false);
+    activeTextTargetRef.current = null;
+    activeTextPathRef.current = null;
+    if (presenceIdleTimerRef.current) clearTimeout(presenceIdleTimerRef.current);
+    presenceIdleTimerRef.current = null;
+  };
+
+  const patch = (p: Partial<CardData>) => {
+    const previous = formDataRef.current;
+    let next = { ...previous, ...p } as CardData;
+    const changes = collectCollaborativeTextChanges(previous, next);
+    const activeTarget = activeTextTargetRef.current;
+    if (activeTarget?.isConnected && document.activeElement === activeTarget && changes.length) {
+      const matching = changes.filter((change) => change.value === activeTarget.value);
+      const resolved = matching.length === 1 ? matching[0] : changes.length === 1 ? changes[0] : null;
+      if (resolved && hasCollaborativeTextPathStructure(card, resolved.path)) {
+        activeTarget.dataset.collaborativeTextPath = resolved.path;
+        activeTextPathRef.current = resolved.path;
+      }
+    }
+    if (collaboration.canCollaborateOnText) {
+      for (const change of changes) {
+        if (!hasCollaborativeTextPathStructure(card, change.path)) continue;
+        const merged = collaboration.applyCollaborativeTextChange(card.id, change.path, change.previousValue, change.value);
+        if (merged !== change.value) next = setCollaborativeTextAtPath(next, change.path, merged);
+      }
+    }
+    setCurrentFormData(next);
+  };
+
+  const resolveTextFieldPath = (value: string) => findCollaborativeTextPathByValue(formData, value);
+  const handleSave = () => { onSave(formDataRef.current); onClose(); };
+  const handleSaveAndClose = () => { onSave(formDataRef.current); onClose(); onExpansionTest(formDataRef.current); };
+
+  useEffect(() => {
+    const previous = previousCardPropRef.current;
+    previousCardPropRef.current = card;
+    cardRef.current = card;
+    if (previous.id !== card.id || previous === card) return;
+    if (JSON.stringify(stripCollaborativeTextFields(previous)) === JSON.stringify(stripCollaborativeTextFields(card))) return;
+    queueMicrotask(() => {
+      if (cardRef.current !== card) return;
+      const latestDraft = formDataRef.current;
+      const merged = mergeCardDraftValue(previous, latestDraft, card) as CardData;
+      if (!sameJsonValue(latestDraft, merged)) setCurrentFormData(merged);
+    });
+  }, [card, setCurrentFormData]);
+
+  useEffect(() => subscribeCollaborativeText((update) => {
+    if (update.cardId !== card.id) return;
+    const next = setCollaborativeTextAtPath(formDataRef.current, update.path, update.value);
+    setCurrentFormData(next);
+  }), [card.id, setCurrentFormData, subscribeCollaborativeText]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeRemoteEditing(() => {
+      setRemoteEditingPresence(getRemoteEditingPresence()
+        .filter((presence) => presence.cardId === card.id && presence.active));
+    });
+    return unsubscribe;
+  }, [card.id, getRemoteEditingPresence, subscribeRemoteEditing]);
+
+  useEffect(() => () => {
+    if (presenceIdleTimerRef.current) clearTimeout(presenceIdleTimerRef.current);
+    const target = activeTextTargetRef.current;
+    if (target && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+      publishTargetPresence(target, false, false);
+    }
+  }, [publishTargetPresence]);
 
   // ============ v5：HOW 分支樹編輯輔助（不可變更新，支援巢狀） ============
   type HowBranchForm = NonNullable<NonNullable<CardData["howData"]>["branches"]>[number];
@@ -358,6 +570,18 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             已修改
           </span>
         )}
+        {remoteEditingPresence.map((presence) => (
+          <span
+            key={presence.participantId}
+            className="inline-flex max-w-[46vw] items-center gap-1 truncate rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-semibold text-indigo-800"
+            title={`${presence.name}${presence.typing ? " 正在輸入" : " 正在編輯"}「${humanizeCollaborativeTextPath(presence.path)}」· 游標位置 ${presence.position + 1}`}
+            aria-label={`${presence.name}${presence.typing ? "正在輸入" : "正在編輯"} ${humanizeCollaborativeTextPath(presence.path)}，游標位置 ${presence.position + 1}`}
+          >
+            <span className={`h-2 w-2 flex-shrink-0 rounded-full ${presence.typing ? "animate-pulse bg-indigo-600" : "bg-indigo-300"}`} />
+            <span className="truncate">{presence.name} · {humanizeCollaborativeTextPath(presence.path)}</span>
+            <span className="flex-shrink-0 border-l border-indigo-300 pl-1">游標 {presence.position + 1}</span>
+          </span>
+        ))}
       </div>
 
       <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 order-2 flex-wrap justify-end">
@@ -440,7 +664,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         <button
           onClick={() => {
             if (window.confirm("確定要復原至本次開啟時的初始狀態嗎？未儲存的修改將會遺失。")) {
-              setFormData(JSON.parse(JSON.stringify(card)));
+              setCurrentFormData(JSON.parse(JSON.stringify(card)) as CardData);
             }
           }}
           disabled={!isDirty}
@@ -541,8 +765,22 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     const isEditable = mode === "paper-edit";
 
     return (
-      <CardEditContext.Provider value={{ editable: isEditable, patch, card: formData }}>
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4">
+      <CardEditContext.Provider value={{
+        editable: isEditable,
+        patch,
+        card: formData,
+        resolveTextFieldPath,
+        remoteTextPresence: remoteEditingPresence,
+      }}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4"
+          onFocusCapture={handleModalFocus}
+          onInputCapture={handleModalInput}
+          onSelectCapture={handleModalSelection}
+          onKeyUpCapture={handleModalSelection}
+          onClickCapture={handleModalSelection}
+          onBlurCapture={handleModalBlur}
+        >
           <div className="modal-frame bg-slate-100 sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-5xl sm:max-h-[96vh] flex flex-col overflow-hidden safe-top safe-bottom">
             {Toolbar}
 
@@ -694,7 +932,15 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   ] as const;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4"
+      onFocusCapture={handleModalFocus}
+      onInputCapture={handleModalInput}
+      onSelectCapture={handleModalSelection}
+      onKeyUpCapture={handleModalSelection}
+      onClickCapture={handleModalSelection}
+      onBlurCapture={handleModalBlur}
+    >
       <div className="modal-frame bg-white sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-4xl sm:max-h-[94vh] flex flex-col overflow-hidden safe-top safe-bottom">
         {Toolbar}
 

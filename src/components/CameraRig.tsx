@@ -106,11 +106,16 @@ export const CameraRig: React.FC<{
   onChairTriggerChange?: (inTrigger: boolean) => void;
   /** 準心目前對到的資料書（給「E 拿起」提示用；null = 沒有） */
   onFocusChange?: (cardId: string | null) => void;
+  /** 將本機玩家姿態輸出給同室 P2P presence；呼叫頻率由 DataChannel 傳輸層節流。 */
+  onPoseChange?: (pose: PlayerPose) => void;
+  /** 唯讀者仍可環顧與開啟內容，但不能移動、跳躍、拿放書或坐起。 */
+  movementEnabled?: boolean;
   /** 第一／第三人稱；只影響相機與人物呈現，不寫入 schema。 */
   viewMode?: ViewMode;
   onToggleView?: () => void;
   playerRef?: React.MutableRefObject<PlayerPose>;
-}> = ({ api, initialCamera, joystickRef, onEnterWork, onExitWork, rigRef, persistCamera, interactionRef, chairRigRef, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, viewMode = "first", onToggleView, playerRef }) => {
+  otherPlayerRef?: React.MutableRefObject<PlayerPose>;
+}> = ({ api, initialCamera, joystickRef, onEnterWork, onExitWork, rigRef, persistCamera, interactionRef, chairRigRef, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, onPoseChange, movementEnabled = true, viewMode = "first", onToggleView, playerRef, otherPlayerRef }) => {
   const camera = api.camera;
   const initialPosition = clampRoomPosition(initialCamera.x ?? 0.9, initialCamera.z ?? 1.55);
   const stateRef = useRef({
@@ -152,6 +157,7 @@ export const CameraRig: React.FC<{
   const pointerLockCallbackRef = useRef(onPointerLockChange);
   const chairTriggerCallbackRef = useRef(onChairTriggerChange);
   const focusCallbackRef = useRef(onFocusChange);
+  const poseCallbackRef = useRef(onPoseChange);
   const focusCardRef = useRef<string | null>(null);
   const lastFocusCheckRef = useRef(0);
   const previousChairTriggerRef = useRef(false);
@@ -172,6 +178,7 @@ export const CameraRig: React.FC<{
   const wasMovingRef = useRef(false);
   const movingRef = useRef(false);
   const viewModeRef = useRef<ViewMode>(viewMode);
+  const movementEnabledRef = useRef(movementEnabled);
   const toggleViewRef = useRef(onToggleView);
   const localPoseRef = useRef<PlayerPose | null>(null);
   const poseRef = playerRef ?? localPoseRef;
@@ -184,8 +191,14 @@ export const CameraRig: React.FC<{
     pointerLockCallbackRef.current = onPointerLockChange;
     chairTriggerCallbackRef.current = onChairTriggerChange;
     focusCallbackRef.current = onFocusChange;
+    poseCallbackRef.current = onPoseChange;
+    movementEnabledRef.current = movementEnabled;
     toggleViewRef.current = onToggleView;
-  }, [persistCamera, onEnterWork, onExitWork, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, onToggleView]);
+    if (!movementEnabled) {
+      keysRef.current.clear();
+      joystickRef.current = { x: 0, y: 0 };
+    }
+  }, [persistCamera, onEnterWork, onExitWork, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, onPoseChange, movementEnabled, onToggleView, joystickRef]);
   // View mode lives outside the schema; snapping once keeps the toggle from sweeping through the room.
   const viewModeChangedRef = useRef(viewMode);
   const interactWithChair = () => interactWithChairRef.current();
@@ -291,6 +304,13 @@ export const CameraRig: React.FC<{
     // pointRoomCamera 讀取 refs，不需列入依賴。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
+
+  const currentOtherPlayerPosition = () => {
+    const pose = otherPlayerRef?.current;
+    return pose?.visible && Number.isFinite(pose.x) && Number.isFinite(pose.z)
+      ? { x: pose.x, z: pose.z }
+      : undefined;
+  };
 
   const storeCamera = () => {
     const s = stateRef.current;
@@ -502,7 +522,7 @@ export const CameraRig: React.FC<{
         s.z >= rect.minZ - 0.3 && s.z <= rect.maxZ + 0.3
       );
       if (!overlap) return;
-      const safe = resolveCollision(s.x, s.z, 0.30, true);
+      const safe = resolveCollision(s.x, s.z, 0.30, true, false, undefined, currentOtherPlayerPosition());
       s.x = safe.x;
       s.z = safe.z;
       pointRoomCamera();
@@ -539,6 +559,7 @@ export const CameraRig: React.FC<{
         chairInTrigger: interactionRef.current.chairInTrigger,
       };
       const action = resolveAction(actionHit, key, context);
+      if (!movementEnabledRef.current && ["jump", "sit", "stand", "pickUp", "putOnDesk", "returnToShelf"].includes(action.type)) return;
       if (action.type === "jump" && stateRef.current.onGround && !interactionRef.current.seated) {
         stateRef.current.jumpVelocity = JUMP.velocity;
         stateRef.current.onGround = false;
@@ -562,6 +583,7 @@ export const CameraRig: React.FC<{
     };
     interactWithChairRef.current = () => performInteraction("KeyF", undefined, undefined, true, "chair");
     const jumpIfPossible = () => {
+      if (!movementEnabledRef.current) return;
       const active = document.activeElement as HTMLElement | null;
       // 輸入框聚焦時不跳（與鍵盤 Space 同一條規則）。
       const typing = !!active?.closest("input,textarea,select,[contenteditable='true'],[role='textbox']");
@@ -889,11 +911,17 @@ export const CameraRig: React.FC<{
         current.onGround = jump.onGround;
       }
       const keys = keysRef.current;
-      let forward = Number(keys.has("w") || keys.has("arrowup")) - Number(keys.has("s") || keys.has("arrowdown"));
-      let side = Number(keys.has("d") || keys.has("arrowright")) - Number(keys.has("a") || keys.has("arrowleft"));
+      let forward = movementEnabledRef.current
+        ? Number(keys.has("w") || keys.has("arrowup")) - Number(keys.has("s") || keys.has("arrowdown"))
+        : 0;
+      let side = movementEnabledRef.current
+        ? Number(keys.has("d") || keys.has("arrowright")) - Number(keys.has("a") || keys.has("arrowleft"))
+        : 0;
       const joy = joystickRef.current;
-      forward += joy.y;
-      side += joy.x;
+      if (movementEnabledRef.current) {
+        forward += joy.y;
+        side += joy.x;
+      }
       const len = Math.hypot(forward, side);
       if (len > 1) { forward /= len; side /= len; }
       movingRef.current = len > 0.02;
@@ -917,7 +945,8 @@ export const CameraRig: React.FC<{
           PLAYER_RADIUS,
           seatedNow || seatedApproach,
           seatedNow,
-          { x: chairX, z: chairZ }
+          { x: chairX, z: chairZ },
+          currentOtherPlayerPosition()
         );
         const pos = clampRoomPosition(separated.x, separated.z);
         stateRef.current.x = pos.x;
@@ -944,6 +973,7 @@ export const CameraRig: React.FC<{
         visible: modeRef.current === "room" && !flyingRef.current,
         holding: !!interactionRef.current.heldCardId,
       };
+      poseCallbackRef.current?.(poseRef.current);
       // 第三人稱每幀平滑跟隨；第一人稱只在移動/跳躍時重設相機（維持既有行為）。
       if (viewModeRef.current === "third") pointRoomCamera(dt);
       // 準心聚焦提示：每 120 ms 才做一次 raycast，避免拖慢手機。
