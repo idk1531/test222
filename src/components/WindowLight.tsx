@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
-import { AMBIENT, PALETTE, ROOM, SHELF, SHELF_INWARD, SHELF_WASH, SUN, WINDOW, WINDOW_FILL } from "@/lib/room3d";
+import { AMBIENT, PALETTE, ROOM, SHELF, SHELF_INWARD, SHELF_WASH, SUN, SUN_SHADOW_CAMERA, WINDOW, WINDOW_FILL } from "@/lib/room3d";
 import { attachPhotoMap } from "@/lib/roomTextures";
 
 /**
@@ -37,10 +37,10 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     sun.castShadow = true;
     sun.shadow.mapSize.set(api.quality.shadowMap, api.quality.shadowMap);
     // v8.3：光源改由東側進光（書牆在西牆），陰影視錐涵蓋整個房間對角
-    sun.shadow.camera.left = -4.6;
-    sun.shadow.camera.right = 4.6;
-    sun.shadow.camera.top = 4.2;
-    sun.shadow.camera.bottom = -3.4;
+    sun.shadow.camera.left = SUN_SHADOW_CAMERA.left;
+    sun.shadow.camera.right = SUN_SHADOW_CAMERA.right;
+    sun.shadow.camera.top = SUN_SHADOW_CAMERA.top;
+    sun.shadow.camera.bottom = SUN_SHADOW_CAMERA.bottom;
     sun.shadow.camera.near = 0.1;
     sun.shadow.camera.far = 18;
     sun.shadow.bias = -0.00022;
@@ -68,8 +68,10 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
         0.92,
         1.4
       );
-      spot.position.set(-0.7 + i * 1.8, ROOM.height - 0.08, 0.15 + (i % 2) * 0.7);
-      spot.target.position.set(-0.9 + i * 1.6, 0, 1.1 + (i % 2) * 0.5);
+      const lightX = -ROOM.width * 0.12 + i * ROOM.width * 0.24;
+      const lightZ = i % 2 === 0 ? -ROOM.depth * 0.15 : ROOM.depth * 0.23;
+      spot.position.set(lightX, ROOM.height - 0.08, lightZ);
+      spot.target.position.set(lightX * 0.85, 0, lightZ + ROOM.depth * 0.25);
       spot.castShadow = false;
       g.add(spot, spot.target);
     }
@@ -139,7 +141,11 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
           side: THREE.DoubleSide,
         });
         const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.4 + i * 0.12, 2.1), material);
-        plane.position.set(WINDOW.cx - 0.78 + i * 0.44, 1.04, -0.62 + i * 0.13);
+        plane.position.set(
+          WINDOW.cx + (i - 1) * WINDOW.width * 0.13,
+          1.04,
+          -ROOM.depth / 2 + ROOM.depth * (0.38 + i * 0.026)
+        );
         plane.rotation.x = -0.31;
         plane.rotation.z = -0.13;
         shafts.add(plane);
@@ -150,9 +156,9 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
       const count = 70;
       const positions = new Float32Array(count * 3);
       for (let i = 0; i < count; i++) {
-        positions[i * 3] = WINDOW.cx - 1.6 + Math.random() * 2.6;
+        positions[i * 3] = WINDOW.cx - WINDOW.width * 0.3 + Math.random() * WINDOW.width * 0.5;
         positions[i * 3 + 1] = 0.75 + Math.random() * 1.7;
-        positions[i * 3 + 2] = -0.48 + Math.random() * 1.8;
+        positions[i * 3 + 2] = -ROOM.depth / 2 + ROOM.depth * (0.4 + Math.random() * 0.36);
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));

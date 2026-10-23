@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { InfiniteCanvas, CanvasObjectData, RelationData } from "@/components/InfiniteCanvas";
 import type { CardData } from "@/components/KnowledgeCardNode";
 import { useWorkspaceState, actions, exportFile, copyExportJson, importFile, resetToSeed, getState } from "@/lib/store";
@@ -50,6 +51,7 @@ import {
   ClipboardCopy,
   GraduationCap,
   Library,
+  Radio,
 } from "lucide-react";
 
 interface BackgroundConfig {
@@ -463,6 +465,14 @@ export default function WorkbenchPage() {
                 <span>{label}</span>
               </button>
             ))}
+            <Link
+              href="/connect/"
+              className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap"
+              style={{ color: appTheme.tabInactiveText }}
+            >
+              <Radio className="w-3 h-3" />
+              <span>連線</span>
+            </Link>
           </div>
         </div>
 
@@ -647,6 +657,14 @@ export default function WorkbenchPage() {
                   <span>{label}</span>
                 </button>
               ))}
+              <Link
+                href="/connect/"
+                onClick={() => setShowMobileMenu(false)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-semibold text-blue-700 bg-blue-50/70 hover:bg-blue-100 mb-0.5"
+              >
+                <Radio className="w-4 h-4" />
+                <span>點對點連線</span>
+              </Link>
 
               <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1 mt-3">設定</div>
               <button

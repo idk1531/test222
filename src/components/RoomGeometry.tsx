@@ -9,8 +9,10 @@ import {
   BLINDS,
   CABINET,
   CABINET_FOOTPRINT,
+  canvasSizeForPlane,
   DESK,
   DESK_FOOTPRINT,
+  DESK_PREVIEW_PLANE,
   FIDELITY,
   LOOK,
   MARBLE_ROUGH,
@@ -26,6 +28,7 @@ import {
   type TextureKey,
 } from "@/lib/room3d";
 import { attachPhotoMap, type AttachOptions } from "@/lib/roomTextures";
+import { canvasCJKFont, ensureCanvasCJKFont } from "@/lib/fonts";
 
 // ================= 程式化貼圖（canvas → CanvasTexture） =================
 
@@ -172,6 +175,31 @@ function drawWarmGlow(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillRect(0, 0, w, h);
 }
 
+const DESK_PREVIEW_WIDTH = DESK_PREVIEW_PLANE.width;
+const DESK_PREVIEW_HEIGHT = DESK_PREVIEW_PLANE.height;
+const DESK_PREVIEW_CANVAS = canvasSizeForPlane(
+  DESK_PREVIEW_WIDTH,
+  DESK_PREVIEW_HEIGHT,
+  Math.round(640 * DESK_PREVIEW_HEIGHT / DESK_PREVIEW_WIDTH)
+);
+
+function fitCanvasFontSize(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  family: string,
+  weight: number,
+  preferredSize: number,
+  maxWidth: number,
+  minSize = 8
+): number {
+  for (let size = Math.max(minSize, Math.floor(preferredSize)); size >= minSize; size--) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    if (ctx.measureText(text).width <= maxWidth) return size;
+  }
+  ctx.font = `${weight} ${minSize}px ${family}`;
+  return minSize;
+}
+
 /**
  * 桌面「畫布預覽」貼圖（房間模式用，非互動）：
  * 把畫布物件的配置／標題畫成紙面縮圖。點擊進入工作視角後即為真實畫布。
@@ -188,10 +216,10 @@ function drawDeskPreview(
   const objs = objects.filter((o) => !o.isHidden);
   if (objs.length === 0) {
     ctx.fillStyle = "#8a7a66";
-    ctx.font = "600 22px 'Noto Sans TC', sans-serif";
+    ctx.font = `600 22px ${canvasCJKFont()}`;
     ctx.textAlign = "center";
     ctx.fillText("畫布是空的", w / 2, h / 2 - 26);
-    ctx.font = "16px 'Noto Sans TC', sans-serif";
+    ctx.font = `500 16px ${canvasCJKFont()}`;
     ctx.fillText("點擊桌面進入工作視角，使用上方「＋」新增卡片", w / 2, h / 2 + 4);
     return;
   }
@@ -224,12 +252,20 @@ function drawDeskPreview(
     roundRect(ctx, x, y, ow, oh, 6 * scale);
     ctx.fill();
     ctx.stroke();
-    // 標題（最多 2 行）
+    // 標題自動縮字級以符合紙面寬度，不使用 fillText(maxWidth) 非等比壓縮字形。
     ctx.fillStyle = "#44403c";
-    ctx.font = `600 ${Math.max(9, 11 * scale)}px 'Noto Sans TC', sans-serif`;
     ctx.textAlign = "left";
     const title = titleOf(o) || "（未命名）";
-    ctx.fillText(title, x + 6 * scale, y + 14 * scale, ow - 12 * scale);
+    const titleFontSize = fitCanvasFontSize(
+      ctx,
+      title,
+      canvasCJKFont(),
+      600,
+      Math.max(9, 11 * scale),
+      Math.max(12, ow - 12 * scale)
+    );
+    ctx.font = `600 ${titleFontSize}px ${canvasCJKFont()}`;
+    ctx.fillText(title, x + 6 * scale, y + 14 * scale);
     // 頂端色條（節點主色）
     ctx.fillStyle = accent;
     ctx.fillRect(x, y, ow, Math.max(2, 3 * scale));
@@ -416,7 +452,7 @@ export const RoomGeometry: React.FC<{
       metalness: 0.02,
       envMapIntensity: 0.05,
     });
-    const initialPaperTexture = canvasTexture(640, 400, (c, w, h) =>
+    const initialPaperTexture = canvasTexture(DESK_PREVIEW_CANVAS.width, DESK_PREVIEW_CANVAS.height, (c, w, h) =>
       drawDeskPreview(c, w, h, objects, cards)
     );
     paperTextureRef.current = initialPaperTexture;
@@ -533,8 +569,8 @@ export const RoomGeometry: React.FC<{
     const lampMatBlack = new THREE.MeshStandardMaterial({ color: "#2a2621", roughness: 0.75 });
     disposers.push(() => lampMatBlack.dispose());
     for (const [lx, lz] of [
-      [0.55, -0.75],
-      [-0.55, 1.15],
+      [-ROOM.width * 0.12, -ROOM.depth * 0.15],
+      [ROOM.width * 0.12, ROOM.depth * 0.23],
     ] as const) {
       group.add(box(0.13, 0.014, 0.13, lampMatBlack, lx, H - 0.007, lz, { cast: false }));
       group.add(box(0.085, 0.006, 0.085, lampMat, lx, H - 0.016, lz, { cast: false, receive: false }));
@@ -795,12 +831,13 @@ export const RoomGeometry: React.FC<{
 
     // ---- 桌面紙面（畫布載體；房間模式顯示預覽，可點擊進入工作視角） ----
     const paper = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.7, DESK.depth - 0.26),
+      new THREE.PlaneGeometry(DESK_PREVIEW_WIDTH, DESK_PREVIEW_HEIGHT),
       paperMat
     );
     paper.rotation.x = -Math.PI / 2;
-    // 紙面靠桌左半（閃開窗台大理石與右側的筆電／小物／盆栽）
-    paper.position.set(-1.35, DESK.top + 0.001, deskZ + 0.03);
+    // 紙面置於主桌左側約 20% 處，並留出筆電、托盤與盆栽的桌面空間。
+    const paperX = deskX0 + (deskX1 - deskX0) * 0.2;
+    paper.position.set(paperX, DESK.top + 0.001, deskZ + 0.03);
     paper.castShadow = false;
     paper.receiveShadow = true;
     paper.userData.kind = "deskCanvas";
@@ -830,7 +867,9 @@ export const RoomGeometry: React.FC<{
       });
       const rug = new THREE.Mesh(new THREE.PlaneGeometry(rugW, rugD), rugMat);
       rug.rotation.x = -Math.PI / 2;
-      rug.position.set(0.05, 0.008, 0.6);
+      const rugX = (DESK_FOOTPRINT[0].minX + DESK_FOOTPRINT[0].maxX) / 2;
+      const rugZ = DESK_FOOTPRINT[0].maxZ + 0.12 + rugD / 2;
+      rug.position.set(rugX, 0.008, rugZ);
       rug.receiveShadow = true;
       rug.castShadow = false;
       group.add(rug);
@@ -1044,22 +1083,29 @@ export const RoomGeometry: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, shelfRows]);
 
-  // ---- 桌面紙面預覽貼圖：畫布物件變動時 debounce 重畫 ----
+  // ---- 桌面紙面預覽貼圖：畫布物件變動時 debounce 重畫；等待離線自帶的 CJK 字型就緒 ----
   useEffect(() => {
+    let cancelled = false;
     const t = window.setTimeout(() => {
-      const mesh = paperRef.current;
-      if (!mesh) return;
-      const mat = mesh.material as THREE.MeshStandardMaterial;
-      const tex = canvasTexture(640, 400, (c, w, h) =>
-        drawDeskPreview(c, w, h, objects, cards)
-      );
-      const old = mat.map;
-      mat.map = tex;
-      paperTextureRef.current = tex;
-      mat.needsUpdate = true;
-      if (old) old.dispose();
+      void ensureCanvasCJKFont().then(() => {
+        if (cancelled) return;
+        const mesh = paperRef.current;
+        if (!mesh) return;
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        const tex = canvasTexture(DESK_PREVIEW_CANVAS.width, DESK_PREVIEW_CANVAS.height, (c, w, h) =>
+          drawDeskPreview(c, w, h, objects, cards)
+        );
+        const old = mat.map;
+        mat.map = tex;
+        paperTextureRef.current = tex;
+        mat.needsUpdate = true;
+        if (old) old.dispose();
+      });
     }, 250);
-    return () => window.clearTimeout(t);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
   }, [objects, cards]);
 
   return null;

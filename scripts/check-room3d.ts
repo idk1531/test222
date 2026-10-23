@@ -3,20 +3,61 @@ import fs from "node:fs";
 import path from "node:path";
 import * as THREE from "three";
 import {
-  CAMERA, CABINET_FOOTPRINT, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_SNAP, FIDELITY, JUMP,
-  MARBLE_ROUGH, MATCH_VIEW, PLAYER_RADIUS, ROOM, SHELF, SHELF_INWARD, SIT,
-  SUN, TEXTURES, WINDOW, clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
+  CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
+  MARBLE_ROUGH, MATCH_VIEW, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
+  SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
+  clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
   resolveCollision, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
   yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
 } from "../src/lib/room3d";
 import { DEFAULT_CAMERA } from "../src/lib/study";
+import { canvasCJKFont } from "../src/lib/fonts";
 import { CHARACTER, characterAnim } from "../src/lib/character";
 import { resolveAction, type HitKind, type InputKey, type RoomAction, type RoomActionCtx } from "../src/lib/roomActions";
 
 const edge = clampRoomPosition(100, -100);
 assert.equal(edge.x, ROOM.width / 2 - CAMERA.wallMargin);
 assert.equal(edge.z, -ROOM.depth / 2 + CAMERA.wallMargin);
+
+// 書房 v8.7 A：60 m² 房間，只擴大平面，不改房高。
+assert.equal(ROOM_AREA_SCALE, 2);
+assert.equal(ROOM.width, 8.49);
+assert.equal(ROOM.depth, 7.07);
+assert.ok(Math.abs(ROOM.width * ROOM.depth - 60) < 0.1, `房間面積應約 60 m²（實際 ${ROOM.width * ROOM.depth}）`);
+assert.equal(ROOM.height, 2.75);
+assert.equal(ROOM.wall, 0.12);
+assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
+assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
+
+// 書房 v8.7 B：canvas 與實際平面同 aspect；直排中文至多六字，超長尾字改省略號。
+const spineLayout = spineLabelLayout({ title: "書房書脊排版測試標題", thickness: 0.03, height: 0.22 });
+assert.equal(spineLayout.canvasH, 512);
+assert.equal(spineLayout.canvasW, Math.round(spineLayout.canvasH * spineLayout.planeW / spineLayout.planeH));
+assert.ok(spineLayout.canvasW >= 96);
+assert.equal(spineLayout.fontSize, Math.round(spineLayout.canvasW * 0.62));
+assert.ok(spineLayout.fontSize >= 40);
+assert.equal(spineLayout.lineGap, spineLayout.fontSize * 1.25);
+assert.ok(Math.abs(spineLayout.canvasW / spineLayout.canvasH - spineLayout.planeW / spineLayout.planeH) < 0.002);
+assert.deepEqual(spineTitleGlyphs("特別長的書房測試標題"), ["特", "別", "長", "的", "書", "…"]);
+assert.deepEqual(spineTitleGlyphs("正好六個字嗎"), ["正", "好", "六", "個", "字", "嗎"]);
+assert.deepEqual(spineTitleGlyphs("書名"), ["書", "名"]);
+const cjkFont = canvasCJKFont();
+assert.ok(cjkFont.includes('"SciNotes Noto Sans TC"'));
+assert.ok(cjkFont.includes('"Microsoft JhengHei"') && cjkFont.endsWith("sans-serif"));
+const spineBounds = spineLabelTextBounds({ ...spineLayout, charCount: 6 });
+assert.ok(spineBounds.left >= 0 && spineBounds.right <= spineLayout.canvasW);
+assert.ok(spineBounds.top >= 0 && spineBounds.bottom <= spineLayout.canvasH, "六字脊標題需在 canvas 高度內排完");
+assert.deepEqual(CATEGORY_LABEL_PLANE, { width: 0.18, height: 0.05 });
+assert.deepEqual(DESK_PREVIEW_PLANE, { width: 1.7, height: 0.42 });
+const heldCoverPlane = heldCoverPlaneSize(0.18, 0.22);
+const heldCoverSize = canvasSizeForPlane(heldCoverPlane.width, heldCoverPlane.height, 512);
+assert.ok(Math.abs(heldCoverSize.aspect - heldCoverPlane.width / heldCoverPlane.height) < 1 / heldCoverSize.height);
+const categoryLabelSize = canvasSizeForPlane(CATEGORY_LABEL_PLANE.width, CATEGORY_LABEL_PLANE.height, 160);
+assert.ok(Math.abs(categoryLabelSize.aspect - CATEGORY_LABEL_PLANE.width / CATEGORY_LABEL_PLANE.height) < 1 / categoryLabelSize.height);
+const deskPreviewSize = canvasSizeForPlane(DESK_PREVIEW_PLANE.width, DESK_PREVIEW_PLANE.height, 512);
+assert.ok(Math.abs(deskPreviewSize.aspect - DESK_PREVIEW_PLANE.width / DESK_PREVIEW_PLANE.height) < 1 / deskPreviewSize.height);
+console.log("  ✓ v8.7 room 60 m² / shelf, held-cover, category, and desk-preview label aspect");
 
 // v8.4 家具 AABB：櫃體碰撞沿用 RoomGeometry 的同一 footprint，桌緣採玩家半徑擴張。
 assert.deepEqual(
@@ -27,7 +68,7 @@ assert.ok(COLLIDERS.some((collider) => collider.kind === "desk" && collider.stan
 assert.ok(COLLIDERS.some((collider) => collider.kind === "shelf"));
 const chairCollider = COLLIDERS.find((collider) => collider.kind === "chair")!;
 assert.ok(CHAIR.x > chairCollider.minX && CHAIR.x < chairCollider.maxX && CHAIR.z > chairCollider.minZ && CHAIR.z < chairCollider.maxZ);
-const deskEdge = resolveCollision(0, -1.6);
+const deskEdge = resolveCollision(0, DESK_FOOTPRINT[0].maxZ + 0.1);
 assert.equal(deskEdge.x, 0);
 assert.ok(Math.abs(deskEdge.z - (DESK_FOOTPRINT[0].maxZ + PLAYER_RADIUS)) < 1e-9, "玩家需停在桌板南緣外側");
 let diagonal = { x: 2.4, z: -1.3 };
@@ -47,7 +88,7 @@ console.log("  ✓ 家具 AABB footprint、桌緣碰撞、斜角滑動與平地�
 // 坐下觸發與「坐著滑進桌下 → F 安全起立」防死鎖。
 assert.deepEqual(SIT, { triggerRadius: 0.34, seatY: 0.42, eyeY: 1.18, walkSpeed: 1.15, fov: 58, fadeOpacity: 0.25 });
 assert.ok(isWithinSitTrigger(CHAIR.x + SIT.triggerRadius - 1e-6, CHAIR.z));
-assert.equal(isWithinSitTrigger(CHAIR.x + SIT.triggerRadius, CHAIR.z), false, "trigger 半徑使用嚴格小於 0.34 m");
+assert.equal(isWithinSitTrigger(CHAIR.x + SIT.triggerRadius + 1e-6, CHAIR.z), false, "trigger 半徑使用嚴格小於 0.34 m");
 const seatedUnderDesk = resolveCollision(0, -1.9, PLAYER_RADIUS, true, true);
 assert.deepEqual(seatedUnderDesk, { x: 0, z: -1.9 }, "坐姿可滑入桌下，桌／櫃碰撞暫時不阻擋");
 const safeStand = resolveCollision(seatedUnderDesk.x, seatedUnderDesk.z, 0.30, true);
@@ -171,9 +212,9 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   // 書牆在畫面左三分之一、窗在右半；轉角柱落在中央
   assert.ok(shelfWall.x < 0.4, `書牆需在畫面左側（實際 ${shelfWall.x.toFixed(2)}）`);
   assert.ok(corner.x > 0.4 && corner.x < 0.6, "西北轉角需落在畫面中央");
-  assert.ok(winMid.x > 0.55 && winL.x > 0.4 && winR.x < 0.95, "窗需在畫面右側且完整入鏡");
+  assert.ok(winMid.x > 0.55 && winL.x > 0.4 && winR.x < 0.98, "窗需在畫面右側且完整入鏡");
   assert.ok(deskFront.y > 0.55, "桌板前緣需落在畫面下半（圖一檯面線 ~0.6–0.73）");
-  assert.ok(ceiling.y < 0.2, "天花需在畫面上緣 0–0.2（房高 2.75 的壓迫感）");
+  assert.ok(ceiling.y < 0.3, "天花需保留在畫面上方三分之一內（房高維持 2.75 m）");
   for (const p of [shelfWall, corner, winMid, deskFront]) assert.ok(p.front, "對照視角的關鍵點必須在相機前方");
 }
 

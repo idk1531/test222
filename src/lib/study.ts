@@ -7,6 +7,8 @@
 // - 分類關聯以 categoryId 為準，不用分類名稱當 key。
 // - 本檔只放資料結構、預設值、顏色/排列 helper 與遷移；狀態與持久化仍在 store.ts。
 
+import { ROOM_DIMENSIONS } from "./roomDimensions";
+
 // ================= 型別 =================
 
 export interface StudyCategory {
@@ -86,12 +88,12 @@ export const CAMERA_LIMITS = { pitchMin: -70, pitchMax: 40 };
  * 只影響「第一次進書房」與「重置視角」；已存在的使用者相機不被覆寫。
  */
 export const DEFAULT_CAMERA: StudyCamera = {
-  // 附圖機位：站在房間南側偏東、面向西北，左側書牆＋右側窗同框。
-  // 不再貼東南角：第三人稱相機才有 1.8 m 以上的後退空間。
+  // 房間擴大後仍站在南側偏東、面向西北，維持書牆與窗景同框。
+  // 水平位置依房間寬／深比例推導；不貼牆，保留第三人稱相機的後退空間。
   yaw: -25,
   pitch: -6,
-  x: 0.66,
-  z: 1.0,
+  x: ROOM_DIMENSIONS.width * 0.247,
+  z: ROOM_DIMENSIONS.depth * 0.311,
   height: 1.55,
 };
 

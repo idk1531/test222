@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
 import {
   DESK,
+  DESK_FOOTPRINT,
   FIDELITY,
   SHELF,
   SHELF_INWARD,
@@ -121,7 +122,7 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
     };
 
     // 相框要「看得見」：最上層板留一段空位（資料書只佔北端，那段本來就空）
-    const TOPSHELF_FRAME_Z = -0.4;
+    const TOPSHELF_FRAME_Z = SHELF.z - SHELF.width * 0.1;
     for (let r = 0; r < plankCount; r++) {
       const plankY = shelfPlankY(r, plankCount);
       // v8.6：只保留「分類標籤」與每本資料書的實際厚度，其餘空隙全部補裝飾書。
@@ -183,13 +184,15 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
     // ---- 腰高檯面／矮擱板的書堆（附圖：檯面與地面層板上的橫躺書堆） ----
     {
       const stackColors = ["#3a3f47", "#7a3b34", "#c9b999", "#4a4f57", "#8a6a4a", "#6b5a45"];
+      const ledgeLength = SHELF.ledge.z1 - SHELF.ledge.z0;
+      const lowShelfLength = SHELF.lowShelf.z1 - SHELF.lowShelf.z0;
       const stackSpecs: Array<[number, number, number]> = [
-        // [y, z, count]
-        [SHELF.ledge.top, 0.52, 4],
-        [SHELF.ledge.top, 1.18, 3],
-        [SHELF.lowShelf.top, 0.32, 5],
-        [SHELF.lowShelf.top, 0.98, 4],
-        [0.02, 0.18, 5],
+        // [y, z, count] — 位置沿長檯面比例分布，不隨 room 世界座標固定在一角。
+        [SHELF.ledge.top, SHELF.ledge.z0 + ledgeLength * 0.22, 4],
+        [SHELF.ledge.top, SHELF.ledge.z0 + ledgeLength * 0.88, 3],
+        [SHELF.lowShelf.top, SHELF.lowShelf.z0 + lowShelfLength * 0.35, 5],
+        [SHELF.lowShelf.top, SHELF.lowShelf.z0 + lowShelfLength * 0.68, 4],
+        [0.02, SHELF.z + SHELF.width * 0.05, 5],
       ];
       stackSpecs.forEach(([baseY, z, count], si) => {
         const len = 0.3 + (si % 3) * 0.04;
@@ -222,10 +225,11 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
     const frameBlack = new THREE.MeshStandardMaterial({ color: "#141210", roughness: 0.6 });
     const frameFace = new THREE.MeshStandardMaterial({ color: "#cfc6b6", roughness: 0.85 });
     // 上層層板：0.26×0.30（板頂 2.42 + 0.30 < 天花 2.75）；腰高檯面：0.22×0.18（閃開 1.22 的底層板）
+    const ledgeLength = SHELF.ledge.z1 - SHELF.ledge.z0;
     const frames: Array<{ y: number; z: number; w: number; h: number }> = [
       { y: shelfPlankY(0, plankCount) + 0.151, z: TOPSHELF_FRAME_Z, w: 0.26, h: 0.3 },
-      { y: SHELF.ledge.top + 0.091, z: 0.2, w: 0.22, h: 0.18 },
-      { y: SHELF.ledge.top + 0.091, z: 0.9, w: 0.22, h: 0.18 },
+      { y: SHELF.ledge.top + 0.091, z: SHELF.ledge.z0 + ledgeLength * 0.42, w: 0.22, h: 0.18 },
+      { y: SHELF.ledge.top + 0.091, z: SHELF.ledge.z0 + ledgeLength * 0.74, w: 0.22, h: 0.18 },
     ];
     for (const fr of frames) {
       const holder = new THREE.Group();
@@ -245,6 +249,9 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
 
     // ---- 西牆回折檯面：附圖左下的相框與書堆（避免檯面中央空一大片） ----
     {
+      const sideDesk = DESK_FOOTPRINT[1];
+      const sideDeskEdgeX = inward > 0 ? sideDesk.minX : sideDesk.maxX;
+      const returnLength = sideDesk.maxZ - sideDesk.minZ;
       const back = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.34, 0.44), frameBlack);
       const face = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3), frameFace);
       face.rotation.y = inward * (Math.PI / 2);
@@ -253,13 +260,19 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
       back.receiveShadow = true;
       const holder = new THREE.Group();
       holder.add(back, face);
-      holder.position.set(SHELF.xBack + inward * 0.06, DESK.top + 0.18, -0.35);
+      holder.position.set(
+        sideDeskEdgeX + inward * 0.06,
+        DESK.top + 0.18,
+        sideDesk.minZ + returnLength * 0.72
+      );
       holder.rotation.z = inward * 0.08;
       group.add(holder);
     }
     {
       const stackColors = ["#3a3f47", "#7a3b34", "#c9b999", "#4a4f57"];
-      const baseZ = -1.2;
+      const sideDesk = DESK_FOOTPRINT[1];
+      const sideDeskEdgeX = inward > 0 ? sideDesk.minX : sideDesk.maxX;
+      const baseZ = sideDesk.minZ + (sideDesk.maxZ - sideDesk.minZ) * 0.28;
       for (let i = 0; i < 4; i++) {
         const material = new THREE.MeshStandardMaterial({ color: stackColors[i], roughness: 0.88 });
         materials.push(material);
@@ -267,7 +280,7 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
           new THREE.BoxGeometry(0.2 - i * 0.008, 0.03, 0.29 - i * 0.01),
           [material, material, material, material, material, material]
         );
-        book.position.set(SHELF.xBack + inward * 0.17, DESK.top + 0.017 + i * 0.032, baseZ + (i % 2 ? 0.01 : -0.008));
+        book.position.set(sideDeskEdgeX + inward * 0.17, DESK.top + 0.017 + i * 0.032, baseZ + (i % 2 ? 0.01 : -0.008));
         book.rotation.y = (i % 2 ? -1 : 1) * 0.04;
         book.castShadow = true;
         book.receiveShadow = true;

@@ -39,6 +39,37 @@ npx serve out                                  # 本機驗證
 
 ---
 
+## 瀏覽器點對點連線（WebRTC）
+
+`/connect/` 是獨立的 A／B 配對頁，使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`。不新增訊號伺服器、資料庫、TURN 服務或應用資料同步；Offer／Answer 是等待 ICE gathering 完成後產生的完整 JSON，必須由兩端人工複製／貼上。
+
+### A／B 操作
+
+1. 兩端都開啟同一個 HTTPS 網站（本機開發可用 localhost），前往「點對點連線」。
+2. **A 發起端**按「建立連線邀請」，等候 Offer 出現後複製，透過私下可信管道傳給 B。
+3. **B 加入端**將完整 Offer 貼入 B 區並按「產生連線回覆」；複製產生的 Answer，私下傳回 A。
+4. **A**將 Answer 貼入 A 區並按「完成連線」。只有狀態顯示 **DataChannel 已開啟** 才代表資料通道已打開；SDP 建立、ICE gathering 完成或候選路徑建立都不等於通道成功。
+5. 任一端可按「中斷連線」清除當前連線並重新配對。頁面離開時也會清理 WebRTC 資源。
+
+### 網路與隱私限制
+
+預設 STUN 為 `stun:stun.cloudflare.com:3478`，可在 UI 修改或留白停用；STUN 服務不保證永遠可用。瀏覽器會直接向所選 STUN 服務送出查詢，該服務可能看到連線來源的公網 IP。此功能**沒有 TURN 中繼**，公司防火牆、對稱 NAT 或受限行動網路可能阻擋點對點直連；逾時時需換網路或重新配對。邀請／回覆可能包含 ICE 候選位址等網路資訊，僅私下傳給預期對象，不要公開貼文或貼入日誌。頁面不把 SDP／ICE 上傳、寫入 localStorage 或記錄到 console，也不提供訊息或其他應用資料傳送功能。
+
+```bash
+npm run test:connection  # STUN／訊號格式、A/B 狀態機、DataChannel 開啟條件與取消清理的 mock 測試
+```
+
+### 相關檔案
+
+| 檔案 | 職責 |
+|---|---|
+| `src/lib/connection.ts` | WebRTC 連線生命週期、STUN 驗證、Offer／Answer JSON 驗證、ICE gathering 等待、狀態／逾時／清理；不處理應用訊息 |
+| `src/app/connect/page.tsx` | A／B 操作介面、完整 JSON 複製貼上、即時狀態、安全與網路限制提示 |
+| `src/app/page.tsx` | 桌面與手機導覽入口 |
+| `tests/connection.test.mjs` | 使用假 PeerConnection／DataChannel 驗證訊號交換及資源管理 |
+
+---
+
 ## 資料層
 
 | 檔案 | 職責 |
@@ -192,6 +223,7 @@ WHY 只有結論 · 推理跳步 · 循環解釋 · **偷渡前提**（與假設
 src/
 ├── app/
 │   ├── api/health/route.ts        靜態健康檢查端點
+│   ├── connect/page.tsx           WebRTC A／B 點對點連線操作頁
 │   ├── globals.css                字體、響應式、安全區、背景圖樣
 │   ├── layout.tsx                 Root layout + viewport
 │   └── page.tsx                   主頁面（視圖切換、匯入匯出、各彈窗組裝）
@@ -239,6 +271,7 @@ src/
 │   └── TemplateSelectorModal.tsx  模板選擇
 └── lib/
     ├── appTheme.ts                工具列配色主題 + localStorage（v7.2）
+    ├── connection.ts              WebRTC／DataChannel 連線生命週期與訊號驗證（無應用資料協定）
     ├── fonts.ts                   字體清單
     ├── inspect.ts                 審查引擎 ＋ 四點自我檢查
     ├── seedData.ts                預設種子資料

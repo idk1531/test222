@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
-import { CHAIR, DESK, FIDELITY, LOOK } from "@/lib/room3d";
+import { CHAIR, DESK, DESK_FOOTPRINT, FIDELITY, LOOK, WINDOW } from "@/lib/room3d";
 import { attachPhotoMap } from "@/lib/roomTextures";
 
 /**
@@ -30,6 +30,11 @@ export const RoomFurniture: React.FC<{
     api.scene.add(group);
     const disposers: Array<() => void> = [];
     const shared: THREE.Material[] = [];
+    const mainDesk = DESK_FOOTPRINT[0];
+    const deskZ = (mainDesk.minZ + mainDesk.maxZ) / 2;
+    const laptopX = WINDOW.cx - 0.6;
+    const trayX = laptopX + 0.9;
+    const plantX = mainDesk.maxX - 0.35;
 
     const leather = new THREE.MeshStandardMaterial({
       color: LOOK.chairFabric,
@@ -172,7 +177,7 @@ export const RoomFurniture: React.FC<{
 
     // ---------- 筆電（13"／105° 夾角） ----------
     const laptop = new THREE.Group();
-    laptop.position.set(0.12, DESK.top + 0.002, -1.98);
+    laptop.position.set(laptopX, DESK.top + 0.002, deskZ);
     laptop.rotation.y = 3.06;
     const aluminum = new THREE.MeshStandardMaterial({ color: "#b9b6ae", roughness: 0.38, metalness: 0.55 });
     shared.push(aluminum);
@@ -201,13 +206,13 @@ export const RoomFurniture: React.FC<{
 
     // ---------- 黑色小物（0.24×0.09×0.07） ----------
     const object = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.07, 0.09), blackMatte);
-    object.position.set(1.05, DESK.top + 0.035, -2.02);
+    object.position.set(trayX, DESK.top + 0.035, deskZ);
     object.rotation.y = 0.35;
     add(object);
 
     // ---------- 龜背竹（附圖右側、窗前的深綠大葉盆栽） ----------
     const plant = new THREE.Group();
-    plant.position.set(1.42, DESK.top, -1.98);
+    plant.position.set(plantX, DESK.top, deskZ);
     // 盆：霧面深炭、略收口，底加淺色承接盤（不是一塊黑色大水桶）
     const potMat2 = new THREE.MeshStandardMaterial({ color: "#2c2a27", roughness: 0.86 });
     const saucerMat = new THREE.MeshStandardMaterial({ color: "#8d8478", roughness: 0.9 });
