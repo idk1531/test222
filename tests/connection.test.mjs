@@ -140,6 +140,19 @@ class FakePeerConnection {
     this.dispatch("iceconnectionstatechange");
   }
 
+  async getStats() {
+    const stats = new Map([
+      ["local-host", { id: "local-host", type: "local-candidate", candidateType: "host", address: "192.0.2.10" }],
+      ["local-srflx", { id: "local-srflx", type: "local-candidate", candidateType: "srflx", address: "198.51.100.10" }],
+    ]);
+    if (this.remoteDescription) {
+      stats.set("remote-host", { id: "remote-host", type: "remote-candidate", candidateType: "host", address: "192.0.2.20" });
+      stats.set("transport", { id: "transport", type: "transport", selectedCandidatePairId: "pair" });
+      stats.set("pair", { id: "pair", type: "candidate-pair", state: "in-progress", selected: true });
+    }
+    return stats;
+  }
+
   close() {
     this.signalingState = "closed";
     this.connectionState = "closed";
@@ -157,6 +170,8 @@ function makeManager() {
   });
   return { manager, getPeer: () => peer };
 }
+
+const waitForStatsRefresh = () => new Promise((resolve) => setImmediate(resolve));
 
 test("STUN input accepts editable STUN URLs, blank disables it, and rejects TURN or malformed input", () => {
   assert.equal(connection.validateStunServer(connection.DEFAULT_STUN_SERVER), connection.DEFAULT_STUN_SERVER);
@@ -263,12 +278,36 @@ test("Offer and Answer JSON serialization round-trips preserve the full SDP exac
   }
 });
 
+test("candidate diagnostics aggregate types and selected-pair state without retaining addresses", () => {
+  const report = new Map([
+    ["local-host", { id: "local-host", type: "local-candidate", candidateType: "host", address: "192.0.2.1" }],
+    ["local-srflx", { id: "local-srflx", type: "local-candidate", candidateType: "srflx", address: "198.51.100.1" }],
+    ["local-relay", { id: "local-relay", type: "local-candidate", candidateType: "relay", address: "203.0.113.1" }],
+    ["remote-host", { id: "remote-host", type: "remote-candidate", candidateType: "host", address: "192.0.2.2" }],
+    ["remote-prflx", { id: "remote-prflx", type: "remote-candidate", candidateType: "prflx", address: "198.51.100.2" }],
+    ["transport", { id: "transport", type: "transport", selectedCandidatePairId: "pair" }],
+    ["pair", { id: "pair", type: "candidate-pair", state: "succeeded", selected: true }],
+  ]);
+  const summary = connection.summarizePeerStats(report);
+  assert.deepEqual(summary.localCandidateTypes, { host: 1, srflx: 1, relay: 1, prflx: 0, other: 0 });
+  assert.deepEqual(summary.remoteCandidateTypes, { host: 1, srflx: 0, relay: 0, prflx: 1, other: 0 });
+  assert.equal(summary.selectedCandidatePairState, "succeeded");
+  assert.equal(JSON.stringify(summary).includes("192.0.2.1"), false);
+});
+
 test("A/B exchange only reports success when the DataChannel is actually open", async () => {
   const a = makeManager();
   const b = makeManager();
 
   const offerText = await a.manager.createOffer(connection.DEFAULT_STUN_SERVER);
+  await waitForStatsRefresh();
   const offer = JSON.parse(offerText);
+  assert.equal(a.manager.getState().signalingState, "have-local-offer");
+  assert.equal(a.manager.getState().localDescriptionSet, true);
+  assert.equal(a.manager.getState().remoteDescriptionSet, false);
+  assert.equal(a.manager.getState().hasRemoteCandidateInformation, false);
+  assert.deepEqual(a.manager.getState().localCandidateTypes, { host: 1, srflx: 1, relay: 0, prflx: 0, other: 0 });
+  assert.equal(JSON.stringify(a.manager.getState()).includes("192.0.2.10"), false);
   assert.equal(offer.type, "offer");
   assert.equal(offer.sdp, SDP);
   assert.match(offer.sdp, /a=candidate:/);
@@ -280,16 +319,30 @@ test("A/B exchange only reports success when the DataChannel is actually open", 
   assert.deepEqual(a.getPeer().configuration.iceServers, [{ urls: connection.DEFAULT_STUN_SERVER }]);
 
   const answerText = await b.manager.createAnswer(offerText, "stun:example.net:3478");
+  await waitForStatsRefresh();
   const answer = JSON.parse(answerText);
+  assert.equal(b.manager.getState().signalingState, "stable");
+  assert.equal(b.manager.getState().localDescriptionSet, true);
+  assert.equal(b.manager.getState().remoteDescriptionSet, true);
+  assert.equal(b.manager.getState().hasRemoteCandidateInformation, true);
+  assert.deepEqual(b.manager.getState().remoteCandidateTypes, { host: 1, srflx: 0, relay: 0, prflx: 0, other: 0 });
+  assert.equal(b.manager.getState().selectedCandidatePairState, "checking");
   assert.equal(answer.type, "answer");
   assert.equal(answer.sdp, SDP);
   assert.deepEqual(b.getPeer().remoteDescription, { type: "offer", sdp: SDP });
   assert.equal(b.manager.getState().phase, "connecting");
+  assert.equal(b.manager.getState().connectionTimeoutActive, false);
   assert.equal(b.manager.getState().dataChannelState, "connecting");
   assert.equal(b.manager.getDataChannel(), null);
   assert.deepEqual(b.getPeer().configuration.iceServers, [{ urls: "stun:example.net:3478" }]);
 
   await a.manager.completeWithAnswer(answerText);
+  await waitForStatsRefresh();
+  assert.equal(a.manager.getState().connectionTimeoutActive, true);
+  assert.equal(a.manager.getState().signalingState, "stable");
+  assert.equal(a.manager.getState().localDescriptionSet, true);
+  assert.equal(a.manager.getState().remoteDescriptionSet, true);
+  assert.equal(a.manager.getState().hasRemoteCandidateInformation, true);
   assert.deepEqual(a.getPeer().remoteDescription, { type: "answer", sdp: SDP });
   assert.notEqual(a.manager.getState().phase, "open");
   assert.equal(a.manager.getDataChannel(), null);
@@ -298,6 +351,7 @@ test("A/B exchange only reports success when the DataChannel is actually open", 
   b.getPeer().channel.open();
   assert.equal(a.manager.getState().phase, "open");
   assert.equal(b.manager.getState().phase, "open");
+  assert.equal(a.manager.getState().connectionTimeoutActive, false);
   assert.equal(a.manager.getDataChannel().readyState, "open");
   assert.equal(b.manager.getDataChannel().readyState, "open");
 
@@ -311,6 +365,56 @@ test("A/B exchange only reports success when the DataChannel is actually open", 
   assert.equal(b.manager.getState().phase, "idle");
   assert.equal(a.getPeer().signalingState, "closed");
   assert.equal(b.getPeer().signalingState, "closed");
+});
+
+test("joiner timeout starts only after confirming the Answer was returned", async () => {
+  const { manager } = makeManager();
+  const offerText = connection.serializeSessionDescription({ type: "offer", sdp: SDP });
+  await manager.createAnswer(offerText, connection.DEFAULT_STUN_SERVER);
+  assert.equal(manager.getState().connectionTimeoutActive, false);
+
+  manager.confirmAnswerSent();
+  assert.equal(manager.getState().connectionTimeoutActive, true);
+  manager.disconnect();
+  assert.equal(manager.getState().connectionTimeoutActive, false);
+});
+
+test("terminal diagnostics retain pre-cleanup ICE and signaling states", async () => {
+  const { manager, getPeer } = makeManager();
+  await manager.createOffer(connection.DEFAULT_STUN_SERVER);
+  const peer = getPeer();
+  peer.connectionState = "failed";
+  peer.iceConnectionState = "failed";
+  peer.dispatch("iceconnectionstatechange");
+  await waitForStatsRefresh();
+
+  const snapshot = manager.getState();
+  assert.equal(snapshot.phase, "failed");
+  assert.equal(snapshot.peerConnectionState, "failed");
+  assert.equal(snapshot.iceConnectionState, "failed");
+  assert.equal(snapshot.signalingState, "have-local-offer");
+  assert.equal(snapshot.localDescriptionSet, true);
+  assert.equal(snapshot.remoteDescriptionSet, false);
+  assert.equal(snapshot.dataChannelState, "connecting");
+  assert.deepEqual(snapshot.localCandidateTypes, { host: 1, srflx: 1, relay: 0, prflx: 0, other: 0 });
+  assert.equal(snapshot.hasRemoteCandidateInformation, false);
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(peer.signalingState, "closed");
+  manager.disconnect();
+});
+
+test("failure detail distinguishes PeerConnection failure from ICE failure", async () => {
+  const { manager, getPeer } = makeManager();
+  await manager.createOffer(connection.DEFAULT_STUN_SERVER);
+  const peer = getPeer();
+  peer.connectionState = "failed";
+  peer.iceConnectionState = "connected";
+  peer.dispatch("connectionstatechange");
+
+  const detail = manager.getState().detail;
+  assert.match(detail, /PeerConnection state=failed/);
+  assert.doesNotMatch(detail, /ICE connection state=failed/);
+  manager.disconnect();
 });
 
 test("setRemoteDescription receives unchanged SDP and reports parser errors without exposing SDP or ICE", async () => {

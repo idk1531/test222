@@ -21,13 +21,31 @@ export type ConnectionPhase =
   | "disconnected"
   | "failed";
 
+export interface CandidateTypeCounts {
+  host: number;
+  srflx: number;
+  relay: number;
+  prflx: number;
+  other: number;
+}
+
+export type SelectedCandidatePairState = "checking" | "succeeded" | "failed" | "not-reported";
+
 export interface ConnectionSnapshot {
   role: ConnectionRole;
   phase: ConnectionPhase;
   peerConnectionState: RTCPeerConnectionState | "unavailable";
   iceConnectionState: RTCIceConnectionState | "unavailable";
   iceGatheringState: RTCIceGatheringState | "unavailable";
+  signalingState: RTCSignalingState | "unavailable";
   dataChannelState: RTCDataChannelState | "unavailable";
+  localDescriptionSet: boolean;
+  remoteDescriptionSet: boolean;
+  hasRemoteCandidateInformation: boolean;
+  localCandidateTypes: CandidateTypeCounts | null;
+  remoteCandidateTypes: CandidateTypeCounts | null;
+  selectedCandidatePairState: SelectedCandidatePairState;
+  connectionTimeoutActive: boolean;
   detail: string;
 }
 
@@ -47,7 +65,15 @@ const INITIAL_SNAPSHOT: ConnectionSnapshot = {
   peerConnectionState: "unavailable",
   iceConnectionState: "unavailable",
   iceGatheringState: "unavailable",
+  signalingState: "unavailable",
   dataChannelState: "unavailable",
+  localDescriptionSet: false,
+  remoteDescriptionSet: false,
+  hasRemoteCandidateInformation: false,
+  localCandidateTypes: null,
+  remoteCandidateTypes: null,
+  selectedCandidatePairState: "not-reported",
+  connectionTimeoutActive: false,
   detail: "",
 };
 
@@ -124,6 +150,60 @@ export function serializeSessionDescription(description: RTCSessionDescription |
   return JSON.stringify({ type: description.type, sdp: description.sdp });
 }
 
+export interface PeerStatsSummary {
+  localCandidateTypes: CandidateTypeCounts;
+  remoteCandidateTypes: CandidateTypeCounts;
+  selectedCandidatePairState: SelectedCandidatePairState;
+}
+
+interface CandidateStatsEntry {
+  id?: string;
+  type?: string;
+  candidateType?: string;
+  selected?: boolean;
+  selectedCandidatePairId?: string;
+  state?: string;
+}
+
+/** Aggregate only non-sensitive ICE stats; addresses and ports are never retained. */
+export function summarizePeerStats(report: Pick<RTCStatsReport, "values">): PeerStatsSummary {
+  const entries = Array.from(report.values()) as CandidateStatsEntry[];
+  const emptyCounts = (): CandidateTypeCounts => ({ host: 0, srflx: 0, relay: 0, prflx: 0, other: 0 });
+  const localCandidateTypes = emptyCounts();
+  const remoteCandidateTypes = emptyCounts();
+  const increment = (counts: CandidateTypeCounts, candidateType: string | undefined) => {
+    switch (candidateType) {
+      case "host": counts.host += 1; break;
+      case "srflx": counts.srflx += 1; break;
+      case "relay": counts.relay += 1; break;
+      case "prflx": counts.prflx += 1; break;
+      default: counts.other += 1; break;
+    }
+  };
+
+  for (const entry of entries) {
+    if (entry.type === "local-candidate") increment(localCandidateTypes, entry.candidateType);
+    if (entry.type === "remote-candidate") increment(remoteCandidateTypes, entry.candidateType);
+  }
+
+  const selectedPairId = entries.find((entry) =>
+    entry.type === "transport" && typeof entry.selectedCandidatePairId === "string"
+  )?.selectedCandidatePairId;
+  const selectedPair = entries.find((entry) =>
+    entry.type === "candidate-pair" && (entry.id === selectedPairId || (!selectedPairId && entry.selected === true))
+  );
+  const pairState = selectedPair?.state;
+  const selectedCandidatePairState: SelectedCandidatePairState = pairState === "succeeded"
+    ? "succeeded"
+    : pairState === "failed"
+      ? "failed"
+      : pairState === "checking" || pairState === "waiting" || pairState === "in-progress" || pairState === "frozen"
+        ? "checking"
+        : "not-reported";
+
+  return { localCandidateTypes, remoteCandidateTypes, selectedCandidatePairState };
+}
+
 export function connectionPhaseLabel(phase: ConnectionPhase): string {
   switch (phase) {
     case "idle": return "尚未連線";
@@ -170,6 +250,18 @@ export function iceGatheringStateLabel(state: ConnectionSnapshot["iceGatheringSt
     case "new": return "尚未開始";
     case "gathering": return "收集候選位址中";
     case "complete": return "收集完成";
+  }
+}
+
+export function signalingStateLabel(state: ConnectionSnapshot["signalingState"]): string {
+  switch (state) {
+    case "unavailable": return "尚未建立";
+    case "stable": return "stable（穩定）";
+    case "have-local-offer": return "have-local-offer（等待 Answer）";
+    case "have-remote-offer": return "have-remote-offer（等待本機 Answer）";
+    case "have-local-pranswer": return "have-local-pranswer";
+    case "have-remote-pranswer": return "have-remote-pranswer";
+    case "closed": return "closed";
   }
 }
 
@@ -249,6 +341,9 @@ export class WebRTCConnectionManager {
   private operationId = 0;
   private operationController: AbortController | null = null;
   private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+  private diagnosticsSessionId = 0;
+  private statsRequestSequence = 0;
+  private latestAppliedStatsSequence = 0;
 
   constructor(peerConnectionFactory?: PeerConnectionFactory) {
     this.peerConnectionFactory = peerConnectionFactory ?? ((configuration) => {
@@ -260,7 +355,11 @@ export class WebRTCConnectionManager {
   }
 
   getState(): ConnectionSnapshot {
-    return { ...this.snapshot };
+    return {
+      ...this.snapshot,
+      localCandidateTypes: this.snapshot.localCandidateTypes ? { ...this.snapshot.localCandidateTypes } : null,
+      remoteCandidateTypes: this.snapshot.remoteCandidateTypes ? { ...this.snapshot.remoteCandidateTypes } : null,
+    };
   }
 
   subscribe(listener: SnapshotListener): () => void {
@@ -343,7 +442,6 @@ export class WebRTCConnectionManager {
         phase: "waiting-peer",
         detail: "回覆已備妥。請私下傳回發起端，等待對方套用 Answer；DataChannel 尚未開啟前不算連線成功。",
       });
-      this.startConnectionTimeout();
       this.syncPeerState();
       this.assertOperation(operation.id, peer);
       return signalingText;
@@ -357,6 +455,17 @@ export class WebRTCConnectionManager {
     } finally {
       this.endOperation(operation.id);
     }
+  }
+
+  /** The joiner starts the wait timeout only after manually returning its Answer. */
+  confirmAnswerSent(): void {
+    const canConfirm = this.snapshot.role === "joiner"
+      && (this.snapshot.phase === "waiting-peer" || this.snapshot.phase === "connecting")
+      && this.snapshot.localDescriptionSet
+      && this.snapshot.remoteDescriptionSet;
+    if (!canConfirm) throw new Error("請先成功套用 Offer 並產生 Answer，再確認已傳回發起端。");
+    this.startConnectionTimeout();
+    this.publish({ detail: "已確認 Answer 傳回發起端；現在開始等待 ICE 路徑與 DataChannel 開啟。" });
   }
 
   async completeWithAnswer(answerText: string): Promise<void> {
@@ -392,6 +501,7 @@ export class WebRTCConnectionManager {
 
   /** Close all transient session data and return to a clean, reusable state. */
   disconnect(): void {
+    this.diagnosticsSessionId += 1;
     this.cancelActiveOperation();
     this.disposeResources();
     this.publish({ ...INITIAL_SNAPSHOT });
@@ -434,11 +544,42 @@ export class WebRTCConnectionManager {
     const configuration: RTCConfiguration = {
       iceServers: stunServer ? [{ urls: stunServer }] : [],
     };
+    this.diagnosticsSessionId += 1;
+    this.latestAppliedStatsSequence = 0;
     this.peer = this.peerConnectionFactory(configuration);
     this.peer.onconnectionstatechange = () => this.syncPeerState();
     this.peer.oniceconnectionstatechange = () => this.syncPeerState();
     this.peer.onicegatheringstatechange = () => this.syncPeerState();
+    this.peer.onsignalingstatechange = () => this.syncPeerState();
     return this.peer;
+  }
+
+  private refreshPeerDiagnostics(peer: RTCPeerConnection): void {
+    if (typeof peer.getStats !== "function") return;
+    const sessionId = this.diagnosticsSessionId;
+    const requestSequence = ++this.statsRequestSequence;
+
+    try {
+      void peer.getStats().then((report) => {
+        if (sessionId !== this.diagnosticsSessionId || requestSequence < this.latestAppliedStatsSequence) return;
+        const peerWasCleanedAfterFailure = peer !== this.peer
+          && (this.snapshot.phase === "failed" || this.snapshot.phase === "disconnected");
+        if (peer !== this.peer && !peerWasCleanedAfterFailure) return;
+
+        this.latestAppliedStatsSequence = requestSequence;
+        const summary = summarizePeerStats(report);
+        const remoteSdp = peer.remoteDescription?.sdp ?? "";
+        const hasRemoteStats = Object.values(summary.remoteCandidateTypes).some((count) => count > 0);
+        this.publish({
+          ...summary,
+          hasRemoteCandidateInformation: /^a=candidate:/m.test(remoteSdp) || hasRemoteStats,
+        });
+      }).catch(() => {
+        // Browser-specific getStats failures must not affect connection state or expose raw stats.
+      });
+    } catch {
+      // Some older browser implementations may throw synchronously from getStats().
+    }
   }
 
   private attachChannel(channel: RTCDataChannel): void {
@@ -472,9 +613,14 @@ export class WebRTCConnectionManager {
     const peer = this.peer;
     if (!peer) return;
     this.publish({});
+    this.refreshPeerDiagnostics(peer);
 
     if (peer.connectionState === "failed" || peer.iceConnectionState === "failed") {
-      this.finish("failed", "ICE 連線失敗。請確認雙端貼上同一組完整 Offer／Answer，並允許瀏覽器 UDP；沒有 TURN 中繼時，部分網路無法直連。");
+      const failedStates = [
+        peer.iceConnectionState === "failed" ? "ICE connection state=failed" : "",
+        peer.connectionState === "failed" ? "PeerConnection state=failed" : "",
+      ].filter(Boolean).join("、");
+      this.finish("failed", `瀏覽器回報 ${failedStates}；此狀態本身無法區分訊號、ICE 候選或傳輸層原因。請比較雙端 Signaling 與候選診斷，並先在同一 Wi-Fi 測試，再比較不同網路。`);
       return;
     }
     if (peer.connectionState === "closed") {
@@ -496,7 +642,9 @@ export class WebRTCConnectionManager {
       if (this.snapshot.phase !== "waiting-answer" && this.snapshot.phase !== "creating-answer") {
         this.publish({ phase: "connecting", detail: "正在檢查可用的點對點路徑，等待 DataChannel 開啟。" });
       }
-      if (this.snapshot.role === "joiner" && this.snapshot.phase !== "creating-answer") this.startConnectionTimeout();
+      if (this.snapshot.role === "joiner" && this.snapshot.connectionTimeoutActive && this.snapshot.phase !== "creating-answer") {
+        this.startConnectionTimeout();
+      }
     }
   }
 
@@ -505,31 +653,39 @@ export class WebRTCConnectionManager {
     this.connectionTimer = setTimeout(() => {
       this.connectionTimer = null;
       if (this.snapshot.phase === "open" || this.snapshot.phase === "idle") return;
-      this.finish("failed", "等待 DataChannel 開啟逾時。請確認雙端已完成貼上／套用、STUN 可用；若網路不允許直連，請改用支援的網路後重新配對。");
+      this.finish("failed", "等待 DataChannel 開啟逾時。請確認雙端已完成 Offer／Answer 交換，並先比對 ICE 與候選診斷；這個逾時本身不表示一定是 NAT 或 TURN 問題。");
     }, CONNECTION_TIMEOUT_MS);
+    this.publish({ connectionTimeoutActive: true });
   }
 
   private clearConnectionTimeout(): void {
+    const wasActive = this.connectionTimer !== null || this.snapshot.connectionTimeoutActive;
     if (this.connectionTimer !== null) {
       clearTimeout(this.connectionTimer);
       this.connectionTimer = null;
     }
+    if (wasActive) this.publish({ connectionTimeoutActive: false });
   }
 
   private finish(phase: "disconnected" | "failed", detail: string): void {
-    const hadPeer = this.peer !== null;
-    const hadChannel = this.channel !== null;
-    const iceGatheringState = this.peer?.iceGatheringState ?? this.snapshot.iceGatheringState;
+    const peer = this.peer;
+    const channel = this.channel;
+    if (peer) this.refreshPeerDiagnostics(peer);
+    const terminalDiagnostics = {
+      peerConnectionState: peer?.connectionState ?? this.snapshot.peerConnectionState,
+      iceConnectionState: peer?.iceConnectionState ?? this.snapshot.iceConnectionState,
+      iceGatheringState: peer?.iceGatheringState ?? this.snapshot.iceGatheringState,
+      signalingState: peer?.signalingState ?? this.snapshot.signalingState,
+      dataChannelState: channel?.readyState ?? this.snapshot.dataChannelState,
+      localDescriptionSet: Boolean(peer?.localDescription) || this.snapshot.localDescriptionSet,
+      remoteDescriptionSet: Boolean(peer?.remoteDescription) || this.snapshot.remoteDescriptionSet,
+      hasRemoteCandidateInformation: Boolean(peer?.remoteDescription?.sdp && /^a=candidate:/m.test(peer.remoteDescription.sdp))
+        || this.snapshot.hasRemoteCandidateInformation,
+      connectionTimeoutActive: false,
+    };
     this.cancelActiveOperation();
     this.disposeResources();
-    this.publish({
-      phase,
-      detail,
-      peerConnectionState: hadPeer ? "closed" : this.snapshot.peerConnectionState,
-      iceConnectionState: hadPeer ? "closed" : this.snapshot.iceConnectionState,
-      iceGatheringState,
-      dataChannelState: hadChannel ? "closed" : this.snapshot.dataChannelState,
-    });
+    this.publish({ phase, detail, ...terminalDiagnostics });
   }
 
   private disposeResources(): void {
@@ -553,6 +709,7 @@ export class WebRTCConnectionManager {
       peer.onconnectionstatechange = null;
       peer.oniceconnectionstatechange = null;
       peer.onicegatheringstatechange = null;
+      peer.onsignalingstatechange = null;
       peer.ondatachannel = null;
       try {
         if (peer.signalingState !== "closed") peer.close();
@@ -565,13 +722,28 @@ export class WebRTCConnectionManager {
   private publish(patch: Partial<ConnectionSnapshot>): void {
     const peer = this.peer;
     const channel = this.channel;
+    const remoteSdp = peer?.remoteDescription?.sdp ?? "";
+    const remoteCandidateTypes = patch.remoteCandidateTypes ?? this.snapshot.remoteCandidateTypes;
+    const hasRemoteStats = remoteCandidateTypes
+      ? Object.values(remoteCandidateTypes).some((count) => count > 0)
+      : false;
     this.snapshot = {
       ...this.snapshot,
       ...patch,
       peerConnectionState: peer?.connectionState ?? patch.peerConnectionState ?? this.snapshot.peerConnectionState,
       iceConnectionState: peer?.iceConnectionState ?? patch.iceConnectionState ?? this.snapshot.iceConnectionState,
       iceGatheringState: peer?.iceGatheringState ?? patch.iceGatheringState ?? this.snapshot.iceGatheringState,
+      signalingState: peer?.signalingState ?? patch.signalingState ?? this.snapshot.signalingState,
       dataChannelState: channel?.readyState ?? patch.dataChannelState ?? this.snapshot.dataChannelState,
+      localDescriptionSet: peer
+        ? Boolean(peer.localDescription)
+        : patch.localDescriptionSet ?? this.snapshot.localDescriptionSet,
+      remoteDescriptionSet: peer
+        ? Boolean(peer.remoteDescription)
+        : patch.remoteDescriptionSet ?? this.snapshot.remoteDescriptionSet,
+      hasRemoteCandidateInformation: peer
+        ? /^a=candidate:/m.test(remoteSdp) || hasRemoteStats
+        : patch.hasRemoteCandidateInformation ?? this.snapshot.hasRemoteCandidateInformation,
     };
     const current = this.getState();
     this.listeners.forEach((listener) => listener(current));
