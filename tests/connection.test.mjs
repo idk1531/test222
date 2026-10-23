@@ -49,8 +49,19 @@ class FakeDataChannel {
   label = "p2p-connection";
   readyState = "connecting";
   onopen = null;
+  onmessage = null;
   onclose = null;
   onerror = null;
+  sent = [];
+
+  send(data) {
+    if (this.readyState !== "open") throw new Error("DataChannel is not open");
+    this.sent.push(data);
+  }
+
+  receive(data) {
+    this.onmessage?.({ data });
+  }
 
   open() {
     this.readyState = "open";
@@ -179,6 +190,27 @@ test("STUN input accepts editable STUN URLs, blank disables it, and rejects TURN
   assert.equal(connection.validateStunServer(""), null);
   assert.throws(() => connection.validateStunServer("turn:relay.example.net:3478"), /不接受 TURN/);
   assert.throws(() => connection.validateStunServer("https://example.net"), /STUN 位址格式/);
+});
+
+test("application messages require an open channel and are delivered without being retained by the manager", async () => {
+  const { manager, getPeer } = makeManager();
+  const received = [];
+  manager.subscribeDataMessages((message) => received.push(message));
+
+  await manager.createOffer("");
+  assert.equal(manager.sendDataMessage("before-open"), false);
+  const channel = getPeer().channel;
+  channel.open();
+
+  const payload = JSON.stringify({ type: "presence", name: "Alice" });
+  assert.equal(manager.sendDataMessage(payload), true);
+  assert.deepEqual(channel.sent, [payload]);
+  channel.receive(payload);
+  assert.deepEqual(received, [payload]);
+
+  manager.disconnect();
+  assert.equal(manager.sendDataMessage("after-close"), false);
+  assert.equal(channel.onmessage, null);
 });
 
 test("clipboard rejection falls back to a selected field without losing text", async () => {

@@ -10,7 +10,10 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:connection": "node --test tests/connection.test.mjs"
+    "test:connection": "node --test tests/connection.test.mjs",
+    "test:collaboration": "node --test tests/collaboration-protocol.test.mjs",
+    "test:collaboration-editing": "node --test tests/collaboration-editing.test.mjs",
+    "test:shared-content": "node --test tests/shared-content.test.mjs"
   },
   "dependencies": {
     "@types/katex": "^0.16.8",

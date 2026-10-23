@@ -1,6 +1,6 @@
 /**
- * Browser-native WebRTC signaling and DataChannel lifecycle only.
- * No application messages are defined or sent by this module.
+ * Browser-native WebRTC signaling and DataChannel lifecycle.
+ * Application payloads pass through a generic API; this module never interprets or logs them.
  */
 
 export const DEFAULT_STUN_SERVER = "stun:stun.cloudflare.com:3478";
@@ -50,6 +50,7 @@ export interface ConnectionSnapshot {
 }
 
 export type SnapshotListener = (snapshot: ConnectionSnapshot) => void;
+export type DataChannelMessageListener = (message: unknown) => void;
 export type PeerConnectionFactory = (configuration: RTCConfiguration) => RTCPeerConnection;
 
 export class ConnectionCancelledError extends Error {
@@ -335,6 +336,7 @@ export class WebRTCConnectionManager {
   private readonly peerConnectionFactory: PeerConnectionFactory;
   private snapshot: ConnectionSnapshot = { ...INITIAL_SNAPSHOT };
   private readonly listeners = new Set<SnapshotListener>();
+  private readonly dataMessageListeners = new Set<DataChannelMessageListener>();
   private peer: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private busy = false;
@@ -367,9 +369,28 @@ export class WebRTCConnectionManager {
     return () => this.listeners.delete(listener);
   }
 
+  /** Listen for application messages without retaining or logging their contents. */
+  subscribeDataMessages(listener: DataChannelMessageListener): () => void {
+    this.dataMessageListeners.add(listener);
+    return () => this.dataMessageListeners.delete(listener);
+  }
+
   /** Return the channel only after the browser reports readyState === "open". */
   getDataChannel(): RTCDataChannel | null {
     return this.channel?.readyState === "open" ? this.channel : null;
+  }
+
+  /** Send a payload only over an open DataChannel; signaling text is never sent here. */
+  sendDataMessage(data: string): boolean {
+    const channel = this.getDataChannel();
+    if (!channel) return false;
+    try {
+      channel.send(data);
+      return true;
+    } catch {
+      // Do not expose raw browser errors; they may contain transport details.
+      return false;
+    }
   }
 
   async createOffer(stunInput: string): Promise<string> {
@@ -596,6 +617,16 @@ export class WebRTCConnectionManager {
       this.publish({ phase: "open", detail: "DataChannel readyState 為 open；目前已確認資料通道開啟。" });
     };
     channel.onopen = markOpen;
+    channel.onmessage = (event) => {
+      // The caller owns parsing and privacy policy; never log or retain payloads here.
+      for (const listener of this.dataMessageListeners) {
+        try {
+          listener(event.data);
+        } catch {
+          // A faulty subscriber must not interrupt delivery to the remaining listeners.
+        }
+      }
+    };
     channel.onclose = () => {
       const wasOpen = this.snapshot.phase === "open" || this.snapshot.dataChannelState === "open";
       this.finish("disconnected", wasOpen
@@ -711,6 +742,7 @@ export class WebRTCConnectionManager {
 
     if (channel) {
       channel.onopen = null;
+      channel.onmessage = null;
       channel.onclose = null;
       channel.onerror = null;
       try {

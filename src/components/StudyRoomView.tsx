@@ -13,11 +13,13 @@ import { ShelfDecor } from "./ShelfDecor";
 import { RoomFurniture, type RoomFurnitureRig } from "./RoomFurniture";
 import { CameraRig, type CameraRigHandle, type CameraRigInteractionState, type RoomActionMeta } from "./CameraRig";
 import { VoxelCharacter } from "./VoxelCharacter";
+import { RemotePlayerLabel } from "./RemotePlayerLabel";
 import { Joystick, type JoystickVector } from "./Joystick";
 import { StudyCategoryPanel } from "./StudyCategoryPanel";
 import type { InfiniteCanvasProps } from "./InfiniteCanvas";
 import type { CardData } from "./KnowledgeCardNode";
 import { useWorkspaceState, actions } from "@/lib/store";
+import { useCollaboration } from "@/components/CollaborationProvider";
 import {
   computeShelfLayout,
   DESK,
@@ -50,6 +52,7 @@ interface BookPreview {
  */
 export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   const state = useWorkspaceState();
+  const { snapshot: collaborationSnapshot, localRole, remoteParticipant, remotePoseRef, publishPose } = useCollaboration();
   const [quality] = useState<SceneQuality>(() => detectQuality());
   const sceneApiRef = useRef<StudySceneApi | null>(null);
   const rigRef = useRef<CameraRigHandle | null>(null);
@@ -341,6 +344,12 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
             <ShelfDecor api={api} layout={layout} />
             <RoomFurniture api={api} chairRigRef={chairRigRef} />
             <VoxelCharacter api={api} playerRef={playerRef} viewMode={viewMode} />
+            {collaborationSnapshot.phase === "open" && remoteParticipant && (
+              <>
+                <VoxelCharacter api={api} playerRef={remotePoseRef} viewMode="third" />
+                <RemotePlayerLabel api={api} poseRef={remotePoseRef} name={remoteParticipant.name} />
+              </>
+            )}
             <CameraRig
               api={api}
               initialCamera={state.studyLayout.camera}
@@ -355,9 +364,12 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               onPointerLockChange={setPointerLocked}
               onChairTriggerChange={setChairInTrigger}
               onFocusChange={setFocusedCardId}
+              onPoseChange={publishPose}
+              movementEnabled={collaborationSnapshot.phase !== "open" || localRole === "owner" || localRole === "editor"}
               viewMode={viewMode}
               onToggleView={toggleViewMode}
               playerRef={playerRef}
+              otherPlayerRef={remotePoseRef}
             />
           </>
         )}
@@ -398,8 +410,14 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
             data-no-orbit="true"
             onPointerDown={(e) => e.stopPropagation()}
           >
+            {collaborationSnapshot.phase === "open" && localRole === "reader" && (
+              <span className="rounded-lg bg-amber-100 px-2 py-1.5 text-[11px] font-bold text-amber-900">唯讀</span>
+            )}
             <span className="hidden rounded-lg bg-white/70 px-2 py-1.5 text-[11px] font-medium text-stone-700 sm:inline">
               {viewMode === "third" ? "第三人稱" : "第一人稱"} · 拖曳環顧 · WASD · E 拿書 · V 視角
+              {collaborationSnapshot.phase === "open" && remoteParticipant
+                ? ` · 同室：${remoteParticipant.name}${localRole === "reader" ? "（唯讀）" : ""}`
+                : ""}
             </span>
             {isTouch && (
               <button

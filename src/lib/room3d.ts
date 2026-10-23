@@ -640,7 +640,7 @@ export function shelfPlankY(row: number, _rowCount: number): number {
   return SHELF.height - row * SHELF.pitch;
 }
 
-export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair";
+export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair" | "player";
 export interface Aabb extends RoomRect {
   kind: RoomColliderKind;
   top: number;
@@ -690,12 +690,24 @@ export function resolveCollision(
   radius = PLAYER_RADIUS,
   ignoreChair = false,
   ignoreDeskAndCabinet = false,
-  chairPosition?: { x: number; z: number }
+  chairPosition?: { x: number; z: number },
+  otherPlayerPosition?: { x: number; z: number } | null
 ): { x: number; z: number } {
   const start = clampRoomPosition(x, z);
   let px = start.x;
   let pz = start.z;
-  const colliders = COLLIDERS.filter((collider) =>
+  const dynamicPlayerCollider: Aabb[] = otherPlayerPosition && Number.isFinite(otherPlayerPosition.x) && Number.isFinite(otherPlayerPosition.z)
+    ? [{
+        minX: otherPlayerPosition.x - PLAYER_RADIUS,
+        maxX: otherPlayerPosition.x + PLAYER_RADIUS,
+        minZ: otherPlayerPosition.z - PLAYER_RADIUS,
+        maxZ: otherPlayerPosition.z + PLAYER_RADIUS,
+        kind: "player",
+        top: 1.7,
+        standable: false,
+      }]
+    : [];
+  const colliders = [...COLLIDERS, ...dynamicPlayerCollider].filter((collider) =>
     !(ignoreChair && collider.kind === "chair") &&
     !(ignoreDeskAndCabinet && (collider.kind === "desk" || collider.kind === "cabinet"))
   );

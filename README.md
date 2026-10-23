@@ -41,7 +41,9 @@ npx serve out                                  # 本機驗證
 
 ## 瀏覽器點對點連線（WebRTC）
 
-`/connect/` 是獨立的 A／B 配對頁，使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`。不新增訊號伺服器、資料庫、TURN 服務或應用資料同步；Offer／Answer 是等待 ICE gathering 完成後產生的完整 JSON，必須由兩端人工複製／貼上。
+`/connect/` 使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`；不新增訊號伺服器、資料庫或 TURN 服務。Offer／Answer 是等待 ICE gathering 完成後產生的完整 JSON，必須由兩端人工複製／貼上。連線由 root-level `CollaborationProvider` 持有，切換 SciNotes 頁面不會關閉 DataChannel。
+
+目前的應用訊息範圍包括**顯示名稱、房主指定的可編輯／唯讀角色、虛擬書房角色位置與動作，以及書本／筆記卡協作**。連線時發起端傳送書房快照；加入端的可編輯者會將本機書本／卡片按 ID 合併回房主，之後同步卡片內容、卡片畫布位置、書架分類／落點／排序及新增／刪除。筆記卡文字欄位逐字即時合併；卡片編輯器會顯示對方正在輸入的欄位與游標位置。一般畫布物件（含公式／圖表）、關係邊、書房視角、一般畫布游標，以及角色個人化外觀不在同步範圍。唯讀端不會回傳本機資料。
 
 ### A／B 操作
 
@@ -49,24 +51,33 @@ npx serve out                                  # 本機驗證
 2. **A 發起端**按「建立連線邀請」，等候 Offer 出現後複製，透過私下可信管道傳給 B。
 3. **B 加入端**將完整 Offer 貼入 B 區並按「產生連線回覆」；複製產生的 Answer，私下傳回 A。
 4. **A**將 Answer 貼入 A 區並按「完成連線」。只有狀態顯示 **DataChannel 已開啟** 才代表資料通道已打開；SDP 建立、ICE gathering 完成或候選路徑建立都不等於通道成功。
-5. 任一端可按「中斷連線」清除當前連線並重新配對。頁面離開時也會清理 WebRTC 資源。
+5. 任一端可按「中斷連線」清除當前連線並重新配對；切換到其他 SciNotes 頁面不會中斷，關閉分頁或整個應用根層卸載才會清理資源。
+6. A 可指定 B 為可編輯者或唯讀者。名稱是自我宣告、不是身份驗證；沒有帳號或伺服器端撤銷／期限機制，Offer／Answer 應只私下交給預期對象。唯讀目前是前端約束，不是能抵抗修改客戶端或防止複製／截圖的安全邊界。
 
 ### 網路與隱私限制
 
-預設 STUN 為 `stun:stun.cloudflare.com:3478`，可在 UI 修改或留白停用；STUN 服務不保證永遠可用。瀏覽器會直接向所選 STUN 服務送出查詢，該服務可能看到連線來源的公網 IP。此功能**沒有 TURN 中繼**，公司防火牆、對稱 NAT 或受限行動網路可能阻擋點對點直連；逾時時需換網路或重新配對。邀請／回覆可能包含 ICE 候選位址等網路資訊，僅私下傳給預期對象，不要公開貼文或貼入日誌。頁面不把 SDP／ICE 上傳、寫入 localStorage 或記錄到 console，也不提供訊息或其他應用資料傳送功能。
+預設 STUN 為 `stun:stun.cloudflare.com:3478`，可在 UI 修改或留白停用；STUN 服務不保證永遠可用。瀏覽器會直接向所選 STUN 服務送出查詢，該服務可能看到連線來源的公網 IP。此功能**沒有 TURN 中繼**，公司防火牆、對稱 NAT 或受限行動網路可能阻擋點對點直連；逾時時需換網路或重新配對。邀請／回覆可能包含 ICE 候選位址等網路資訊，僅私下傳給預期對象，不要公開貼文或貼入日誌。頁面不把 SDP／ICE 上傳、寫入 localStorage 或記錄到 console；僅把顯示名稱偏好留在本機。配對後書本／卡片資料會透過 DataChannel 直接送給對方，且繼續保存在各端本機；建立連線前請確認卡片內容適合分享。可編輯端的初始資料會按 ID 合併，唯讀端只接收房主資料、不回傳本機卡片。唯讀仍只是前端限制，不是安全邊界。
+
+筆記卡文字欄位以字符序列 CRDT 合併並在連線期間即時寫入兩端本機工作區；同卡文字同時插入／刪除可合併，遠端 presence 顯示對方欄位、輸入狀態與游標位置。新建清單項目等結構變更先儲存後，該項文字才可即時協作。**文字以外的卡片欄位及清單結構仍採整筆記錄的確定性版本順序**，同時修改仍可能覆蓋另一端；一般畫布游標、公式／圖表物件及角色個人化外觀不會同步。離線修改只保存在本機，不會形成持久化操作佇列；重新連線按現存記錄合併時，另一端的舊副本可能讓離線刪除復現，需以手動匯出／匯入處理。唯讀是前端限制，不是安全邊界。這不代表已完成完整多人共同編輯。
 
 ```bash
-npm run test:connection  # STUN／訊號格式、A/B 狀態機、DataChannel 開啟條件與取消清理的 mock 測試
+npm run test:connection             # WebRTC 生命週期與 DataChannel API 的 mock 測試
+npm run test:collaboration          # 姓名／角色／姿態訊息協定與輸入驗證測試
+npm run test:collaboration-editing  # 文字 CRDT 合併、游標、Unicode 與訊息分塊測試（非實機 WebRTC）
+npm run test:shared-content         # 書本／卡片同步、唯讀與分塊協定測試（非實機 WebRTC）
 ```
 
 ### 相關檔案
 
 | 檔案 | 職責 |
 |---|---|
-| `src/lib/connection.ts` | WebRTC 連線生命週期、STUN 驗證、Offer／Answer JSON 驗證、ICE gathering 等待、狀態／逾時／清理；不處理應用訊息 |
-| `src/app/connect/page.tsx` | A／B 操作介面、完整 JSON 複製貼上、即時狀態、安全與網路限制提示 |
-| `src/app/page.tsx` | 桌面與手機導覽入口 |
-| `tests/connection.test.mjs` | 使用假 PeerConnection／DataChannel 驗證訊號交換及資源管理 |
+| `src/lib/connection.ts` | WebRTC 連線生命週期、STUN／訊號驗證、狀態／逾時／清理，以及不記錄內容的 DataChannel 訊息 API |
+| `src/components/CollaborationProvider.tsx` | root-level 連線生命週期、姓名／角色握手、角色姿態 presence、書本／卡片同步與跨頁狀態 |
+| `src/lib/sharedContent.ts` | 限定書本／卡片欄位的初始合併、版本化 CRUD 操作、輸入驗證與 DataChannel 分塊傳輸 |
+| `src/lib/collaborationEditing.ts` | 卡片文字欄位的字符序列 CRDT、穩定欄位路徑、即時游標／輸入狀態訊息與分塊傳輸 |
+| `src/app/connect/page.tsx` | A／B 操作介面、名稱／加入權限、Offer／Answer 複製貼上、同步狀態與分享限制提示 |
+| `src/components/CameraRig.tsx`、`src/components/StudyRoomView.tsx` | 姿態傳送、遠端 voxel 角色呈現、遠端玩家碰撞及唯讀移動限制 |
+| `tests/connection.test.mjs` | 使用假 PeerConnection／DataChannel 驗證訊號交換、訊息 API 及資源管理；不代表實機 WebRTC 驗證 |
 
 ---
 
@@ -74,7 +85,7 @@ npm run test:connection  # STUN／訊號格式、A/B 狀態機、DataChannel 開
 
 | 檔案 | 職責 |
 |---|---|
-| `src/lib/store.ts` | 全域狀態倉庫（`useSyncExternalStore`）、CRUD actions、localStorage 自動持久化、`exportFile` / `importFile` / `resetToSeed`、**v4→v5 結構遷移**（WHEN 併入 HOW：triggers→checks、steps→branches、enables→can；本機載入與 JSON 匯入都會自動跑）、**v7.1→v8.0 書房資料遷移（v8.1 相機欄位相容補齊）**、純函式 `applyPatch`（預留 op log/同步介接） |
+| `src/lib/store.ts` | 全域狀態倉庫（`useSyncExternalStore`）、CRUD actions、localStorage 自動持久化、匯入／匯出與 schema 遷移，以及唯讀寫入閘門和只套用卡片／書本的遠端 patch |
 | `src/lib/study.ts` | 虛擬書房資料型別、分類／書本 helper、v8.1 相機欄位補齊與 360° yaw/pitch 限制 |
 | `src/lib/room3d.ts` | v8.1 房間尺寸、光源／相機參數、移動限制、3D→CSS 投影與書架佈局純函式 |
 | `src/lib/seedData.ts` | 預設種子資料（4 張完整例卡＋畫布物件＋關係邊＋日誌＋盲區＋母題） |
@@ -271,7 +282,7 @@ src/
 │   └── TemplateSelectorModal.tsx  模板選擇
 └── lib/
     ├── appTheme.ts                工具列配色主題 + localStorage（v7.2）
-    ├── connection.ts              WebRTC／DataChannel 連線生命週期與訊號驗證（無應用資料協定）
+    ├── connection.ts              WebRTC／DataChannel 生命週期、訊號驗證與安全訊息 API
     ├── fonts.ts                   字體清單
     ├── inspect.ts                 審查引擎 ＋ 四點自我檢查
     ├── seedData.ts                預設種子資料
@@ -296,4 +307,4 @@ src/
 
 母題：「連續對稱性與守恆律對偶」（3 實例 ＋ 候選推理測試 ＋ 新預測驗證 → 已成立）
 
-v8.1／v8.3 回歸檢查：`npx tsx scripts/check-room3d.ts`（相機邊界／360°／飛行 easing／日光／375px 投影／SSR／**v8.2 貼圖資產齊備**／**v8.3 西牆書牆＋對照視角投影＋層板堆疊**）。v8.2 換材質來源後重生貼圖：`bash scripts/make-room-textures.sh <來源圖目錄>`（需 ImageMagick，會順手輸出 `tile-check-*.jpg` 2×2 平貼檢查圖）；詳見 [`docs/v8.2-room-textures.md`](docs/v8.2-room-textures.md)。2026-10-18 補強包含輸入焦點移動隔離、可見的返回飛行，以及書本預覽即時讀取 store；詳見 v8.1 文件 §7。
+書房回歸檢查：`npx tsx scripts/check-room3d.ts`（相機邊界／360°／飛行 easing／日光／375px 投影／SSR／**v8.2 貼圖資產齊備**／**v8.3 西牆書牆＋對照視角投影＋層板堆疊**／家具與遠端玩家 AABB 碰撞）。v8.2 換材質來源後重生貼圖：`bash scripts/make-room-textures.sh <來源圖目錄>`（需 ImageMagick，會順手輸出 `tile-check-*.jpg` 2×2 平貼檢查圖）；詳見 [`docs/v8.2-room-textures.md`](docs/v8.2-room-textures.md)。2026-10-18 補強包含輸入焦點移動隔離、可見的返回飛行，以及書本預覽即時讀取 store；詳見 v8.1 文件 §7。

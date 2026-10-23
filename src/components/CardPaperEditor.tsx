@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import type { CardData } from "./KnowledgeCardNode";
+import type { RemoteEditingPresence } from "@/lib/collaborationEditing";
 import { MathText } from "./MathText";
 import { Plus, Trash2, ArrowUp, ArrowDown, Check, Edit2, ChevronDown, ChevronRight, X } from "lucide-react";
 
@@ -13,6 +14,8 @@ export interface CardEditContextType {
   editable: boolean;
   patch: (p: Partial<CardData>) => void;
   card?: CardData;
+  resolveTextFieldPath?: (value: string) => string | null;
+  remoteTextPresence?: RemoteEditingPresence[];
 }
 
 export const CardEditContext = React.createContext<CardEditContextType | null>(null);
@@ -53,45 +56,40 @@ export const EditableText: React.FC<EditableTextProps> = ({
   const ed = useCardEdit();
   const editable = ed?.editable ?? false;
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [prevValue, setPrevValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
-
-  if (!isEditing && prevValue !== value) {
-    setPrevValue(value);
-    setDraft(value);
-  }
+  const fieldPath = ed?.resolveTextFieldPath?.(value) ?? null;
+  const remoteCursors = fieldPath
+    ? (ed?.remoteTextPresence || []).filter((presence) => presence.path === fieldPath && presence.active)
+    : [];
+  const cursorMarkers = remoteCursors.map((presence) => (
+    <span
+      key={presence.participantId}
+      className="ml-1 inline-flex items-center gap-1 rounded bg-indigo-50 px-1 py-0.5 text-[9px] font-semibold text-indigo-700 align-middle"
+      title={`${presence.name}${presence.typing ? " 正在輸入" : " 正在編輯"} · 游標第 ${presence.position + 1} 字`}
+      aria-label={`${presence.name} 的遠端游標，第 ${presence.position + 1} 字`}
+    >
+      <span className="h-3 w-0.5 bg-indigo-500" />{presence.name}
+    </span>
+  ));
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
-      // 將游標置於最後
       if ("selectionStart" in inputRef.current) {
-        const len = inputRef.current.value.length;
-        inputRef.current.setSelectionRange(len, len);
+        const length = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(length, length);
       }
     }
   }, [isEditing]);
 
-  const commit = () => {
-    if (draft !== value) {
-      onChange(draft);
-    }
-    setIsEditing(false);
-  };
-
-  const cancel = () => {
-    setDraft(value);
-    setIsEditing(false);
-  };
+  const commit = () => setIsEditing(false);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // 阻止向外冒泡以避免觸發畫布全域快捷鍵
     e.stopPropagation();
-
     if (e.key === "Escape") {
       e.preventDefault();
-      cancel();
+      commit();
     } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey || (!multiline && !asInput))) {
       e.preventDefault();
       commit();
@@ -99,16 +97,12 @@ export const EditableText: React.FC<EditableTextProps> = ({
   };
 
   if (!editable) {
-    if (!value) {
-      return (
-        <span className={`italic opacity-45 ${className}`} style={{ fontFamily: font, ...style }}>
-          {placeholder}
-        </span>
-      );
-    }
     return (
       <span className={className} style={{ fontFamily: font, ...style }}>
-        <MathText text={value} />
+        <span data-collaborative-text-path={fieldPath ?? undefined}>
+          {value ? <MathText text={value} /> : <span className="italic opacity-45">{placeholder}</span>}
+        </span>
+        {cursorMarkers}
       </span>
     );
   }
@@ -119,9 +113,10 @@ export const EditableText: React.FC<EditableTextProps> = ({
         {multiline ? (
           <textarea
             ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-            value={draft}
+            data-collaborative-text-path={fieldPath ?? undefined}
+            value={value}
             rows={rows}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => onChange(e.target.value)}
             onBlur={commit}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
@@ -131,9 +126,10 @@ export const EditableText: React.FC<EditableTextProps> = ({
         ) : (
           <input
             ref={inputRef as React.RefObject<HTMLInputElement>}
+            data-collaborative-text-path={fieldPath ?? undefined}
             type={type}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
             onBlur={commit}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
@@ -142,17 +138,20 @@ export const EditableText: React.FC<EditableTextProps> = ({
           />
         )}
         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5 px-1 font-sans">
-          <span>Esc 取消 · Ctrl/Cmd+Enter 提交</span>
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              commit();
-            }}
-            className="px-1.5 py-0.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700"
-          >
-            完成
-          </button>
+          <span>Esc 結束編輯 · Ctrl/Cmd+Enter 完成</span>
+          <div className="flex items-center gap-1">
+            {cursorMarkers}
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                commit();
+              }}
+              className="px-1.5 py-0.5 bg-blue-600 text-white rounded font-bold hover:bg-blue-700"
+            >
+              完成
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -170,11 +169,10 @@ export const EditableText: React.FC<EditableTextProps> = ({
       style={{ fontFamily: font, ...style }}
       title="點擊編輯此欄位"
     >
-      {value ? (
-        <MathText text={value} />
-      ) : (
-        <span>{placeholder}</span>
-      )}
+      <span data-collaborative-text-path={fieldPath ?? undefined}>
+        {value ? <MathText text={value} /> : <span>{placeholder}</span>}
+      </span>
+      {cursorMarkers}
       {showCue && (
         <span className="opacity-0 group-hover/edit:opacity-100 ml-1 text-[10px] text-blue-600 font-sans print:hidden align-middle">
           ✎
