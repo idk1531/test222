@@ -1,0 +1,551 @@
+/**
+ * Browser-native WebRTC signaling and DataChannel lifecycle only.
+ * No application messages are defined or sent by this module.
+ */
+
+export const DEFAULT_STUN_SERVER = "stun:stun.cloudflare.com:3478";
+export const ICE_GATHERING_TIMEOUT_MS = 60_000;
+export const CONNECTION_TIMEOUT_MS = 60_000;
+const MAX_SIGNALING_TEXT_LENGTH = 1_000_000;
+
+export type ConnectionRole = "initiator" | "joiner" | null;
+export type ConnectionPhase =
+  | "idle"
+  | "creating-offer"
+  | "waiting-answer"
+  | "creating-answer"
+  | "waiting-peer"
+  | "applying-answer"
+  | "connecting"
+  | "open"
+  | "disconnected"
+  | "failed";
+
+export interface ConnectionSnapshot {
+  role: ConnectionRole;
+  phase: ConnectionPhase;
+  peerConnectionState: RTCPeerConnectionState | "unavailable";
+  iceConnectionState: RTCIceConnectionState | "unavailable";
+  iceGatheringState: RTCIceGatheringState | "unavailable";
+  dataChannelState: RTCDataChannelState | "unavailable";
+  detail: string;
+}
+
+export type SnapshotListener = (snapshot: ConnectionSnapshot) => void;
+export type PeerConnectionFactory = (configuration: RTCConfiguration) => RTCPeerConnection;
+
+export class ConnectionCancelledError extends Error {
+  constructor() {
+    super("操作已取消。");
+    this.name = "ConnectionCancelledError";
+  }
+}
+
+const INITIAL_SNAPSHOT: ConnectionSnapshot = {
+  role: null,
+  phase: "idle",
+  peerConnectionState: "unavailable",
+  iceConnectionState: "unavailable",
+  iceGatheringState: "unavailable",
+  dataChannelState: "unavailable",
+  detail: "",
+};
+
+export function validateStunServer(input: string): string | null {
+  const value = input.trim();
+  if (!value) return null;
+  if (value.length > 255 || !/^stuns?:[^\s]+$/i.test(value)) {
+    throw new Error("STUN 位址格式不正確。請輸入 stun:主機名稱:連接埠 或 stuns:主機名稱:連接埠；本頁不接受 TURN 中繼位址。");
+  }
+  return value;
+}
+
+/** Parse the small, explicit JSON signaling envelope; never execute pasted content. */
+export function parseSessionDescription(
+  raw: string,
+  expectedType: "offer" | "answer"
+): RTCSessionDescriptionInit {
+  const text = raw.trim();
+  if (!text) throw new Error(`請貼上完整的 ${expectedType === "offer" ? "Offer" : "Answer"} JSON。`);
+  if (text.length > MAX_SIGNALING_TEXT_LENGTH) {
+    throw new Error("貼上的內容超過 1 MB，可能不是本頁產生的連線資訊。");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("內容不是有效 JSON。請從對方提供的連線資訊開頭到結尾完整複製貼上，不要只貼 SDP 片段。");
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("連線資訊格式不正確；請貼上本頁產生的 JSON 內容。");
+  }
+
+  const candidate = parsed as { type?: unknown; sdp?: unknown };
+  if (candidate.type !== expectedType) {
+    const expectedName = expectedType === "offer" ? "Offer" : "Answer";
+    const actualName = candidate.type === "offer" ? "Offer" : candidate.type === "answer" ? "Answer" : "未知內容";
+    throw new Error(`這裡需要 ${expectedName}，但貼上的內容是${actualName}。請確認 A／B 的交換順序。`);
+  }
+  if (typeof candidate.sdp !== "string" || candidate.sdp.length > MAX_SIGNALING_TEXT_LENGTH) {
+    throw new Error("連線資訊缺少有效的 SDP。請重新複製完整內容。");
+  }
+
+  const sdp = candidate.sdp.trim();
+  if (!/^v=0(?:\r?\n)/.test(sdp) || !/^m=application /m.test(sdp)) {
+    throw new Error("SDP 不完整或不是 DataChannel 連線資訊。請重新產生並完整複製 Offer／Answer。");
+  }
+  if (!/^a=(?:sctp-port|sctpmap):/m.test(sdp)) {
+    throw new Error("SDP 中找不到 DataChannel 協商欄位。請重新產生連線資訊。");
+  }
+  if (!/^a=candidate:/m.test(sdp)) {
+    throw new Error("SDP 中沒有 ICE 候選位址，可能尚未完成收集。請等候收集完成後重新複製。");
+  }
+
+  return { type: expectedType, sdp };
+}
+
+export function serializeSessionDescription(description: RTCSessionDescription | RTCSessionDescriptionInit): string {
+  if ((description.type !== "offer" && description.type !== "answer") || !description.sdp) {
+    throw new Error("瀏覽器沒有提供完整的 SDP。請中斷連線後重新建立邀請。");
+  }
+  return JSON.stringify({ type: description.type, sdp: description.sdp });
+}
+
+export function connectionPhaseLabel(phase: ConnectionPhase): string {
+  switch (phase) {
+    case "idle": return "尚未連線";
+    case "creating-offer": return "正在建立邀請";
+    case "waiting-answer": return "等待對方回覆";
+    case "creating-answer": return "正在協商";
+    case "waiting-peer": return "正在協商";
+    case "applying-answer": return "正在協商";
+    case "connecting": return "正在連線";
+    case "open": return "DataChannel 已開啟";
+    case "disconnected": return "連線中斷";
+    case "failed": return "連線失敗";
+  }
+}
+
+export function peerConnectionStateLabel(state: ConnectionSnapshot["peerConnectionState"]): string {
+  switch (state) {
+    case "unavailable": return "尚未建立";
+    case "new": return "新建";
+    case "connecting": return "連線中";
+    case "connected": return "已連線";
+    case "disconnected": return "中斷";
+    case "failed": return "失敗";
+    case "closed": return "已關閉";
+  }
+}
+
+export function iceConnectionStateLabel(state: ConnectionSnapshot["iceConnectionState"]): string {
+  switch (state) {
+    case "unavailable": return "尚未建立";
+    case "new": return "新建";
+    case "checking": return "檢查路徑中";
+    case "connected": return "已建立候選路徑";
+    case "completed": return "候選檢查完成";
+    case "disconnected": return "暫時中斷";
+    case "failed": return "失敗";
+    case "closed": return "已關閉";
+  }
+}
+
+export function iceGatheringStateLabel(state: ConnectionSnapshot["iceGatheringState"]): string {
+  switch (state) {
+    case "unavailable": return "尚未開始";
+    case "new": return "尚未開始";
+    case "gathering": return "收集候選位址中";
+    case "complete": return "收集完成";
+  }
+}
+
+export function dataChannelStateLabel(state: ConnectionSnapshot["dataChannelState"]): string {
+  switch (state) {
+    case "unavailable": return "尚未建立";
+    case "connecting": return "等待開啟";
+    case "open": return "已開啟";
+    case "closing": return "關閉中";
+    case "closed": return "已關閉";
+  }
+}
+
+function safeMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}
+
+function waitForIceGatheringComplete(
+  peer: RTCPeerConnection,
+  timeoutMs: number,
+  signal: AbortSignal
+): Promise<void> {
+  if (signal.aborted) return Promise.reject(new ConnectionCancelledError());
+  if (peer.iceGatheringState === "complete") return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      peer.removeEventListener("icegatheringstatechange", onGatheringChange);
+      peer.removeEventListener("connectionstatechange", onConnectionChange);
+      signal.removeEventListener("abort", onAbort);
+      if (timeout !== null) clearTimeout(timeout);
+    };
+    const finish = (error?: Error) => {
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onGatheringChange = () => {
+      if (peer.iceGatheringState === "complete") finish();
+    };
+    const onConnectionChange = () => {
+      if (peer.connectionState === "closed") finish(new Error("連線已在 ICE 收集完成前關閉。請重新建立邀請。"));
+    };
+    const onAbort = () => finish(new ConnectionCancelledError());
+
+    peer.addEventListener("icegatheringstatechange", onGatheringChange);
+    peer.addEventListener("connectionstatechange", onConnectionChange);
+    signal.addEventListener("abort", onAbort, { once: true });
+    timeout = setTimeout(() => finish(new Error("收集 ICE 候選位址逾時。請檢查網路與 STUN 設定，或稍後重新建立邀請。")), timeoutMs);
+    // Guard against state changes between the first check and listener registration.
+    onGatheringChange();
+    if (signal.aborted) onAbort();
+  });
+}
+
+export class WebRTCConnectionManager {
+  private readonly peerConnectionFactory: PeerConnectionFactory;
+  private snapshot: ConnectionSnapshot = { ...INITIAL_SNAPSHOT };
+  private readonly listeners = new Set<SnapshotListener>();
+  private peer: RTCPeerConnection | null = null;
+  private channel: RTCDataChannel | null = null;
+  private busy = false;
+  private operationId = 0;
+  private operationController: AbortController | null = null;
+  private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(peerConnectionFactory?: PeerConnectionFactory) {
+    this.peerConnectionFactory = peerConnectionFactory ?? ((configuration) => {
+      if (typeof RTCPeerConnection === "undefined") {
+        throw new Error("這個瀏覽器不支援 WebRTC。請改用最新版 Chrome、Edge、Firefox 或 Safari，並使用 HTTPS 網址。");
+      }
+      return new RTCPeerConnection(configuration);
+    });
+  }
+
+  getState(): ConnectionSnapshot {
+    return { ...this.snapshot };
+  }
+
+  subscribe(listener: SnapshotListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** Return the channel only after the browser reports readyState === "open". */
+  getDataChannel(): RTCDataChannel | null {
+    return this.channel?.readyState === "open" ? this.channel : null;
+  }
+
+  async createOffer(stunInput: string): Promise<string> {
+    this.assertIdle();
+    const stunServer = validateStunServer(stunInput);
+    const operation = this.beginOperation();
+    this.publish({ role: "initiator", phase: "creating-offer", detail: "正在建立瀏覽器原生 PeerConnection 與 DataChannel。" });
+
+    try {
+      const peer = this.createPeer(stunServer);
+      this.channel = peer.createDataChannel("p2p-connection", { ordered: true });
+      this.attachChannel(this.channel);
+
+      const offer = await peer.createOffer();
+      this.assertOperation(operation.id, peer);
+      await peer.setLocalDescription(offer);
+      this.assertOperation(operation.id, peer);
+      await waitForIceGatheringComplete(peer, ICE_GATHERING_TIMEOUT_MS, operation.signal);
+      this.assertOperation(operation.id, peer);
+      if (peer.connectionState === "closed") throw new Error("連線在建立邀請時已關閉，請重新嘗試。");
+      if (!peer.localDescription) throw new Error("瀏覽器未產生本機 SDP。請中斷後重新建立邀請。");
+
+      const signalingText = serializeSessionDescription(peer.localDescription);
+      this.publish({
+        phase: "waiting-answer",
+        detail: "邀請已備妥。請私下將完整 Offer 傳給加入端；ICE 收集完成不代表兩端已連線。",
+      });
+      return signalingText;
+    } catch (error) {
+      if (error instanceof ConnectionCancelledError || operation.id !== this.operationId) {
+        throw new ConnectionCancelledError();
+      }
+      const message = safeMessage(error, "無法建立 Offer。請確認瀏覽器支援 WebRTC、網路可用，再重新嘗試。");
+      this.finish("failed", message);
+      throw new Error(message);
+    } finally {
+      this.endOperation(operation.id);
+    }
+  }
+
+  async createAnswer(offerText: string, stunInput: string): Promise<string> {
+    this.assertIdle();
+    const offer = parseSessionDescription(offerText, "offer");
+    const stunServer = validateStunServer(stunInput);
+    const operation = this.beginOperation();
+    this.publish({ role: "joiner", phase: "creating-answer", detail: "正在套用 Offer 並建立回覆。" });
+
+    try {
+      const peer = this.createPeer(stunServer);
+      peer.ondatachannel = (event) => this.attachChannel(event.channel);
+
+      await peer.setRemoteDescription(offer);
+      this.assertOperation(operation.id, peer);
+      const answer = await peer.createAnswer();
+      this.assertOperation(operation.id, peer);
+      await peer.setLocalDescription(answer);
+      this.assertOperation(operation.id, peer);
+      await waitForIceGatheringComplete(peer, ICE_GATHERING_TIMEOUT_MS, operation.signal);
+      this.assertOperation(operation.id, peer);
+      if (peer.connectionState === "closed") throw new Error("連線在建立回覆時已關閉，請重新貼上 Offer。");
+      if (!peer.localDescription) throw new Error("瀏覽器未產生本機 SDP。請中斷後重新建立回覆。");
+
+      const signalingText = serializeSessionDescription(peer.localDescription);
+      this.publish({
+        phase: "waiting-peer",
+        detail: "回覆已備妥。請私下傳回發起端，等待對方套用 Answer；DataChannel 尚未開啟前不算連線成功。",
+      });
+      this.startConnectionTimeout();
+      this.syncPeerState();
+      this.assertOperation(operation.id, peer);
+      return signalingText;
+    } catch (error) {
+      if (error instanceof ConnectionCancelledError || operation.id !== this.operationId) {
+        throw new ConnectionCancelledError();
+      }
+      const message = safeMessage(error, "無法套用 Offer。請確認它完整、尚未使用，並來自目前這次配對。");
+      this.finish("failed", message);
+      throw new Error(message);
+    } finally {
+      this.endOperation(operation.id);
+    }
+  }
+
+  async completeWithAnswer(answerText: string): Promise<void> {
+    if (this.snapshot.role !== "initiator" || this.snapshot.phase !== "waiting-answer" || !this.peer) {
+      throw new Error("操作順序不正確。請先在發起端建立 Offer，並等候對方回覆。");
+    }
+    if (this.busy) throw new Error("上一個步驟仍在進行，請稍候再操作。");
+    const answer = parseSessionDescription(answerText, "answer");
+    const peer = this.peer;
+    if (peer.signalingState !== "have-local-offer" || peer.remoteDescription) {
+      throw new Error("這個 Answer 不適用於目前的邀請。請確認它來自同一個 Offer，或中斷後重新配對。");
+    }
+
+    const operation = this.beginOperation();
+    this.publish({ phase: "applying-answer", detail: "正在套用 Answer，等待 ICE 與 DataChannel 狀態更新。" });
+    try {
+      await peer.setRemoteDescription(answer);
+      this.assertOperation(operation.id, peer);
+      this.publish({ phase: "connecting", detail: "Answer 已套用；等待 PeerConnection 與 DataChannel 真正連線。" });
+      this.startConnectionTimeout();
+      this.syncPeerState();
+    } catch (error) {
+      if (error instanceof ConnectionCancelledError || operation.id !== this.operationId) {
+        throw new ConnectionCancelledError();
+      }
+      const message = "Answer 無法套用。請確認你貼上的是本次 Offer 對應的完整 Answer，且雙端沒有重複使用舊邀請。";
+      this.finish("failed", message);
+      throw new Error(message);
+    } finally {
+      this.endOperation(operation.id);
+    }
+  }
+
+  /** Close all transient session data and return to a clean, reusable state. */
+  disconnect(): void {
+    this.cancelActiveOperation();
+    this.disposeResources();
+    this.publish({ ...INITIAL_SNAPSHOT });
+  }
+
+  private beginOperation(): { id: number; signal: AbortSignal } {
+    this.busy = true;
+    const id = ++this.operationId;
+    const controller = new AbortController();
+    this.operationController = controller;
+    return { id, signal: controller.signal };
+  }
+
+  private assertOperation(id: number, peer: RTCPeerConnection): void {
+    if (id !== this.operationId || peer !== this.peer) throw new ConnectionCancelledError();
+  }
+
+  private endOperation(id: number): void {
+    if (id !== this.operationId) return;
+    this.busy = false;
+    this.operationController = null;
+  }
+
+  private cancelActiveOperation(): void {
+    this.operationId += 1;
+    const controller = this.operationController;
+    this.operationController = null;
+    this.busy = false;
+    controller?.abort();
+  }
+
+  private assertIdle(): void {
+    if (this.busy) throw new Error("操作仍在進行中，請稍候。");
+    if (this.peer || this.snapshot.phase !== "idle") {
+      throw new Error("目前已有一組連線流程。請先按「中斷連線」再建立新的配對。");
+    }
+  }
+
+  private createPeer(stunServer: string | null): RTCPeerConnection {
+    const configuration: RTCConfiguration = {
+      iceServers: stunServer ? [{ urls: stunServer }] : [],
+    };
+    this.peer = this.peerConnectionFactory(configuration);
+    this.peer.onconnectionstatechange = () => this.syncPeerState();
+    this.peer.oniceconnectionstatechange = () => this.syncPeerState();
+    this.peer.onicegatheringstatechange = () => this.syncPeerState();
+    return this.peer;
+  }
+
+  private attachChannel(channel: RTCDataChannel): void {
+    if (this.channel && this.channel !== channel) {
+      // This page negotiates one channel only. Close unexpected extras rather than
+      // inventing an application-level channel protocol.
+      channel.close();
+      return;
+    }
+    this.channel = channel;
+    const markOpen = () => {
+      if (channel.readyState !== "open") return;
+      this.clearConnectionTimeout();
+      this.publish({ phase: "open", detail: "DataChannel readyState 為 open；目前已確認資料通道開啟。" });
+    };
+    channel.onopen = markOpen;
+    channel.onclose = () => {
+      const wasOpen = this.snapshot.phase === "open" || this.snapshot.dataChannelState === "open";
+      this.finish("disconnected", wasOpen
+        ? "對方已關閉 DataChannel，連線已中斷。"
+        : "DataChannel 在開啟前關閉。請確認對方完成協商，再重新配對。");
+    };
+    channel.onerror = () => {
+      this.finish("failed", "DataChannel 發生錯誤。請雙端中斷目前配對，重新交換 Offer／Answer。");
+    };
+    this.publish({ detail: "已收到 DataChannel，等待其 readyState 變為 open。" });
+    markOpen();
+  }
+
+  private syncPeerState(): void {
+    const peer = this.peer;
+    if (!peer) return;
+    this.publish({});
+
+    if (peer.connectionState === "failed" || peer.iceConnectionState === "failed") {
+      this.finish("failed", "ICE 連線失敗。請確認雙端貼上同一組完整 Offer／Answer，並允許瀏覽器 UDP；沒有 TURN 中繼時，部分網路無法直連。");
+      return;
+    }
+    if (peer.connectionState === "closed") {
+      this.finish("disconnected", "PeerConnection 已關閉。請按「中斷連線」清除資訊後重新配對。");
+      return;
+    }
+    if (peer.connectionState === "disconnected" || peer.iceConnectionState === "disconnected") {
+      if (this.snapshot.phase !== "disconnected") {
+        this.publish({ phase: "disconnected", detail: "目前網路路徑中斷；瀏覽器可能自動恢復，若持續中斷可重新配對。" });
+      }
+      return;
+    }
+    if (this.channel?.readyState === "open") {
+      this.clearConnectionTimeout();
+      this.publish({ phase: "open", detail: "DataChannel readyState 為 open；目前已確認資料通道開啟。" });
+      return;
+    }
+    if (peer.connectionState === "connecting" || peer.iceConnectionState === "checking" || peer.connectionState === "connected") {
+      if (this.snapshot.phase !== "waiting-answer" && this.snapshot.phase !== "creating-answer") {
+        this.publish({ phase: "connecting", detail: "正在檢查可用的點對點路徑，等待 DataChannel 開啟。" });
+      }
+      if (this.snapshot.role === "joiner" && this.snapshot.phase !== "creating-answer") this.startConnectionTimeout();
+    }
+  }
+
+  private startConnectionTimeout(): void {
+    if (this.connectionTimer !== null) return;
+    this.connectionTimer = setTimeout(() => {
+      this.connectionTimer = null;
+      if (this.snapshot.phase === "open" || this.snapshot.phase === "idle") return;
+      this.finish("failed", "等待 DataChannel 開啟逾時。請確認雙端已完成貼上／套用、STUN 可用；若網路不允許直連，請改用支援的網路後重新配對。");
+    }, CONNECTION_TIMEOUT_MS);
+  }
+
+  private clearConnectionTimeout(): void {
+    if (this.connectionTimer !== null) {
+      clearTimeout(this.connectionTimer);
+      this.connectionTimer = null;
+    }
+  }
+
+  private finish(phase: "disconnected" | "failed", detail: string): void {
+    const hadPeer = this.peer !== null;
+    const hadChannel = this.channel !== null;
+    const iceGatheringState = this.peer?.iceGatheringState ?? this.snapshot.iceGatheringState;
+    this.cancelActiveOperation();
+    this.disposeResources();
+    this.publish({
+      phase,
+      detail,
+      peerConnectionState: hadPeer ? "closed" : this.snapshot.peerConnectionState,
+      iceConnectionState: hadPeer ? "closed" : this.snapshot.iceConnectionState,
+      iceGatheringState,
+      dataChannelState: hadChannel ? "closed" : this.snapshot.dataChannelState,
+    });
+  }
+
+  private disposeResources(): void {
+    this.clearConnectionTimeout();
+    const channel = this.channel;
+    const peer = this.peer;
+    this.channel = null;
+    this.peer = null;
+
+    if (channel) {
+      channel.onopen = null;
+      channel.onclose = null;
+      channel.onerror = null;
+      try {
+        if (channel.readyState !== "closed") channel.close();
+      } catch {
+        // Closing an already-terminated browser object is harmless.
+      }
+    }
+    if (peer) {
+      peer.onconnectionstatechange = null;
+      peer.oniceconnectionstatechange = null;
+      peer.onicegatheringstatechange = null;
+      peer.ondatachannel = null;
+      try {
+        if (peer.signalingState !== "closed") peer.close();
+      } catch {
+        // Closing an already-terminated browser object is harmless.
+      }
+    }
+  }
+
+  private publish(patch: Partial<ConnectionSnapshot>): void {
+    const peer = this.peer;
+    const channel = this.channel;
+    this.snapshot = {
+      ...this.snapshot,
+      ...patch,
+      peerConnectionState: peer?.connectionState ?? patch.peerConnectionState ?? this.snapshot.peerConnectionState,
+      iceConnectionState: peer?.iceConnectionState ?? patch.iceConnectionState ?? this.snapshot.iceConnectionState,
+      iceGatheringState: peer?.iceGatheringState ?? patch.iceGatheringState ?? this.snapshot.iceGatheringState,
+      dataChannelState: channel?.readyState ?? patch.dataChannelState ?? this.snapshot.dataChannelState,
+    };
+    const current = this.getState();
+    this.listeners.forEach((listener) => listener(current));
+  }
+}

@@ -2,6 +2,14 @@
 @import url("https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Indie+Flower&family=Fredoka+One&family=Playwrite+GB+S:ital@0;1&family=Caveat+Brush&family=Comfortaa:wght@400;700&family=Satisfy&family=Pacifico&family=Sacramento&family=Dancing+Script:wght@400;700&family=Quicksand:wght@400;700&family=Varela+Round&family=Nunito:wght@400;700&display=swap");
 @import "tailwindcss";
 
+@font-face {
+  font-family: "SciNotes Noto Sans TC";
+  src: url("./fonts/noto-sans-tc-700.woff") format("woff");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   /* 手寫體字體家族 */
   --font-caveat: "Caveat", cursive;

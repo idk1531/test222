@@ -12,20 +12,23 @@ import {
   type StudyBookLayout,
   type StudyCategory,
 } from "./study";
+import { ROOM_DIMENSIONS } from "./roomDimensions";
+
+export { ROOM_AREA_SCALE } from "./roomDimensions";
 
 // ================= 房間尺寸（公尺） =================
-export const ROOM = {
-  width: 6, // X：東西向（−3 … +3）
-  depth: 5, // Z：南北向（−2.5 … +2.5）
-  height: 2.75, // v8.3：圖一量測值（原 3.1）
-  wall: 0.12, // 牆厚
-};
+export const ROOM = ROOM_DIMENSIONS; // X：8.49 m、Z：7.07 m；高度與牆厚不變
 
 // 大窗（北牆 z = −depth/2；窗台略高於桌面，溫和日光由窗外右上方射入）
+// 西側窗墩 0.35 m、東側窗墩 1.20 m，窗寬與中心隨房寬推導。
+const WINDOW_WEST_PIER = 0.35;
+const WINDOW_EAST_PIER = 1.2;
+const WINDOW_LEFT = -ROOM.width / 2 + WINDOW_WEST_PIER;
+const WINDOW_RIGHT = ROOM.width / 2 - WINDOW_EAST_PIER;
 // v8.3：框變細、單中挺、無橫櫺（圖一＝大玻璃＋一條直中挺）
 export const WINDOW = {
-  cx: -0.3, // 窗中心 X（v8.6：依附圖北牆幾乎整面開窗，西側只留 9 cm 牆墩）
-  width: 4.9,
+  cx: (WINDOW_LEFT + WINDOW_RIGHT) / 2,
+  width: WINDOW_RIGHT - WINDOW_LEFT,
   sill: 0.9, // 窗台高（大理石檯面頂）
   top: 2.58,
   frame: 0.055, // 窗框寬（原 0.085）
@@ -36,19 +39,28 @@ export const WINDOW = {
   sillThickness: 0.12, // 窗台石塊厚（自桌面 0.78 墊到 0.90）
 };
 
-// L 形大理石檯面：沿窗 3.4 m ＋ 沿西牆回折 1.7 m ＋ 東側延伸（盆栽）
-// 桌板頂 0.78、厚 0.05、深 0.68；CameraRig 的飛行公式 deskZ = −D/2 + wall + depth/2
-// 必須落在板中央，因此 depth 與桌板位置以此為錨（桌板後緣離牆 0.12，由窗台石與櫃體填滿）。
+// L 形大理石檯面：沿北窗延伸，並沿西側回折；只平移到新窗位，不隨房間放大。
+// 桌板頂 0.78、厚 0.05、深 0.68；沿窗段維持既有 5.79 m 尺寸。
 export const DESK = {
-  cx: -0.55, // 沿窗段中心 X（＝窗中心；飛行目標沿用）
-  width: 3.4, // 沿窗段寬（＝窗寬）
+  cx: WINDOW.cx, // 沿窗段中心（工作視角錨點）
+  width: 5.79, // 保持擴大房間前的實際沿窗段長度
   depth: 0.68, // 檯面深
   top: 0.78, // 桌面高度
   thickness: 0.05,
-  sideDepth: 1.7, // 沿西牆回折段長（Z）
-  wingWidth: 0.8, // 東側延伸（龜背竹座）
-  sideX: 0.68, // 西牆回折段深（X）
+  sideDepth: 1.7, // 西牆回折總長；尺寸不隨房間擴大
+  sideX: 0.68, // 西牆回折段深（X），保持家具實際尺度
 };
+
+/** Physical planes used by room labels and their aspect-matched canvas textures. */
+export const CATEGORY_LABEL_PLANE = { width: 0.18, height: 0.05 } as const;
+export const DESK_PREVIEW_PLANE = { width: 1.7, height: 0.42 } as const;
+
+export function heldCoverPlaneSize(bookDepth: number, bookHeight: number): { width: number; height: number } {
+  return {
+    width: Math.max(0.01, bookDepth * 0.92),
+    height: Math.max(0.01, bookHeight * 0.94),
+  };
+}
 
 // 桌下落地的深炭櫃（圖一：櫃高 0.73、深 0.60、4 片門、縫 0.008）
 export const CABINET = {
@@ -57,32 +69,6 @@ export const CABINET = {
   gap: 0.008,
   doors: 4,
 };
-
-/** v8.3 椅子的世界座標與外形 footprint；幾何/碰撞不在元件內重抄位置。 */
-export const CHAIR = {
-  x: -0.82,
-  y: 0,
-  z: -1.02,
-  yaw: 2.62,
-  width: 0.67,
-  depth: 0.67,
-  seatWidth: 0.6,
-  seatDepth: 0.52,
-  seatHeight: 0.42,
-};
-
-export const SIT = {
-  triggerRadius: 0.34,
-  seatY: 0.42,
-  eyeY: 1.18,
-  walkSpeed: 1.15,
-  fov: 58,
-  fadeOpacity: 0.25,
-};
-
-export function isWithinSitTrigger(x: number, z: number, chairX = CHAIR.x, chairZ = CHAIR.z): boolean {
-  return Math.hypot(x - chairX, z - chairZ) < SIT.triggerRadius;
-}
 
 /** 逐項可退步開關（v8.3）：任一 false 只影響該項，其餘照舊。 */
 export const FIDELITY = {
@@ -125,11 +111,13 @@ export const LOOK = {
 
 // 懸浮薄層板書牆（v8.3：西牆 wallSign=-1；-1＝西牆、+1＝東牆，保留可切換）
 // xBack 為背牆面 X；板材自背牆往室內長 depth；層板沿 Z 長 width。
+const SHELF_CENTER_Z = 0;
+const SHELF_WIDTH = ROOM.depth - 0.5;
 export const SHELF = {
   wallSign: FIDELITY.shelfWallSign,
-  // 附圖的書牆沿整面西牆（幾乎到南北兩端）；資料書因此也更靠近房間中央。
-  z: 0.05, // 中心 Z（北端 −2.25、南端 +2.35，西牆內面 −2.44…+2.44）
-  width: 4.6, // 沿 Z 軸寬度
+  // 書牆沿西牆延伸；兩端各留約 0.25 m，不會撞到南北牆。
+  z: SHELF_CENTER_Z,
+  width: SHELF_WIDTH, // 沿 Z 軸寬度（房間深 7.07 → 書架長 6.57 m）
   height: 2.46, // 最上層板「頂面」Y（附圖量測）
   depth: 0.28, // 層板深
   plank: 0.035, // 板厚
@@ -143,12 +131,24 @@ export const SHELF = {
   labelWidth: 0.15, // 櫃板標籤佔寬
   maxRowHeight: 0.52,
   pullOut: 0.055, // 書本抽出距離（預覽）
-  // 腰高長檯面（板頂 0.92、厚 0.045、深 0.30）
-  ledge: { top: 0.92, thickness: 0.045, depth: 0.3, z0: -0.7, z1: 1.48 },
+  // 腰高長檯面（板頂 0.92、厚 0.045、深 0.30），與書牆等長並留 0.10 m 收邊。
+  ledge: {
+    top: 0.92,
+    thickness: 0.045,
+    depth: 0.3,
+    z0: SHELF_CENTER_Z - SHELF_WIDTH / 2 + 0.1,
+    z1: SHELF_CENTER_Z + SHELF_WIDTH / 2 - 0.1,
+  },
   /** 背板燈槽：每層板後方洗牆光的亮度（0–1） */
   backGlow: 0.85,
   // 檯面下矮擱板（板頂 0.40、厚 0.035、深 0.28）
-  lowShelf: { top: 0.4, thickness: 0.035, depth: 0.28, z0: -0.7, z1: 1.48 },
+  lowShelf: {
+    top: 0.4,
+    thickness: 0.035,
+    depth: 0.28,
+    z0: SHELF_CENTER_Z - SHELF_WIDTH / 2 + 0.1,
+    z1: SHELF_CENTER_Z + SHELF_WIDTH / 2 - 0.1,
+  },
 };
 
 /** 桌上書的位置網格，公尺；保持落點可重現。 */
@@ -164,15 +164,15 @@ export interface RoomRect {
 /** L 形桌板實際 footprint，與 RoomGeometry 的桌板段共用 DESK/SHELF/WINDOW 真相。 */
 export const DESK_FOOTPRINT: readonly RoomRect[] = (() => {
   const wallInnerZ = -ROOM.depth / 2 + ROOM.wall;
-  const mainMinX = SHELF.xBack;
-  const mainMaxX = WINDOW.cx + WINDOW.width / 2 + DESK.wingWidth;
+  const mainMinX = DESK.cx - DESK.width / 2;
+  const mainMaxX = DESK.cx + DESK.width / 2;
   const mainMinZ = wallInnerZ;
   const mainMaxZ = wallInnerZ + DESK.depth;
   return [
     { minX: mainMinX, maxX: mainMaxX, minZ: mainMinZ, maxZ: mainMaxZ },
     {
-      minX: SHELF.xBack,
-      maxX: SHELF.xBack + DESK.sideX,
+      minX: mainMinX,
+      maxX: mainMinX + DESK.sideX,
       minZ: mainMaxZ,
       maxZ: wallInnerZ + DESK.sideDepth,
     },
@@ -183,16 +183,46 @@ export const DESK_FOOTPRINT: readonly RoomRect[] = (() => {
 export const CABINET_FOOTPRINT: readonly RoomRect[] = (() => {
   const wallZ = -ROOM.depth / 2;
   const wallInnerZ = wallZ + ROOM.wall;
-  const deskX1 = WINDOW.cx + WINDOW.width / 2 + DESK.wingWidth;
+  const [mainDesk, sideDesk] = DESK_FOOTPRINT;
+  const deskX1 = mainDesk.maxX;
   const cabinetZ0 = wallZ;
   const cabinetZ1 = cabinetZ0 + CABINET.depth;
-  const sideCabinetX0 = SHELF.xBack;
-  const sideCabinetX1 = SHELF.xBack + DESK.sideX - 0.08;
+  const sideCabinetX0 = sideDesk.minX;
+  const sideCabinetX1 = sideDesk.maxX - 0.08;
   return [
     { minX: sideCabinetX1, maxX: deskX1 - 0.12, minZ: cabinetZ0, maxZ: cabinetZ1 },
     { minX: sideCabinetX0, maxX: sideCabinetX1, minZ: wallInnerZ + 0.02, maxZ: cabinetZ1 },
   ];
 })();
+
+/** v8.3 椅子位置由桌面 footprint 推導，桌緣前距 0.62 m 並離側桌外緣至少 0.55 m。 */
+const MAIN_DESK_FOOTPRINT = DESK_FOOTPRINT[0];
+const SIDE_DESK_FOOTPRINT = DESK_FOOTPRINT[1];
+const MAIN_DESK_CENTER_X = (MAIN_DESK_FOOTPRINT.minX + MAIN_DESK_FOOTPRINT.maxX) / 2;
+export const CHAIR = {
+  x: Math.max(SIDE_DESK_FOOTPRINT.maxX + 0.55, MAIN_DESK_CENTER_X - 0.87),
+  y: 0,
+  z: MAIN_DESK_FOOTPRINT.maxZ + 0.62,
+  yaw: 2.62,
+  width: 0.67,
+  depth: 0.67,
+  seatWidth: 0.6,
+  seatDepth: 0.52,
+  seatHeight: 0.42,
+};
+
+export const SIT = {
+  triggerRadius: 0.34,
+  seatY: 0.42,
+  eyeY: 1.18,
+  walkSpeed: 1.15,
+  fov: 58,
+  fadeOpacity: 0.25,
+};
+
+export function isWithinSitTrigger(x: number, z: number, chairX = CHAIR.x, chairZ = CHAIR.z): boolean {
+  return Math.hypot(x - chairX, z - chairZ) < SIT.triggerRadius;
+}
 
 /**
  * 將桌上書中心夾回 L 形桌板內，並吸附 4 cm 網格。
@@ -222,11 +252,17 @@ export const SUN = {
   color: "#fff5e6", // 暖白斜陽（比 v8.5 更中性，避免整間變橘）
   // 附圖是「亮窗＋霧感庭園」的柔光：方向光負責可讀陰影，其餘交給窗光與環境光。
   intensity: 2.15,
-  position: new THREE.Vector3(2.1, 3.0, -ROOM.depth / 2 - 1.8),
-  target: new THREE.Vector3(-0.75, 0.2, 1.25),
+  position: new THREE.Vector3(ROOM.width * 0.35, 3.0, -ROOM.depth / 2 - 1.8),
+  target: new THREE.Vector3(-ROOM.width * 0.125, 0.2, ROOM.depth * 0.25),
   shadowMap: { desktop: 2048, mobile: 1024 },
   /** PCFSoft 陰影模糊半徑（桌機較柔） */
   shadowRadius: { desktop: 7, mobile: 4 },
+};
+export const SUN_SHADOW_CAMERA = {
+  left: -ROOM.width * 0.78,
+  right: ROOM.width * 0.78,
+  top: ROOM.depth * 0.88,
+  bottom: -ROOM.depth * 0.76,
 };
 export const AMBIENT = {
   // 中性偏暖的環境光：降低整體填充，保留窗光與層板燈的明暗對比。
@@ -242,17 +278,24 @@ export const WINDOW_FILL = {
   color: "#f2f5f8",
   intensityDesktop: 1.1,
   intensityMobile: 0.7,
-  position: new THREE.Vector3(-0.4, 1.9, -1.3),
-  target: new THREE.Vector3(-0.6, 0.75, 1.7),
+  position: new THREE.Vector3(WINDOW.cx - 0.1, 1.9, -ROOM.depth / 2 + 1.2),
+  target: new THREE.Vector3(WINDOW.cx - 0.3, 0.75, ROOM.depth * 0.34),
 };
 
-/** 書牆暖光洗牆燈（v8.5）：三盞低強度點光源，模擬附圖層板下 LED 的暖色溢光。 */
+function evenlySpaced(start: number, end: number, count: number): number[] {
+  if (count <= 1) return [(start + end) / 2];
+  return Array.from({ length: count }, (_, i) => start + ((end - start) * i) / (count - 1));
+}
+
+/** 書牆三盞暖光洗牆燈維持原數量與亮度，位置依新書牆長度等分。 */
+const SHELF_WASH_START = SHELF.z - SHELF.width / 2 + 0.55;
+const SHELF_WASH_END = SHELF.z + SHELF.width / 2 - 0.55;
 export const SHELF_WASH = {
   color: "#ffc28c",
   intensityDesktop: 0.3,
   intensityMobile: 0.22,
   distance: 2.7,
-  z: [-1.7, -0.4, 0.9],
+  z: evenlySpaced(SHELF_WASH_START, SHELF_WASH_END, 3),
   y: 1.9,
   xOffset: 0.42,
 };
@@ -372,10 +415,9 @@ export const TEXTURES: {
  * 僅供預覽／驗收截圖使用，不寫入 localStorage、不影響使用者相機。
  */
 export const MATCH_VIEW = {
-  // v8.6：窗寬 4.6 m 後，驗收機位再退到東南角並稍微加寬視野，
-  // 讓「左書牆、中轉角、右窗」三個關鍵點都完整入鏡。
-  x: 2.58,
-  z: 2.08,
+  // 退到房間東南側，依新房寬／深比例取景，讓「左書牆、中轉角、右窗」完整入鏡。
+  x: ROOM.width * 0.424,
+  z: ROOM.depth * 0.418,
   height: 1.52,
   yaw: THREE.MathUtils.degToRad(-48),
   pitch: THREE.MathUtils.degToRad(-2),
@@ -422,6 +464,83 @@ export function detectQuality(): SceneQuality {
 }
 
 // ================= 純函式 helper =================
+
+export interface AspectCanvasSize {
+  width: number;
+  height: number;
+  aspect: number;
+}
+
+/** 建立與實體平面同 aspect 的 canvas 尺寸，避免 CanvasTexture 被非等比拉伸。 */
+export function canvasSizeForPlane(planeW: number, planeH: number, canvasH = 512): AspectCanvasSize {
+  const safeW = Number.isFinite(planeW) && planeW > 0 ? planeW : 1;
+  const safeH = Number.isFinite(planeH) && planeH > 0 ? planeH : 1;
+  const height = Math.max(1, Math.round(canvasH));
+  const width = Math.max(1, Math.round(height * safeW / safeH));
+  return { width, height, aspect: width / height };
+}
+
+const SPINE_LABEL_CANVAS_H = 512;
+const SPINE_LABEL_MIN_CANVAS_W = 96;
+
+/** 書脊直排字：最多六個字，標題過長以省略號佔最後一格。 */
+export function spineTitleGlyphs(title: string): string[] {
+  const chars = Array.from(String(title || "未命名").trim() || "未命名");
+  return chars.length > 6 ? [...chars.slice(0, 5), "…"] : chars;
+}
+
+/**
+ * 依書本尺寸推導書脊標籤的幾何與畫布：canvas aspect 永遠等於 plane aspect。
+ * Plane 可透明延伸到完整書高；實際紙籤仍以書厚的 62% 和書高的 72% 繪製。
+ */
+export function spineLabelLayout(input: {
+  title: string;
+  thickness: number;
+  height: number;
+}): {
+  planeW: number;
+  planeH: number;
+  aspect: number;
+  canvasW: number;
+  canvasH: number;
+  fontSize: number;
+  charCount: number;
+  lineGap: number;
+} {
+  const thickness = Math.max(0.001, Number.isFinite(input.thickness) ? input.thickness : 0.03);
+  const height = Math.max(0.01, Number.isFinite(input.height) ? input.height : 0.22);
+  const planeH = height;
+  // 96px 最小寬度避免細書脊 canvas 過度低解析度；透明 plane 不會把標籤白底撐出書脊。
+  const planeW = Math.max(thickness, planeH * SPINE_LABEL_MIN_CANVAS_W / SPINE_LABEL_CANVAS_H);
+  const canvasW = Math.round(SPINE_LABEL_CANVAS_H * planeW / planeH);
+  const charCount = spineTitleGlyphs(input.title).length;
+  const fontSize = Math.round(canvasW * 0.62);
+  return {
+    planeW,
+    planeH,
+    aspect: planeW / planeH,
+    canvasW,
+    canvasH: SPINE_LABEL_CANVAS_H,
+    fontSize,
+    charCount,
+    lineGap: fontSize * 1.25,
+  };
+}
+
+/** 對書脊垂直排版做純數學 bounds 計算（不用 canvas，測試可確保 6 字不溢出）。 */
+export function spineLabelTextBounds(layout: Pick<
+  ReturnType<typeof spineLabelLayout>,
+  "canvasW" | "canvasH" | "fontSize" | "charCount" | "lineGap"
+>): { left: number; right: number; top: number; bottom: number } {
+  const textHeight = layout.fontSize + Math.max(0, layout.charCount - 1) * layout.lineGap;
+  const top = (layout.canvasH - textHeight) / 2;
+  return {
+    left: (layout.canvasW - layout.fontSize) / 2,
+    right: (layout.canvasW + layout.fontSize) / 2,
+    top,
+    bottom: top + textHeight,
+  };
+}
 
 export function clampRoomPosition(x: number, z: number): { x: number; z: number } {
   const mx = ROOM.width / 2 - CAMERA.wallMargin;

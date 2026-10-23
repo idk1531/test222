@@ -31,3 +31,32 @@ export const FONT_MAP: Record<string, string> = FONT_OPTIONS.reduce(
 export function resolveFont(key?: string): string {
   return FONT_MAP[key || "quicksand"] || FONT_MAP.quicksand;
 }
+
+const LOCAL_CJK_FAMILY = "SciNotes Noto Sans TC";
+const CJK_FONT_SAMPLE = "書房筆記分類";
+let cjkFontReady: Promise<void> | null = null;
+
+/** Font-family stack used by CanvasRenderingContext2D and HTML labels. */
+export function canvasCJKFont(): string {
+  return `"${LOCAL_CJK_FAMILY}", "Noto Sans TC", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif`;
+}
+
+/**
+ * Wait for the bundled Traditional Chinese face before rasterizing canvas labels.
+ * A failed local load is non-fatal: the returned stack still provides platform CJK fallbacks.
+ */
+export function ensureCanvasCJKFont(): Promise<void> {
+  if (typeof document === "undefined" || !document.fonts) return Promise.resolve();
+  if (!cjkFontReady) {
+    cjkFontReady = (async () => {
+      try {
+        await document.fonts.load(`700 16px "${LOCAL_CJK_FAMILY}"`, CJK_FONT_SAMPLE);
+        await document.fonts.ready;
+      } catch {
+        // Canvas text still uses the explicit system fallback stack if the local face cannot load.
+        await document.fonts.ready.catch(() => undefined);
+      }
+    })();
+  }
+  return cjkFontReady;
+}
