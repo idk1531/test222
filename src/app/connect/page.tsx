@@ -8,6 +8,8 @@ import {
   CONNECTION_TIMEOUT_MS,
   ICE_GATHERING_TIMEOUT_MS,
   ConnectionCancelledError,
+  type CandidateTypeCounts,
+  type SelectedCandidatePairState,
   DEFAULT_STUN_SERVER,
   WebRTCConnectionManager,
   connectionPhaseLabel,
@@ -15,6 +17,7 @@ import {
   iceConnectionStateLabel,
   iceGatheringStateLabel,
   peerConnectionStateLabel,
+  signalingStateLabel,
   type ConnectionPhase,
   type ConnectionSnapshot,
 } from "@/lib/connection";
@@ -35,11 +38,25 @@ function isCancellation(error: unknown): boolean {
   return error instanceof ConnectionCancelledError;
 }
 
+function formatCandidateTypes(counts: CandidateTypeCounts | null): string {
+  if (!counts) return "尚無統計";
+  return `host ${counts.host} · srflx ${counts.srflx} · relay ${counts.relay} · prflx ${counts.prflx} · other ${counts.other}`;
+}
+
+function selectedCandidatePairLabel(state: SelectedCandidatePairState): string {
+  switch (state) {
+    case "checking": return "檢查中";
+    case "succeeded": return "已選定且成功";
+    case "failed": return "失敗";
+    case "not-reported": return "瀏覽器尚未回報";
+  }
+}
+
 function StateMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0">
       <span className="text-xs text-slate-500">{label}</span>
-      <span className="text-xs font-semibold text-slate-800">{value}</span>
+      <span className="text-right text-xs font-semibold text-slate-800">{value}</span>
     </div>
   );
 }
@@ -107,6 +124,17 @@ export default function ConnectionPage() {
     }
   };
 
+  const confirmAnswerSent = () => {
+    setErrorMessage("");
+    setNotice("");
+    try {
+      manager.confirmAnswerSent();
+      setNotice("已確認 Answer 傳回 A；B 端現在開始等待連線。");
+    } catch (error) {
+      setErrorMessage(formatFailure(error, "請先產生 Answer，再確認已傳回發起端。"));
+    }
+  };
+
   const completePairing = async () => {
     setErrorMessage("");
     setNotice("");
@@ -168,6 +196,9 @@ export default function ConnectionPage() {
   const connectionTimeoutSeconds = Math.round(CONNECTION_TIMEOUT_MS / 1000);
   const waitingForIceGathering = snapshot.phase === "creating-offer" || snapshot.phase === "creating-answer";
   const waitingForConnection = snapshot.phase === "waiting-peer" || snapshot.phase === "applying-answer" || snapshot.phase === "connecting";
+  const canConfirmAnswerSent = isJoiner && Boolean(answerOutput)
+    && (snapshot.phase === "waiting-peer" || snapshot.phase === "connecting")
+    && !snapshot.connectionTimeoutActive;
 
   return (
     <main className="min-h-dvh bg-slate-100 px-3 py-5 text-slate-900 sm:px-6 sm:py-8">
@@ -208,7 +239,13 @@ export default function ConnectionPage() {
             <p className="mt-1 text-xs text-slate-600">完整訊號需等候 ICE 候選收集完成；超過 {iceGatheringTimeoutSeconds} 秒會逾時，可檢查網路或 STUN 設定後重試。</p>
           )}
           {waitingForConnection && (
-            <p className="mt-1 text-xs text-slate-600">若 {connectionTimeoutSeconds} 秒內 DataChannel 沒有開啟，介面會提示逾時；可中斷後重新配對。</p>
+            <p className="mt-1 text-xs text-slate-600">
+              {snapshot.connectionTimeoutActive
+                ? `連線等待計時已啟動，最長 ${connectionTimeoutSeconds} 秒；逾時時請先比對診斷狀態。`
+                : isJoiner
+                  ? `B 端先把 Answer 傳回 A，再按下方確認按鈕；這時才開始 ${connectionTimeoutSeconds} 秒等待計時。`
+                  : `A 端成功套用 Answer 後才開始 ${connectionTimeoutSeconds} 秒等待計時。`}
+            </p>
           )}
         </section>
 
@@ -347,21 +384,44 @@ export default function ConnectionPage() {
               {copied === "answer" ? <Check className="h-4 w-4" /> : <ClipboardCopy className="h-4 w-4" />}
               {copied === "answer" ? "Answer 已複製" : "複製 Answer"}
             </button>
+            {isJoiner && answerOutput && (snapshot.phase === "waiting-peer" || snapshot.phase === "connecting") && (
+              <button
+                type="button"
+                onClick={confirmAnswerSent}
+                disabled={!canConfirmAnswerSent}
+                className="touch-target mt-2 inline-flex min-h-10 w-full items-center justify-center rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {snapshot.connectionTimeoutActive ? "已開始等待 A 端" : "我已傳回 Answer，開始等待"}
+              </button>
+            )}
           </section>
         </div>
 
         <section className="mt-4 grid gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)] sm:p-5" aria-labelledby="details-heading">
           <div>
-            <h2 id="details-heading" className="mb-2 text-sm font-bold">即時連線狀態</h2>
+            <h2 id="details-heading" className="mb-1 text-sm font-bold">連線狀態與診斷</h2>
+            <p className="mb-2 text-[11px] text-slate-500">中斷或失敗時保留清理前最後狀態；只顯示候選類型數量，不顯示候選位址。</p>
             <StateMetric label="PeerConnection" value={peerConnectionStateLabel(snapshot.peerConnectionState)} />
             <StateMetric label="ICE 連線" value={iceConnectionStateLabel(snapshot.iceConnectionState)} />
             <StateMetric label="ICE 候選收集" value={iceGatheringStateLabel(snapshot.iceGatheringState)} />
+            <StateMetric label="Signaling" value={signalingStateLabel(snapshot.signalingState)} />
+            <StateMetric label="本機描述" value={snapshot.localDescriptionSet ? "已設定" : "尚未設定"} />
+            <StateMetric label="遠端描述" value={snapshot.remoteDescriptionSet ? "已套用" : "尚未套用"} />
+            <StateMetric label="遠端候選資訊" value={!snapshot.remoteDescriptionSet
+              ? "尚未收到遠端描述"
+              : snapshot.hasRemoteCandidateInformation
+                ? "訊號含候選資訊（不代表可達）"
+                : "遠端描述未含候選資訊"} />
+            <StateMetric label="本機候選類型（getStats）" value={formatCandidateTypes(snapshot.localCandidateTypes)} />
+            <StateMetric label="遠端候選類型（getStats）" value={formatCandidateTypes(snapshot.remoteCandidateTypes)} />
+            <StateMetric label="選定候選配對" value={selectedCandidatePairLabel(snapshot.selectedCandidatePairState)} />
             <StateMetric label="DataChannel" value={dataChannelStateLabel(snapshot.dataChannelState)} />
           </div>
           <div className="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
             <h3 className="mb-1 font-bold text-slate-800">重要限制</h3>
             <p>本工具只建立並監測資料通道，不傳送筆記、畫面、音訊或其他應用資料。WebRTC 使用 STUN 嘗試 NAT 穿透，但本方案沒有 TURN 中繼；公司防火牆、對稱 NAT 或受限行動網路可能阻擋直連，這時連線可能失敗。</p>
             <p className="mt-2">需要 HTTPS（GitHub Pages 預設提供）或 localhost。人工訊號交換沒有伺服器代替保管邀請；兩端需同時在線，並在逾時前完成 Offer／Answer 交換。</p>
+            <p className="mt-2">排查順序：先讓兩台裝置在同一 Wi-Fi 測試，再改用不同網路（例如一端行動網路）。候選類型統計與 gathering complete 都不代表路徑可達；只有 DataChannel readyState 為 open 才算成功。</p>
           </div>
         </section>
 
