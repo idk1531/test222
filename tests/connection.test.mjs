@@ -17,6 +17,16 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 await writeFile(modulePath, compiled, "utf8");
 const connection = await import(pathToFileURL(modulePath).href);
+const clipboardModulePath = join(temporaryDirectory, "clipboard.mjs");
+const clipboardSource = await readFile(new URL("../src/lib/clipboard.ts", import.meta.url), "utf8");
+const clipboardCompiled = ts.transpileModule(clipboardSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ESNext,
+    target: ts.ScriptTarget.ES2022,
+  },
+}).outputText;
+await writeFile(clipboardModulePath, clipboardCompiled, "utf8");
+const clipboard = await import(pathToFileURL(clipboardModulePath).href);
 
 after(async () => {
   await rm(temporaryDirectory, { recursive: true, force: true });
@@ -29,6 +39,7 @@ const SDP = [
   "t=0 0",
   "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
   "c=IN IP4 0.0.0.0",
+  "a=max-message-size:262144",
   "a=sctp-port:5000",
   "a=candidate:1 1 UDP 2122260223 192.0.2.1 5000 typ host",
   "",
@@ -102,10 +113,18 @@ class FakePeerConnection {
 
   async setLocalDescription(description) {
     if (this.signalingState === "closed") throw new Error("PeerConnection is closed");
-    this.localDescription = description;
+    this.localDescription = {
+      ...description,
+      sdp: description.sdp.replace(/^a=candidate:.*(?:\r?\n)?/m, ""),
+    };
     this.signalingState = description.type === "offer" ? "have-local-offer" : "stable";
-    this.iceGatheringState = "complete";
-    this.dispatch("icegatheringstatechange");
+    this.iceGatheringState = "gathering";
+    setTimeout(() => {
+      if (this.signalingState === "closed") return;
+      this.localDescription = description;
+      this.iceGatheringState = "complete";
+      this.dispatch("icegatheringstatechange");
+    }, 5);
   }
 
   async setRemoteDescription(description) {
@@ -147,14 +166,101 @@ test("STUN input accepts editable STUN URLs, blank disables it, and rejects TURN
   assert.throws(() => connection.validateStunServer("https://example.net"), /STUN 位址格式/);
 });
 
-test("signaling parser validates JSON, role order, DataChannel SDP, and complete ICE candidates", () => {
+test("clipboard rejection falls back to a selected field without losing text", async () => {
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value,
+  });
+  const restoreGlobal = (name, descriptor) => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+    else delete globalThis[name];
+  };
+  const makeField = () => {
+    const calls = [];
+    return {
+      calls,
+      field: {
+        value: "complete Offer JSON",
+        focus: () => calls.push("focus"),
+        select: () => calls.push("select"),
+        setSelectionRange: (start, end) => calls.push([start, end]),
+      },
+    };
+  };
+
+  try {
+    let writtenText = "";
+    let legacyCopyCalls = 0;
+    setGlobal("navigator", { clipboard: { writeText: async (text) => { writtenText = text; } } });
+    setGlobal("document", { execCommand: () => { legacyCopyCalls += 1; return true; } });
+    const successField = makeField();
+    assert.equal(await clipboard.copyTextWithFallback("complete Offer JSON", successField.field), "clipboard");
+    assert.equal(writtenText, "complete Offer JSON");
+    assert.deepEqual(successField.calls, []);
+    assert.equal(legacyCopyCalls, 0);
+
+    setGlobal("navigator", { clipboard: { writeText: async () => { throw new Error("NotAllowedError"); } } });
+    setGlobal("document", { execCommand: () => false });
+    const deniedField = makeField();
+    assert.equal(await clipboard.copyTextWithFallback("complete Offer JSON", deniedField.field), "manual");
+    assert.deepEqual(deniedField.calls, ["focus", "select", [0, "complete Offer JSON".length]]);
+    assert.equal(deniedField.field.value, "complete Offer JSON");
+
+    setGlobal("navigator", { clipboard: undefined });
+    setGlobal("document", { execCommand: () => true });
+    const legacyField = makeField();
+    legacyField.field.value = "complete Answer JSON";
+    assert.equal(await clipboard.copyTextWithFallback("complete Answer JSON", legacyField.field), "legacy-copy");
+    assert.deepEqual(legacyField.calls, ["focus", "select", [0, "complete Answer JSON".length]]);
+  } finally {
+    restoreGlobal("navigator", originalNavigator);
+    restoreGlobal("document", originalDocument);
+  }
+});
+
+test("signaling parser validates JSON, role order, DataChannel SDP, and exact SDP characters", () => {
   const validOffer = JSON.stringify({ type: "offer", sdp: SDP });
-  assert.deepEqual(connection.parseSessionDescription(validOffer, "offer"), { type: "offer", sdp: SDP.trim() });
+  assert.deepEqual(connection.parseSessionDescription(validOffer, "offer"), { type: "offer", sdp: SDP });
+  assert.match(connection.parseSessionDescription(validOffer, "offer").sdp, /^v=0\r\n/);
+  assert.match(connection.parseSessionDescription(validOffer, "offer").sdp, /^a=max-message-size:262144$/m);
+
+  const lfSdp = SDP.replaceAll("\r\n", "\n");
+  assert.equal(connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: lfSdp }), "offer").sdp, lfSdp);
+  const unicodeSdp = SDP.replace("s=-", "s=測試 ✓");
+  assert.equal(connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: unicodeSdp }), "offer").sdp, unicodeSdp);
+
   assert.throws(() => connection.parseSessionDescription("not-json", "offer"), /有效 JSON/);
+  assert.throws(() => connection.parseSessionDescription(validOffer.slice(0, -2), "offer"), /有效 JSON/);
+  assert.throws(() => connection.parseSessionDescription(`${validOffer} trailing text`, "offer"), /有效 JSON/);
+  assert.throws(() => connection.parseSessionDescription(JSON.stringify(validOffer), "offer"), /格式不正確/);
+  const doubleEscapedSdp = SDP.replaceAll("\r\n", "\\r\\n");
+  assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: doubleEscapedSdp }), "offer"), /SDP 不完整/);
+  const truncatedSdp = SDP.slice(0, SDP.indexOf("a=candidate:"));
+  assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: truncatedSdp }), "offer"), /ICE 候選/);
+  assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: SDP.replaceAll("\r\n", "\r") }), "offer"), /換行或控制字元/);
+  assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: SDP.replace("a=max-message-size:262144", "a=max-message-size:262144x") }), "offer"), /max-message-size/);
   assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "answer", sdp: SDP }), "offer"), /需要 Offer/);
   assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: "v=0\r\nm=application 9\r\n" }), "offer"), /DataChannel/);
   assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: SDP.replace(/^a=candidate:.*\r?\n/m, "") }), "offer"), /ICE 候選/);
   assert.throws(() => connection.parseSessionDescription(JSON.stringify({ type: "offer", sdp: SDP }), "answer"), /需要 Answer/);
+});
+
+test("Offer and Answer JSON serialization round-trips preserve the full SDP exactly", () => {
+  for (const type of ["offer", "answer"]) {
+    const description = { type, sdp: SDP };
+    const serialized = connection.serializeSessionDescription(description);
+    assert.equal(serialized, JSON.stringify(description));
+    assert.ok(serialized.includes("a=max-message-size:262144\\r\\n"));
+    assert.equal(serialized.includes("a=max-message-size:262144\r\n"), false);
+    const parsed = connection.parseSessionDescription(serialized, type);
+    assert.equal(parsed.type, type);
+    assert.equal(parsed.sdp, SDP);
+    assert.equal(parsed.sdp.includes("a=max-message-size:262144\r\n"), true);
+  }
 });
 
 test("A/B exchange only reports success when the DataChannel is actually open", async () => {
@@ -164,7 +270,9 @@ test("A/B exchange only reports success when the DataChannel is actually open", 
   const offerText = await a.manager.createOffer(connection.DEFAULT_STUN_SERVER);
   const offer = JSON.parse(offerText);
   assert.equal(offer.type, "offer");
+  assert.equal(offer.sdp, SDP);
   assert.match(offer.sdp, /a=candidate:/);
+  assert.match(offer.sdp, /^a=max-message-size:262144$/m);
   assert.equal(a.manager.getState().phase, "waiting-answer");
   assert.equal(a.manager.getState().iceGatheringState, "complete");
   assert.equal(a.manager.getState().dataChannelState, "connecting");
@@ -174,12 +282,15 @@ test("A/B exchange only reports success when the DataChannel is actually open", 
   const answerText = await b.manager.createAnswer(offerText, "stun:example.net:3478");
   const answer = JSON.parse(answerText);
   assert.equal(answer.type, "answer");
+  assert.equal(answer.sdp, SDP);
+  assert.deepEqual(b.getPeer().remoteDescription, { type: "offer", sdp: SDP });
   assert.equal(b.manager.getState().phase, "connecting");
   assert.equal(b.manager.getState().dataChannelState, "connecting");
   assert.equal(b.manager.getDataChannel(), null);
   assert.deepEqual(b.getPeer().configuration.iceServers, [{ urls: "stun:example.net:3478" }]);
 
   await a.manager.completeWithAnswer(answerText);
+  assert.deepEqual(a.getPeer().remoteDescription, { type: "answer", sdp: SDP });
   assert.notEqual(a.manager.getState().phase, "open");
   assert.equal(a.manager.getDataChannel(), null);
 
@@ -200,6 +311,30 @@ test("A/B exchange only reports success when the DataChannel is actually open", 
   assert.equal(b.manager.getState().phase, "idle");
   assert.equal(a.getPeer().signalingState, "closed");
   assert.equal(b.getPeer().signalingState, "closed");
+});
+
+test("setRemoteDescription receives unchanged SDP and reports parser errors without exposing SDP or ICE", async () => {
+  let peer;
+  const manager = new connection.WebRTCConnectionManager((configuration) => {
+    peer = new FakePeerConnection(configuration);
+    peer.setRemoteDescription = async (description) => {
+      peer.remoteDescription = description;
+      throw new Error(`Invalid SDP line a=max-message-size:262144; private SDP: ${description.sdp}`);
+    };
+    return peer;
+  });
+
+  const offerText = connection.serializeSessionDescription({ type: "offer", sdp: SDP });
+  await assert.rejects(
+    manager.createAnswer(offerText, connection.DEFAULT_STUN_SERVER),
+    /加入端瀏覽器拒絕 SDP 中的 a=max-message-size 屬性/
+  );
+  assert.deepEqual(peer.remoteDescription, { type: "offer", sdp: SDP });
+  const detail = manager.getState().detail;
+  assert.match(detail, /a=max-message-size/);
+  assert.equal(detail.includes("262144"), false);
+  assert.equal(detail.includes("192.0.2.1"), false);
+  assert.equal(detail.includes(SDP), false);
 });
 
 test("invalid operation order and duplicate pairing are rejected without replacing the active session", async () => {

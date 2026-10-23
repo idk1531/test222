@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { copyTextWithFallback } from "@/lib/clipboard";
 import { KaTeXRenderer } from "./KaTeXRenderer";
 import { Check, Copy, Sparkles, BookOpen } from "lucide-react";
 
@@ -23,6 +24,8 @@ export const MathFormulaEditor: React.FC<MathFormulaEditorProps> = ({
   const [title, setTitle] = useState(initialTitle);
   const [epistemicMark, setEpistemicMark] = useState(initialEpistemicMark);
   const [copied, setCopied] = useState(false);
+  const [copyMessage, setCopyMessage] = useState("");
+  const latexFieldRef = useRef<HTMLTextAreaElement | null>(null);
 
   const symbolGroups = [
     {
@@ -69,8 +72,14 @@ export const MathFormulaEditor: React.FC<MathFormulaEditorProps> = ({
     setLatex((prev) => prev + (prev.endsWith(" ") || prev.length === 0 ? "" : " ") + code);
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(latex);
+  const handleCopy = async () => {
+    const result = await copyTextWithFallback(latex, latexFieldRef.current);
+    if (result === "manual") {
+      setCopied(false);
+      setCopyMessage("瀏覽器未允許自動複製；LaTeX 原始碼仍保留在下方文字區，並已嘗試選取。若未反白，請點入欄位全選後手動複製。");
+      return;
+    }
+    setCopyMessage("");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -155,12 +164,14 @@ export const MathFormulaEditor: React.FC<MathFormulaEditorProps> = ({
               </button>
             </div>
             <textarea
+              ref={latexFieldRef}
               rows={3}
               value={latex}
               onChange={(e) => setLatex(e.target.value)}
               className="w-full font-mono text-xs p-3 rounded-lg border border-slate-300 focus:border-blue-500 outline-none bg-slate-900 text-emerald-400"
               placeholder="\eta = 1 - \frac{T_C}{T_H}"
             />
+            {copyMessage && <p className="mt-1 text-[11px] text-amber-700" role="status" aria-live="polite">{copyMessage}</p>}
           </div>
 
           {/* Live KaTeX Preview */}

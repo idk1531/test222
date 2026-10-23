@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { copyTextWithFallback } from "@/lib/clipboard";
 import { Palette, RefreshCw, Download, Upload, Copy, Check } from "lucide-react";
 
 interface BackgroundConfig {
@@ -31,6 +32,8 @@ export const BackgroundCustomizer: React.FC<BackgroundCustomizerProps> = ({
 }) => {
   const [config, setConfig] = useState<BackgroundConfig>(currentConfig);
   const [copied, setCopied] = useState(false);
+  const [copyMessage, setCopyMessage] = useState("");
+  const cssFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const [presets] = useState<Record<string, BackgroundConfig>>({
     minimal_light: {
       type: "solid",
@@ -136,8 +139,14 @@ opacity: ${config.imageOpacity ?? 1};`;
     return "";
   };
 
-  const handleCopyCSS = () => {
-    navigator.clipboard.writeText(generateCSS());
+  const handleCopyCSS = async () => {
+    const result = await copyTextWithFallback(generateCSS(), cssFieldRef.current);
+    if (result === "manual") {
+      setCopied(false);
+      setCopyMessage("瀏覽器未允許自動複製；CSS 仍保留在下方文字區，並已嘗試選取。若未反白，請點入欄位全選後手動複製。");
+      return;
+    }
+    setCopyMessage("");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -432,6 +441,7 @@ opacity: ${config.imageOpacity ?? 1};`;
             <label className="font-bold text-slate-700 block mb-1">生成的 CSS：</label>
             <div className="relative">
               <textarea
+                ref={cssFieldRef}
                 rows={3}
                 readOnly
                 value={generateCSS()}
@@ -448,6 +458,7 @@ opacity: ${config.imageOpacity ?? 1};`;
                 )}
               </button>
             </div>
+            {copyMessage && <p className="mt-1 text-[11px] text-amber-700" role="status" aria-live="polite">{copyMessage}</p>}
           </div>
         </div>
 

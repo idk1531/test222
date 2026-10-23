@@ -3,6 +3,7 @@
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, ClipboardCopy, Link2, LoaderCircle, ShieldAlert, Unplug } from "lucide-react";
+import { copyTextWithFallback } from "@/lib/clipboard";
 import {
   CONNECTION_TIMEOUT_MS,
   ICE_GATHERING_TIMEOUT_MS,
@@ -32,23 +33,6 @@ function formatFailure(error: unknown, fallback: string): string {
 
 function isCancellation(error: unknown): boolean {
   return error instanceof ConnectionCancelledError;
-}
-
-async function copyText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const field = document.createElement("textarea");
-  field.value = text;
-  field.setAttribute("readonly", "true");
-  field.style.position = "fixed";
-  field.style.opacity = "0";
-  document.body.appendChild(field);
-  field.select();
-  const copied = document.execCommand("copy");
-  field.remove();
-  if (!copied) throw new Error("瀏覽器未允許自動複製，請點選文字區域後手動全選並複製。");
 }
 
 function StateMetric({ label, value }: { label: string; value: string }) {
@@ -138,15 +122,30 @@ export default function ConnectionPage() {
   const copySignal = async (kind: "offer" | "answer") => {
     const content = kind === "offer" ? offerOutput : answerOutput;
     if (!content) return;
+    const label = kind === "offer" ? "Offer" : "Answer";
+    const field = document.getElementById(`${kind}-output`) as HTMLTextAreaElement | null;
     setErrorMessage("");
     setNotice("");
     try {
-      await copyText(content);
+      const result = await copyTextWithFallback(content, field);
+      if (result === "manual") {
+        setCopied(null);
+        setNotice(`剪貼簿權限受瀏覽器或頁面政策限制；${label} 仍保留在下方文字區，並已嘗試選取。若未反白，請點入欄位按 Ctrl+A／⌘A 全選後複製，再私下傳給對方。`);
+        return;
+      }
       setCopied(kind);
-      setNotice(`${kind === "offer" ? "Offer" : "Answer"} 已複製。請只傳給預期配對的對方。`);
+      setNotice(`${label} 已複製。請只傳給預期配對的對方。`);
       window.setTimeout(() => setCopied((current) => current === kind ? null : current), 1800);
-    } catch (error) {
-      setErrorMessage(formatFailure(error, "複製失敗。請在文字區域手動全選並複製。"));
+    } catch {
+      // A copy failure must never clear the signal or block the pairing flow.
+      try {
+        field?.focus();
+        field?.select();
+      } catch {
+        // The visible read-only field is still available for manual selection.
+      }
+      setCopied(null);
+      setNotice(`無法自動複製；${label} 仍保留在下方文字區。請手動選取並複製，再私下傳給對方。`);
     }
   };
 

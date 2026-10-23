@@ -92,15 +92,26 @@ export function parseSessionDescription(
     throw new Error("連線資訊缺少有效的 SDP。請重新複製完整內容。");
   }
 
-  const sdp = candidate.sdp.trim();
-  if (!/^v=0(?:\r?\n)/.test(sdp) || !/^m=application /m.test(sdp)) {
+  // Keep the decoded SDP byte-for-byte (including CRLF and the final newline).
+  // Do not trim, normalize line endings, or rewrite attributes such as
+  // a=max-message-size:262144 before passing this RTCSessionDescriptionInit on.
+  const sdp = candidate.sdp;
+  if (/\r(?!\n)/.test(sdp) || sdp.includes("\0")) {
+    throw new Error("SDP 的換行或控制字元格式不正確。請重新複製完整的 Offer／Answer JSON。");
+  }
+  const sdpLines = sdp.split(/\r\n|\n/);
+  if (sdpLines[0] !== "v=0" || !sdpLines.some((line) => /^m=application\s/.test(line))) {
     throw new Error("SDP 不完整或不是 DataChannel 連線資訊。請重新產生並完整複製 Offer／Answer。");
   }
-  if (!/^a=(?:sctp-port|sctpmap):/m.test(sdp)) {
+  if (!sdpLines.some((line) => /^a=(?:sctp-port|sctpmap):/.test(line))) {
     throw new Error("SDP 中找不到 DataChannel 協商欄位。請重新產生連線資訊。");
   }
-  if (!/^a=candidate:/m.test(sdp)) {
+  if (!sdpLines.some((line) => /^a=candidate:/.test(line))) {
     throw new Error("SDP 中沒有 ICE 候選位址，可能尚未完成收集。請等候收集完成後重新複製。");
+  }
+  const maxMessageSizeLines = sdpLines.filter((line) => line.startsWith("a=max-message-size"));
+  if (maxMessageSizeLines.some((line) => !/^a=max-message-size:\d+$/.test(line))) {
+    throw new Error("SDP 的 max-message-size 屬性格式不正確。請重新產生完整訊號，不要手動改寫 SDP。");
   }
 
   return { type: expectedType, sdp };
@@ -175,6 +186,18 @@ export function dataChannelStateLabel(state: ConnectionSnapshot["dataChannelStat
 function safeMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) return error.message;
   return fallback;
+}
+
+/** Return a privacy-safe explanation; never echo browser errors that may contain SDP or ICE. */
+function remoteOfferFailureMessage(error: unknown, sdp: string): string {
+  const browserMessage = error instanceof Error ? error.message : "";
+  if (/a=max-message-size/i.test(browserMessage)) {
+    if (/^a=max-message-size:\d+$/m.test(sdp)) {
+      return "加入端瀏覽器拒絕 SDP 中的 a=max-message-size 屬性。JSON 解碼後的 SDP 已原樣交給 setRemoteDescription；程式未刪除或改寫該行。請確認雙端瀏覽器版本相容，勿手動刪除此屬性。";
+    }
+    return "瀏覽器回報 max-message-size，但貼上訊號解碼後未找到有效屬性行。請從發起端重新產生並完整複製 Offer；頁面不會改寫 SDP。";
+  }
+  return "加入端瀏覽器無法解析 Offer 的 SDP。JSON 格式與必要 DataChannel／ICE 欄位已通過檢查；請確認完整複製、未額外加入文字，並更新雙端瀏覽器。";
 }
 
 function waitForIceGatheringComplete(
@@ -299,7 +322,12 @@ export class WebRTCConnectionManager {
       const peer = this.createPeer(stunServer);
       peer.ondatachannel = (event) => this.attachChannel(event.channel);
 
-      await peer.setRemoteDescription(offer);
+      try {
+        await peer.setRemoteDescription(offer);
+      } catch (error) {
+        // Native browser errors can echo private ICE lines; surface only a safe diagnosis.
+        throw new Error(remoteOfferFailureMessage(error, offer.sdp ?? ""));
+      }
       this.assertOperation(operation.id, peer);
       const answer = await peer.createAnswer();
       this.assertOperation(operation.id, peer);
