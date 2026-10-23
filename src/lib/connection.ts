@@ -615,12 +615,27 @@ export class WebRTCConnectionManager {
     this.publish({});
     this.refreshPeerDiagnostics(peer);
 
+    const joinerWaitingForAnswerHandoff = this.snapshot.role === "joiner"
+      && !this.snapshot.connectionTimeoutActive
+      && (this.snapshot.phase === "creating-answer" || this.snapshot.phase === "waiting-peer");
+    const joinerWaitingForDataChannel = this.snapshot.role === "joiner" && this.channel?.readyState !== "open";
+
+    if (this.channel?.readyState === "open") {
+      this.clearConnectionTimeout();
+      this.publish({ phase: "open", detail: "DataChannel readyState 為 open；目前已確認資料通道開啟。" });
+      return;
+    }
     if (peer.connectionState === "failed" || peer.iceConnectionState === "failed") {
       const failedStates = [
         peer.iceConnectionState === "failed" ? "ICE connection state=failed" : "",
         peer.connectionState === "failed" ? "PeerConnection state=failed" : "",
       ].filter(Boolean).join("、");
-      this.finish("failed", `瀏覽器回報 ${failedStates}；此狀態本身無法區分訊號、ICE 候選或傳輸層原因。請比較雙端 Signaling 與候選診斷，並先在同一 Wi-Fi 測試，再比較不同網路。`);
+      const failureDetail = `瀏覽器回報 ${failedStates}；此狀態本身無法區分訊號、ICE 候選或傳輸層原因。`;
+      if (joinerWaitingForDataChannel) {
+        this.publish({ detail: `${failureDetail}加入端會保留目前狀態，等待 Answer 手動傳回及 DataChannel 開啟；未開啟前不代表連線成功。` });
+        return;
+      }
+      this.finish("failed", `${failureDetail}請比較雙端 Signaling 與候選診斷，並先在同一 Wi-Fi 測試，再比較不同網路。`);
       return;
     }
     if (peer.connectionState === "closed") {
@@ -628,14 +643,13 @@ export class WebRTCConnectionManager {
       return;
     }
     if (peer.connectionState === "disconnected" || peer.iceConnectionState === "disconnected") {
+      if (joinerWaitingForAnswerHandoff) {
+        this.publish({ detail: "加入端尚未確認 Answer 已傳回；瀏覽器目前暫時中斷，先保留 Answer 與候選狀態，完成傳遞後再判讀。" });
+        return;
+      }
       if (this.snapshot.phase !== "disconnected") {
         this.publish({ phase: "disconnected", detail: "目前網路路徑中斷；瀏覽器可能自動恢復，若持續中斷可重新配對。" });
       }
-      return;
-    }
-    if (this.channel?.readyState === "open") {
-      this.clearConnectionTimeout();
-      this.publish({ phase: "open", detail: "DataChannel readyState 為 open；目前已確認資料通道開啟。" });
       return;
     }
     if (peer.connectionState === "connecting" || peer.iceConnectionState === "checking" || peer.connectionState === "connected") {
