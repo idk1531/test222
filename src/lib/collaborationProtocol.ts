@@ -67,6 +67,7 @@ export function normalizeRemotePose(value: unknown): PlayerPose | null {
   const numericKeys = ["x", "z", "eyeY", "jumpOffset", "yaw", "pitch"] as const;
   if (numericKeys.some((key) => typeof candidate[key] !== "number" || !Number.isFinite(candidate[key]))) return null;
   if (["moving", "onGround", "seated", "visible"].some((key) => typeof candidate[key] !== "boolean")) return null;
+  if (candidate.sprinting !== undefined && typeof candidate.sprinting !== "boolean") return null;
   const clamp = (number: number, min: number, max: number) => Math.max(min, Math.min(max, number));
   return {
     x: clamp(candidate.x as number, -5, 5),
@@ -76,6 +77,7 @@ export function normalizeRemotePose(value: unknown): PlayerPose | null {
     yaw: clamp(candidate.yaw as number, -Math.PI * 8, Math.PI * 8),
     pitch: clamp(candidate.pitch as number, -Math.PI / 2, Math.PI / 2),
     moving: candidate.moving as boolean,
+    sprinting: candidate.sprinting === true,
     onGround: candidate.onGround as boolean,
     seated: candidate.seated as boolean,
     visible: candidate.visible as boolean,

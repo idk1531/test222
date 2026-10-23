@@ -446,7 +446,12 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
   assert.ok(sitAnim.bodyDrop < 0, "坐下時身體下降");
   assert.notDeepEqual(idle, sitAnim);
   const holdAnim = characterAnim({ phase: 0, moving: false, holding: true });
-  assert.ok(holdAnim.rightArm < -0.9 && holdAnim.leftArm < -0.4, "手持書時雙臂需抬到胸前");
+  assert.ok(holdAnim.rightArm > 0.9 && holdAnim.leftArm > 0.7, "手持書時雙臂需向前抬到胸前");
+  assert.ok(jumpAnim.leftArmZ < -1.8 && jumpAnim.rightArmZ > 1.8, "跳躍時雙臂向外展開");
+  const runAnim = characterAnim({ phase: Math.PI / 2, moving: true, sprinting: true });
+  const easedWalk = characterAnim({ phase: Math.PI / 2, moving: true, moveWeight: 0.35 });
+  assert.ok(runAnim.leftLeg > walkA.leftLeg && runAnim.torsoLean > walkA.torsoLean, "衝刺步幅與前傾需高於行走");
+  assert.ok(easedWalk.leftLeg < walkA.leftLeg && easedWalk.leftLeg > 0, "起步／停步權重需讓步態平滑漸變");
   // 第一人稱手持書錨點：直式在畫面中央偏左、橫式在右下，且都在相機前方。
   const portraitAnchor = firstPersonHeldAnchor(390 / 844, 58);
   const landscapeAnchor = firstPersonHeldAnchor(1440 / 900, 62);
@@ -467,4 +472,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產 / v8.3 西牆書牆＋對照視角＋層板堆疊 / v8.4 actions, furniture and remote-player AABB, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產 / v8.3 西牆書牆＋對照視角＋層板堆疊 / furniture and remote-player AABB / character detail, gait, sprint, jump, sit)");

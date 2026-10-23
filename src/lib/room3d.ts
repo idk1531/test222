@@ -990,6 +990,7 @@ export interface PlayerPose {
   yaw: number;
   pitch: number;
   moving: boolean;
+  sprinting?: boolean;
   onGround: boolean;
   seated: boolean;
   visible: boolean;

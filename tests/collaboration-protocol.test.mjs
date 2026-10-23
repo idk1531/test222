@@ -30,6 +30,7 @@ const validPose = {
   yaw: 0.7,
   pitch: -0.2,
   moving: true,
+  sprinting: true,
   onGround: false,
   seated: false,
   visible: true,
@@ -89,6 +90,22 @@ test("pose messages validate finite coordinates and clamp untrusted positions", 
   assert.equal(parsed.pose.z, -4);
   assert.equal(parsed.pose.jumpOffset, 3);
   assert.equal(parsed.pose.holding, true);
+  assert.equal(parsed.pose.sprinting, true);
+  const legacyPose = { ...validPose };
+  delete legacyPose.sprinting;
+  const legacyParsed = protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "pose",
+    participantId: "peer-old",
+    pose: legacyPose,
+  }));
+  assert.equal(legacyParsed.pose.sprinting, false);
+  assert.equal(protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "pose",
+    participantId: "peer-b",
+    pose: { ...validPose, sprinting: "fast" },
+  })), null);
 
   assert.equal(protocol.parseCollaborationMessage(JSON.stringify({
     v: 1,
