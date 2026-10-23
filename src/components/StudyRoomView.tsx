@@ -6,6 +6,7 @@ import { ArrowUp, ArrowDown, BookOpen, Eye, Hand, Library, RotateCcw, Tags, X } 
 import { DeskWorkView } from "./DeskWorkView";
 import { StudyScene, type StudySceneApi } from "./StudyScene";
 import { RoomGeometry } from "./RoomGeometry";
+import { NestedCityGeometry } from "./NestedCityGeometry";
 import { WindowLight } from "./WindowLight";
 import { Book3D, type DeskBookModel } from "./Book3D";
 import { HeldBook } from "./HeldBook";
@@ -45,7 +46,7 @@ interface BookPreview {
 }
 
 /**
- * v8.1 全景書房：three.js 3D 房間 + 真實 HTML 浮層。
+ * 嵌套之城書房：three.js 多層挑空建築 + 真實 HTML 浮層。
  * WebGL：房間/窗景/日光/書桌/書架/3D 書本。HTML：InfiniteCanvas、書封預覽、HUD、分類面板、搖桿。
  * 手勢分流：房間空白拖曳環顧；點桌面進俯視工作視角；工作視角 100% 交 InfiniteCanvas；
  * HUD/搖桿/預覽一律 [data-no-orbit]，WASD 對輸入框/IME 不作用。
@@ -82,6 +83,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     x: state.studyLayout.camera.x ?? 0.9,
     z: state.studyLayout.camera.z ?? 1.55,
     eyeY: state.studyLayout.camera.height ?? 1.5,
+    floorY: state.studyLayout.camera.floorY ?? 0,
     jumpOffset: 0,
     yaw: (state.studyLayout.camera.yaw * Math.PI) / 180,
     pitch: (state.studyLayout.camera.pitch * Math.PI) / 180,
@@ -338,6 +340,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               cards={state.cards as CardData[]}
               shelfRows={layout.rows.length}
             />
+            <NestedCityGeometry api={api} />
             <WindowLight api={api} />
             <Book3D api={api} layout={layout} deskBooks={deskBookModels} heldCardId={heldCardId} titleOf={titleOf} />
             <HeldBook api={api} cardId={heldCardId} placement={heldBookPlacement} title={titleOf(heldCardId || "")} viewMode={viewMode} playerRef={playerRef} />

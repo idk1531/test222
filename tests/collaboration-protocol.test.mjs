@@ -9,14 +9,16 @@ import ts from "typescript";
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "scinotes-collab-protocol-test-"));
 const modulePath = join(temporaryDirectory, "collaborationProtocol.mjs");
 const source = await readFile(new URL("../src/lib/collaborationProtocol.ts", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, {
-  compilerOptions: {
-    module: ts.ModuleKind.ESNext,
-    target: ts.ScriptTarget.ES2022,
-  },
-}).outputText;
+const dimensionsSource = await readFile(new URL("../src/lib/roomDimensions.ts", import.meta.url), "utf8");
+const compilerOptions = { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 };
+const dimensionsModulePath = join(temporaryDirectory, "roomDimensions.mjs");
+const dimensionsCompiled = ts.transpileModule(dimensionsSource, { compilerOptions }).outputText;
+await writeFile(dimensionsModulePath, dimensionsCompiled, "utf8");
+const compiled = ts.transpileModule(source, { compilerOptions }).outputText
+  .replaceAll('"./roomDimensions"', '"./roomDimensions.mjs"');
 await writeFile(modulePath, compiled, "utf8");
 const protocol = await import(pathToFileURL(modulePath).href);
+const { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } = await import(pathToFileURL(dimensionsModulePath).href);
 
 after(async () => {
   await rm(temporaryDirectory, { recursive: true, force: true });
@@ -26,6 +28,7 @@ const validPose = {
   x: 1.25,
   z: -2,
   eyeY: 1.5,
+  floorY: 8,
   jumpOffset: 0.3,
   yaw: 0.7,
   pitch: -0.2,
@@ -86,13 +89,15 @@ test("pose messages validate finite coordinates and clamp untrusted positions", 
     pose: { ...validPose, x: 500, z: -500, jumpOffset: 9 },
   }));
   assert.equal(parsed.type, "pose");
-  assert.equal(parsed.pose.x, 5);
-  assert.equal(parsed.pose.z, -4);
+  assert.equal(parsed.pose.x, ROOM_DIMENSIONS.width / 2 - ROOM_EDGE_MARGIN);
+  assert.equal(parsed.pose.z, -ROOM_DIMENSIONS.depth / 2 + ROOM_EDGE_MARGIN);
+  assert.equal(parsed.pose.floorY, 8);
   assert.equal(parsed.pose.jumpOffset, 3);
   assert.equal(parsed.pose.holding, true);
   assert.equal(parsed.pose.sprinting, true);
   const legacyPose = { ...validPose };
   delete legacyPose.sprinting;
+  delete legacyPose.floorY;
   const legacyParsed = protocol.parseCollaborationMessage(JSON.stringify({
     v: 1,
     type: "pose",
@@ -100,6 +105,7 @@ test("pose messages validate finite coordinates and clamp untrusted positions", 
     pose: legacyPose,
   }));
   assert.equal(legacyParsed.pose.sprinting, false);
+  assert.equal(legacyParsed.pose.floorY, 0);
   assert.equal(protocol.parseCollaborationMessage(JSON.stringify({
     v: 1,
     type: "pose",

@@ -97,7 +97,7 @@ export const HeldBook: React.FC<{
           // 第三人稱相機在角色後方：書若只放在胸前會被軀幹整個遮住（實際預覽看不到）。
           // 因此往右手外側再推 0.16 m、略抬高，站在背後也看得到手上的書。
           world
-            .set(pose.x, 0, pose.z)
+            .set(pose.x, pose.floorY ?? 0, pose.z)
             .addScaledVector(right, (hand.x + 0.14) * scale)
             .addScaledVector(forward, -hand.z * 0.9 * scale)
             .setY(Math.max(0, pose.jumpOffset) + (hand.y + 0.12 - (pose.seated ? 0.2 : 0)) * scale);

@@ -311,12 +311,11 @@ function box(
 }
 
 /**
- * 房間幾何本體（v8.3「完全復刻圖一」）：
- * - 西牆深褐微水泥書牆：4 排懸浮薄層板（板下暖光暈＋LED 燈帶）、腰高長檯面、矮擱板
- * - 北牆大窗：白細框＋單中挺＋透光橫紋簾；窗台與桌板同一塊大理石（L 形連續檯面）
- * - 桌下落地深炭櫃（4 片門、縫 0.008）
- * - 天花燈槽＋2 個方形嵌燈、淺灰大理石地坪
- * 全部靜態共享材質；卸載時完整 dispose。
+ * 書房家具與資料內容幾何：
+ * - 西側低層真實書牆、可互動 3D 書本、分類標籤與工作桌預覽
+ * - 北側高窗玻璃幕牆、桌面／櫃體／椅子與暖色層板燈
+ * - 開放地面由此元件建立；三重框架、挑空樓板與連接斜坡由 NestedCityGeometry 管理
+ * 保留既有物件／卡片資料通路，卸載時完整 dispose。
  */
 export const RoomGeometry: React.FC<{
   api: StudySceneApi;
@@ -390,13 +389,6 @@ export const RoomGeometry: React.FC<{
       metalness: 0,
       envMapIntensity: 0.015,
     });
-    const ceilMat = new THREE.MeshStandardMaterial({
-      color: "#f4f0e8",
-      roughness: 1,
-      metalness: 0,
-      // 天花交給環境光；不要自發光，否則整片會變成奶油綠。
-      envMapIntensity: 0.015,
-    });
     const floorMat = new THREE.MeshStandardMaterial({
       color: floorIsMarble ? LOOK.floorTint : "#e8d7b8",
       map: floorTex,
@@ -464,7 +456,6 @@ export const RoomGeometry: React.FC<{
     disposers.push(() => {
       wallMat.dispose();
       westMat.dispose();
-      ceilMat.dispose();
       floorMat.dispose();
       deskMat.dispose();
       frameMat.dispose();
@@ -508,84 +499,14 @@ export const RoomGeometry: React.FC<{
     photo(deskMat, "marble", { repeat: TEXTURES.repeat.desk, tint: LOOK.deskTint });
     photo(plankMat, "walnut", { repeat: TEXTURES.repeat.shelf, tint: LOOK.shelfWoodTint });
 
-    // ---- 地板／天花 ----
+    // ---- 地面：大尺度開放挑空；上層樓板與結構由 NestedCityGeometry 管理 ----
     group.add(box(W + 0.48, 0.1, D + 0.48, floorMat, 0, -0.05, 0, { cast: false }));
-    // 附圖：淺暖白平頂天花＋沿牆一圈窄燈槽＋兩個方形嵌燈。
-    // v8.6 不再做 16 cm 深的大面積上凹（實際預覽會出現突兀的白色斜帶）。
-    const ceilingOpts = { cast: false, receive: false } as const;
-    group.add(box(W + 0.4, 0.08, D + 0.4, ceilMat, 0, H + 0.04, 0, ceilingOpts));
-    // 牆頂收邊的細陰影線，讓平頂與牆面有交界（不是一整片發光）。
-    const shadowGapMat = new THREE.MeshStandardMaterial({ color: "#b3aa9d", roughness: 1 });
-    disposers.push(() => shadowGapMat.dispose());
-    for (const side of [-1, 1]) {
-      group.add(box(W + 0.2, 0.012, 0.012, shadowGapMat, 0, H - 0.006, side * (D / 2 - 0.006), { cast: false, receive: false }));
-      group.add(box(0.012, 0.012, D + 0.2, shadowGapMat, side * (W / 2 - 0.006), H - 0.006, 0, { cast: false, receive: false }));
-    }
 
-    // ---- 發光材質：天花燈槽＋層板燈帶 ----
-    const coveMat = new THREE.MeshBasicMaterial({ color: "#ffddb2" });
+    // 層板燈帶沿用既有暖光材質，供真實書架幾何使用。
     const ledMat = new THREE.MeshBasicMaterial({ color: LOOK.ledSoft, toneMapped: false });
-    const lampMat = new THREE.MeshBasicMaterial({ color: LOOK.ledSoft, toneMapped: false });
-    disposers.push(() => {
-      coveMat.dispose();
-      ledMat.dispose();
-      lampMat.dispose();
-    });
-    // 附圖的平頂沿牆有一圈退縮的燈槽（soffit）：外圈天花降 10 cm，
-    // 內緣藏一條暖光，從房間看是一圈「上亮下暗」的階梯，而不是貼牆的一條線。
-    const soffitW = 0.3;
-    const soffitDrop = 0.08;
-    // 降板比平頂略深一階（附圖的燈槽外圈不是純白），否則會變成一整條發光白帶。
-    const soffitMat = new THREE.MeshStandardMaterial({
-      color: "#ddd7cc",
-      roughness: 1,
-      metalness: 0,
-      envMapIntensity: 0.012,
-    });
-    disposers.push(() => soffitMat.dispose());
-    const soffitY = H - soffitDrop;
-    const addSoffit = (cx: number, cz: number, sx: number, sz: number) => {
-      // 單一塊降板：底面與內側垂直面由同一個盒子提供，燈槽才有 10 cm 的深度。
-      group.add(box(sx, soffitDrop, sz, soffitMat, cx, soffitY + soffitDrop / 2, cz, { cast: false, receive: false }));
-    };
-    addSoffit(0, D / 2 - soffitW / 2, W, soffitW);
-    addSoffit(0, -D / 2 + soffitW / 2, W, soffitW);
-    addSoffit(W / 2 - soffitW / 2, 0, soffitW, D - 2 * soffitW);
-    addSoffit(-W / 2 + soffitW / 2, 0, soffitW, D - 2 * soffitW);
-    // 燈槽：退縮 8 cm 的暗縫＋縫底的暖光（附圖天花與牆面之交的細亮線）
-    const coveInset = soffitW;
-    const coveY = soffitY + 0.004;
-    const coveLights: Array<[number, number, number, number, number, number]> = [
-      [W - 2 * coveInset, 0.014, 0.014, 0, coveY, -D / 2 + coveInset + 0.05],
-      [W - 2 * coveInset, 0.014, 0.014, 0, coveY, D / 2 - coveInset - 0.05],
-      [0.014, 0.014, D - 2 * coveInset, W / 2 - coveInset - 0.05, coveY, 0],
-      [0.014, 0.014, D - 2 * coveInset, -W / 2 + coveInset + 0.05, coveY, 0],
-    ];
-    for (const [sx, sy, sz, cx, cy, cz] of coveLights) {
-      group.add(box(sx, sy, sz, coveMat, cx, cy, cz, { cast: false, receive: false }));
-    }
+    disposers.push(() => ledMat.dispose());
 
-    // 2 個方形嵌燈（靠北窗側），深色外框＋暖白發光面
-    const lampMatBlack = new THREE.MeshStandardMaterial({ color: "#2a2621", roughness: 0.75 });
-    disposers.push(() => lampMatBlack.dispose());
-    for (const [lx, lz] of [
-      [-ROOM.width * 0.12, -ROOM.depth * 0.15],
-      [ROOM.width * 0.12, ROOM.depth * 0.23],
-    ] as const) {
-      group.add(box(0.13, 0.014, 0.13, lampMatBlack, lx, H - 0.007, lz, { cast: false }));
-      group.add(box(0.085, 0.006, 0.085, lampMat, lx, H - 0.016, lz, { cast: false, receive: false }));
-    }
-
-    // ---- 牆體 ----
-    group.add(box(W + 0.24, H, T, wallMat, 0, H / 2, D / 2 + T / 2)); // 南
-    group.add(box(T, H, D + 0.24, wallMat, W / 2 + T / 2, H / 2, 0)); // 東
-    // 西牆：微水泥加厚 0.28（外緣仍在 −3.12），內面正好落在 SHELF.xBack，
-    // 懸浮層板才是真的「貼牆」（v8.2 背板與牆之間其實有 16 cm 空腔）。
-    const westFace = SHELF.xBack; // −2.84（牆內面）
-    const westThickness = W / 2 + T - Math.abs(westFace); // 0.28（外緣仍在 −3.12）
-    group.add(
-      box(westThickness, H, D + 0.24, westMat, westFace - westThickness / 2, H / 2, 0)
-    );
+    // 三面保持開放；西側真實書架有獨立石材背板，北側保留落地玻璃幕牆。
 
     // ---- 北牆（開窗洞：四段） ----
     const winL = WINDOW.cx - WINDOW.width / 2;
@@ -1065,11 +986,7 @@ export const RoomGeometry: React.FC<{
       );
     }
 
-    // ---- 踢腳板（南／東／北窗下；西牆書牆不做踢腳） ----
-    const skirtMat = new THREE.MeshStandardMaterial({ color: "#e9dfcc", roughness: 0.85 });
-    disposers.push(() => skirtMat.dispose());
-    group.add(box(W, 0.09, 0.02, skirtMat, 0, 0.045, D / 2 - 0.01, { cast: false }));
-    group.add(box(0.02, 0.09, D, skirtMat, W / 2 - 0.01, 0.045, 0, { cast: false }));
+
 
     return () => {
       disposers.forEach((d) => d());

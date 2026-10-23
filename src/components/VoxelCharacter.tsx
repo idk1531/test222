@@ -447,7 +447,7 @@ export const VoxelCharacter: React.FC<{
       const scale = Math.max(0.72, Math.min(1.35, pose.eyeY / CHARACTER.eyeHeight));
       root.scale.setScalar(scale);
       root.rotation.y = -pose.yaw;
-      root.position.set(pose.x, Math.max(0, pose.jumpOffset) + anim.bodyDrop, pose.z);
+      root.position.set(pose.x, (pose.floorY ?? 0) + Math.max(0, pose.jumpOffset) + anim.bodyDrop, pose.z);
 
       // 第三人稱撞牆／家具時相機會被拉到 0.55 m 內，此時淡化角色避免整個畫面被身體擋住。
       let bodyOpacity = 1;
