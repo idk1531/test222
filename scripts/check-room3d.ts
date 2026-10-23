@@ -4,7 +4,7 @@ import path from "node:path";
 import * as THREE from "three";
 import {
   CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
-  MARBLE_ROUGH, MATCH_VIEW, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
+  MARBLE_ROUGH, MATCH_VIEW, MAX_WALKABLE_STEP, NESTED_CITY, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
@@ -20,13 +20,21 @@ const edge = clampRoomPosition(100, -100);
 assert.equal(edge.x, ROOM.width / 2 - CAMERA.wallMargin);
 assert.equal(edge.z, -ROOM.depth / 2 + CAMERA.wallMargin);
 
-// 書房 v8.7 A：60 m² 房間，只擴大平面，不改房高。
-assert.equal(ROOM_AREA_SCALE, 2);
-assert.equal(ROOM.width, 8.49);
-assert.equal(ROOM.depth, 7.07);
-assert.ok(Math.abs(ROOM.width * ROOM.depth - 60) < 0.1, `房間面積應約 60 m²（實際 ${ROOM.width * ROOM.depth}）`);
-assert.equal(ROOM.height, 2.75);
-assert.equal(ROOM.wall, 0.12);
+// 嵌套之城初始假設：四個可行走樓層；尺寸明確不是從概念圖精確量得。
+assert.equal(ROOM_AREA_SCALE, 16);
+assert.equal(ROOM.width, 24);
+assert.equal(ROOM.depth, 20);
+assert.equal(ROOM.width * ROOM.depth, 480);
+assert.equal(ROOM.height, 16);
+assert.equal(ROOM.wall, 0.32);
+assert.deepEqual(NESTED_CITY.levels, [0, 4, 8, 12]);
+assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 1).length, 5);
+assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 2).length, 5);
+assert.ok(NESTED_CITY.platforms.some((platform) => platform.level === 3));
+assert.equal(NESTED_CITY.ramps.length, 3);
+assert.ok(NESTED_CITY.ramps.every((ramp, index) =>
+  ramp.start.y === NESTED_CITY.levels[index] && ramp.end.y === NESTED_CITY.levels[index + 1]
+), "三段連續斜坡必須連接地面與三個上層");
 assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
 assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
 
@@ -57,7 +65,7 @@ const categoryLabelSize = canvasSizeForPlane(CATEGORY_LABEL_PLANE.width, CATEGOR
 assert.ok(Math.abs(categoryLabelSize.aspect - CATEGORY_LABEL_PLANE.width / CATEGORY_LABEL_PLANE.height) < 1 / categoryLabelSize.height);
 const deskPreviewSize = canvasSizeForPlane(DESK_PREVIEW_PLANE.width, DESK_PREVIEW_PLANE.height, 512);
 assert.ok(Math.abs(deskPreviewSize.aspect - DESK_PREVIEW_PLANE.width / DESK_PREVIEW_PLANE.height) < 1 / deskPreviewSize.height);
-console.log("  ✓ v8.7 room 60 m² / shelf, held-cover, category, and desk-preview label aspect");
+console.log("  ✓ 嵌套之城 4 層／480 m² 初始假設與既有書本／畫布標籤比例");
 
 // v8.4 家具 AABB：櫃體碰撞沿用 RoomGeometry 的同一 footprint，桌緣採玩家半徑擴張。
 assert.deepEqual(
@@ -174,11 +182,11 @@ assert.equal(match.z, MATCH_VIEW.z);
   assert.ok(right.x > 0.5 && right.z < -0.5, "yaw=-45° 時畫面右方必須同時指向 +X 與 −Z");
   assert.ok(forward.x < 0 && forward.z < 0, "yaw=-45° 時視線必須望向西北（書牆與窗的交角）");
 }
-// 房高與圖一量測一致；窗台低於桌面外緣的連續大理石
-assert.equal(ROOM.height, 2.75);
-assert.ok(WINDOW.sill > DESK.top && WINDOW.sill - DESK.top < 0.15, "窗台應略高於桌板（同一塊大理石墊高）");
-assert.ok(WINDOW.top - WINDOW.sill > 1.6, "窗洞高度需保留大面積採光");
-assert.equal(WINDOW.mullions, 2); // v8.5 附圖：大窗分成三格
+// 高窗跨越多層挑空；尺寸按初始假設建模，不冒稱由參考圖量得。
+assert.equal(ROOM.height, 16);
+assert.ok(WINDOW.sill >= 0 && WINDOW.top < ROOM.height);
+assert.ok(WINDOW.top - WINDOW.sill > 14, "落地高窗需涵蓋大部分挑空高度");
+assert.equal(WINDOW.mullions, 4);
 assert.equal(WINDOW.bars, 0);
 assert.ok(TEXTURES.floor === "marble", "v8.3 地坪必須切到淺灰大理石");
 assert.ok(MARBLE_ROUGH.desk < 0.45, "桌板需保留柔反射");
@@ -197,31 +205,55 @@ assert.ok(shelfPlankY(4, 5) > SHELF.ledge.top + 0.1);
 // 書脊面在牆與室內之間，且朝 +X
 assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
 
-// ---- 對照視角投影：左書牆、右窗（可重複判定的「像不像」）----
+// ---- 嵌套之城白模：三種材質／朝向交錯、中央挑空、樓層與斜坡連續 ----
 {
-  const cam = new THREE.PerspectiveCamera(MATCH_VIEW.fov, 16 / 9, 0.05, 80);
-  cam.position.set(MATCH_VIEW.x, MATCH_VIEW.height, MATCH_VIEW.z);
-  cam.up.set(0, 1, 0);
-  cam.lookAt(cam.position.clone().add(forwardFromYawPitch(MATCH_VIEW.yaw, MATCH_VIEW.pitch)));
-  cam.updateMatrixWorld();
-  const px = (x: number, y: number, z: number) => {
-    const v = new THREE.Vector3(x, y, z).project(cam);
-    return { x: v.x * 0.5 + 0.5, y: -v.y * 0.5 + 0.5, front: v.z < 1 };
-  };
-  const shelfWall = px(-ROOM.width / 2, 1.9, SHELF.z);
-  const corner = px(-ROOM.width / 2, 1.5, -ROOM.depth / 2);
-  const winMid = px(WINDOW.cx, (WINDOW.sill + WINDOW.top) / 2, -ROOM.depth / 2);
-  const winL = px(WINDOW.cx - WINDOW.width / 2, 1.7, -ROOM.depth / 2);
-  const winR = px(WINDOW.cx + WINDOW.width / 2, 1.7, -ROOM.depth / 2);
-  const deskFront = px(0, DESK.top, -ROOM.depth / 2 + ROOM.wall + DESK.depth);
-  const ceiling = px(-0.5, ROOM.height, 0);
-  // 書牆在畫面左三分之一、窗在右半；轉角柱落在中央
-  assert.ok(shelfWall.x < 0.4, `書牆需在畫面左側（實際 ${shelfWall.x.toFixed(2)}）`);
-  assert.ok(corner.x > 0.4 && corner.x < 0.6, "西北轉角需落在畫面中央");
-  assert.ok(winMid.x > 0.55 && winL.x > 0.4 && winR.x < 0.98, "窗需在畫面右側且完整入鏡");
-  assert.ok(deskFront.y > 0.55, "桌板前緣需落在畫面下半（圖一檯面線 ~0.6–0.73）");
-  assert.ok(ceiling.y < 0.3, "天花需保留在畫面上方三分之一內（房高維持 2.75 m）");
-  for (const p of [shelfWall, corner, winMid, deskFront]) assert.ok(p.front, "對照視角的關鍵點必須在相機前方");
+  const timberFrames = NESTED_CITY.frames.filter((frame) => frame.material === "timber");
+  const stoneFrames = NESTED_CITY.frames.filter((frame) => frame.material === "stone");
+  const coreFrame = NESTED_CITY.frames.find((frame) => frame.id === "offset-rotated-core")!;
+  assert.ok(timberFrames.length >= 3 && stoneFrames.length >= 2);
+  assert.ok(NESTED_CITY.frames.some((frame) => frame.plane === "x") && NESTED_CITY.frames.some((frame) => frame.plane === "z"));
+  assert.notEqual(coreFrame.rotationY, 0, "內核需有明確旋轉，不能成為同心等距盒");
+  assert.ok(Math.abs(coreFrame.x) > 0.5 && Math.abs(coreFrame.z) > 0.5, "內核需相對主框架偏移");
+  assert.ok(stoneFrames.some((frame) => frame.z !== timberFrames[0].z));
+
+  const onPlatform = (level: number, x: number, z: number) => NESTED_CITY.platforms.some((platform) =>
+    platform.level === level &&
+    Math.abs(x - platform.x) <= platform.width / 2 &&
+    Math.abs(z - platform.z) <= platform.depth / 2
+  );
+  assert.ok(![1, 2, 3].some((level) => onPlatform(level, 4, 3)), "中央挑空不能被樓板填滿");
+  assert.equal(groundHeightAt(4, 3, 0), 0, "地面仍可穿越挑空底部");
+  assert.equal(groundHeightAt(-9.75, 0, 4), 4, "Level 1 西側環廊可行走");
+  assert.equal(groundHeightAt(-8.5, 0, 8), 8, "同一投影位置依目前高度選取 Level 2");
+  assert.equal(groundHeightAt(-8.5, 0, 0), 0, "不能從地面瞬移到重疊上層");
+
+  let floorY = 0;
+  let position = { x: NESTED_CITY.ramps[0].start.x, z: NESTED_CITY.ramps[0].start.z };
+  for (const ramp of NESTED_CITY.ramps) {
+    assert.ok(Math.abs(floorY - ramp.start.y) < 0.03, `${ramp.id} 起點要接到前一層`);
+    const steps = 240;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = ramp.start.x + (ramp.end.x - ramp.start.x) * t;
+      const z = ramp.start.z + (ramp.end.z - ramp.start.z) * t;
+      const nextPosition = resolveCollision(x, z, PLAYER_RADIUS, false, false, undefined, undefined, floorY);
+      assert.ok(Math.hypot(nextPosition.x - x, nextPosition.z - z) < 0.12, `${ramp.id} 的扶手／框架碰撞不可封住動線`);
+      const nextFloorY = groundHeightAt(nextPosition.x, nextPosition.z, floorY);
+      assert.ok(Math.abs(nextFloorY - floorY) <= MAX_WALKABLE_STEP + 1e-6, `${ramp.id} 不可有不可走的高度斷差`);
+      position = nextPosition;
+      floorY = nextFloorY;
+    }
+    assert.ok(Math.abs(position.x - ramp.end.x) < 0.03 && Math.abs(position.z - ramp.end.z) < 0.03);
+    assert.ok(Math.abs(floorY - ramp.end.y) < 0.03, `${ramp.id} 終點高度應接到下一平台`);
+  }
+  assert.equal(floorY, 12);
+
+  const deskRect = DESK_FOOTPRINT[0];
+  const deskCenter = { x: DESK.cx, z: (deskRect.minZ + deskRect.maxZ) / 2 };
+  const lowerCollision = resolveCollision(deskCenter.x, deskCenter.z);
+  const upperClearance = resolveCollision(deskCenter.x, deskCenter.z, PLAYER_RADIUS, false, false, undefined, undefined, 4);
+  assert.notDeepEqual(lowerCollision, deskCenter, "地面仍要撞到桌體");
+  assert.deepEqual(upperClearance, deskCenter, "上層角色不應被地面桌櫃的投影碰撞阻擋");
 }
 
 // ---- v8.4 clampToDesk 與 resolveAction 完整輸入表（5 命中 × 7 輸入）----
@@ -360,12 +392,12 @@ console.log("  ✓ 視角方向回歸：拖曳與 Pointer Lock 左拖＝左轉�
   assert.ok(behind.y < ROOM.height, "第三人稱相機不可穿出天花板");
   const nearWall = resolveThirdPersonCamera({ x: 0, z: 2.2, eyeY: 1.5, jumpOffset: 0 }, 0, 0);
   const dist = Math.hypot(nearWall.x, nearWall.z - 2.2);
-  assert.ok(dist < THIRD_PERSON.distance + 1e-9);
+  assert.ok(dist <= Math.hypot(THIRD_PERSON.distance, THIRD_PERSON.shoulder) + 1e-9);
   assert.ok(!COLLIDERS.some((collider) =>
-    nearWall.y < collider.top + 0.12 &&
+    nearWall.y > (collider.bottom ?? 0) - 0.1 && nearWall.y < collider.top + 0.12 &&
     nearWall.x > collider.minX - 0.18 && nearWall.x < collider.maxX + 0.18 &&
     nearWall.z > collider.minZ - 0.18 && nearWall.z < collider.maxZ + 0.18
-  ), "第三人稱相機不得落在書架／桌子等家具內");
+  ), "第三人稱相機不得落入同高度的家具／結構碰撞體");
   assert.ok(nearWall.z < ROOM.depth / 2 - THIRD_PERSON.wallMargin + 1e-9, "第三人稱相機必須留在房間內");
   // 面西時相機在東側；面南時相機在北側（符號不可反）
   const faceWest = resolveThirdPersonCamera(pose, Math.PI / 2, 0);
@@ -373,7 +405,7 @@ console.log("  ✓ 視角方向回歸：拖曳與 Pointer Lock 左拖＝左轉�
   const faceSouth = resolveThirdPersonCamera(pose, Math.PI, 0);
   assert.ok(faceSouth.z < -0.5, "面南時相機需退到北側（−Z）");
   // 牆角回歸：玩家貼在東南角時，相機不得被拉進角色頭部（實際預覽曾整個人物消失）。
-  const cornerPose = { x: 2.16, z: 1.84, eyeY: 1.55, jumpOffset: 0 };
+  const cornerPose = { x: ROOM.width / 2 - CAMERA.wallMargin, z: ROOM.depth / 2 - CAMERA.wallMargin, eyeY: 1.55, jumpOffset: 0 };
   const corner = resolveThirdPersonCamera(cornerPose, -Math.PI / 4, -0.1);
   const cornerDist = Math.hypot(corner.x - cornerPose.x, corner.y - cornerPose.eyeY, corner.z - cornerPose.z);
   assert.ok(cornerDist > 1.0, "牆角第三人稱仍需保持可視距離，不可貼在角色身上");
@@ -382,10 +414,10 @@ console.log("  ✓ 視角方向回歸：拖曳與 Pointer Lock 左拖＝左轉�
   assert.ok(corner.x > -ROOM.width / 2 && corner.x < ROOM.width / 2, "牆角相機仍需在房內（X）");
   assert.ok(corner.z > -ROOM.depth / 2 && corner.z < ROOM.depth / 2, "牆角相機仍需在房內（Z）");
   assert.ok(!COLLIDERS.some((collider) =>
-    corner.y < collider.top + 0.12 &&
+    corner.y > (collider.bottom ?? 0) - 0.1 && corner.y < collider.top + 0.12 &&
     corner.x > collider.minX - 0.18 && corner.x < collider.maxX + 0.18 &&
     corner.z > collider.minZ - 0.18 && corner.z < collider.maxZ + 0.18
-  ), "牆角相機不得落在家具內");
+  ), "牆角相機不得落入同高度的家具／結構碰撞體");
   // 初始機位必須留給第三人稱足夠後退空間（否則一按 V 就貼臉）。
   const start = resolveThirdPersonCamera(
     { x: DEFAULT_CAMERA.x!, z: DEFAULT_CAMERA.z!, eyeY: DEFAULT_CAMERA.height!, jumpOffset: 0 },
@@ -472,4 +504,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (bounds / 360° / flight easing / sunlight / projection / SSR quality / 貼圖資產 / v8.3 西牆書牆＋對照視角＋層板堆疊 / furniture and remote-player AABB / character detail, gait, sprint, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (nested-city dimensions / 4 levels / central void / ramp walkability and collision / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");

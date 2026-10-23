@@ -609,6 +609,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
         x: pose.x,
         z: pose.z,
         eyeY: pose.eyeY,
+        floorY: pose.floorY ?? 0,
         jumpOffset: pose.jumpOffset,
         yaw: pose.yaw,
         pitch: pose.pitch,

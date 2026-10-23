@@ -25,6 +25,7 @@ import {
   groundHeightAt,
   isWithinSitTrigger,
   JUMP,
+  MAX_WALKABLE_STEP,
   PLAYER_RADIUS,
   resolveCollision,
   resolveThirdPersonCamera,
@@ -70,6 +71,7 @@ interface Pose {
   z: number;
   height: number;
   eyeHeight: number;
+  floorY: number;
 }
 
 type CameraMode = "room" | "work";
@@ -118,9 +120,11 @@ export const CameraRig: React.FC<{
 }> = ({ api, initialCamera, joystickRef, onEnterWork, onExitWork, rigRef, persistCamera, interactionRef, chairRigRef, onRoomAction, onPointerLockChange, onChairTriggerChange, onFocusChange, onPoseChange, movementEnabled = true, viewMode = "first", onToggleView, playerRef, otherPlayerRef }) => {
   const camera = api.camera;
   const initialPosition = clampRoomPosition(initialCamera.x ?? 0.9, initialCamera.z ?? 1.55);
+  const initialFloorY = groundHeightAt(initialPosition.x, initialPosition.z, initialCamera.floorY ?? 0);
   const stateRef = useRef({
     x: initialPosition.x,
     z: initialPosition.z,
+    groundY: initialFloorY,
     height: clampHeight(initialCamera.height ?? 1.5),
     eyeHeight: clampHeight(initialCamera.height ?? 1.5),
     yaw: THREE.MathUtils.degToRad(initialCamera.yaw),
@@ -223,6 +227,7 @@ export const CameraRig: React.FC<{
     z: stateRef.current.z,
     height: stateRef.current.height,
     eyeHeight: stateRef.current.eyeHeight,
+    floorY: stateRef.current.groundY,
   });
 
   const applyPose = (p: Pose) => {
@@ -231,15 +236,17 @@ export const CameraRig: React.FC<{
     camera.fov = p.fov;
     camera.up.copy(p.up);
     camera.updateProjectionMatrix();
+    const floorY = groundHeightAt(p.x, p.z, p.floorY);
     stateRef.current = {
       ...stateRef.current,
       x: p.x,
       z: p.z,
+      groundY: floorY,
       height: p.height,
-      // 第三人稱的相機不在眼睛位置，直接沿用起飛前視高（v8.4 的回歸 pose 仍精確）。
+      // 第三人稱相機不在眼睛位置，視高仍相對於當前樓板保存。
       eyeHeight: viewModeRef.current === "third"
         ? p.eyeHeight
-        : p.position.y - groundHeightAt(p.x, p.z) - stateRef.current.jumpOffset,
+        : p.position.y - floorY - stateRef.current.jumpOffset,
       yaw: p.yaw,
       pitch: p.pitch,
     };
@@ -252,7 +259,7 @@ export const CameraRig: React.FC<{
   const pointRoomCamera = (dt = 1 / 60, snap = false) => {
     const s = stateRef.current;
     camera.up.set(0, 1, 0);
-    const eyeY = groundHeightAt(s.x, s.z) + s.eyeHeight + s.jumpOffset;
+    const eyeY = s.groundY + s.eyeHeight + s.jumpOffset;
     // 房間視野依 aspect 調整（直式手機加寬），但座位轉場與飛行各自控制 fov。
     if (!seatTransitionRef.current && !flightRef.current) {
       const portrait = camera.aspect < THIRD_PERSON.portraitAspect;
@@ -267,7 +274,7 @@ export const CameraRig: React.FC<{
     if (viewModeRef.current === "third" && modeRef.current === "room" && !flightRef.current) {
       const portrait = camera.aspect < THIRD_PERSON.portraitAspect;
       const target = resolveThirdPersonCamera(
-        { x: s.x, z: s.z, eyeY: s.eyeHeight, jumpOffset: s.jumpOffset },
+        { x: s.x, z: s.z, eyeY: s.eyeHeight, jumpOffset: s.jumpOffset, floorY: s.groundY },
         s.yaw,
         s.pitch,
         thirdPersonDistance(camera.aspect, 1)
@@ -308,7 +315,7 @@ export const CameraRig: React.FC<{
   const currentOtherPlayerPosition = () => {
     const pose = otherPlayerRef?.current;
     return pose?.visible && Number.isFinite(pose.x) && Number.isFinite(pose.z)
-      ? { x: pose.x, z: pose.z }
+      ? { x: pose.x, z: pose.z, floorY: pose.floorY ?? 0 }
       : undefined;
   };
 
@@ -320,6 +327,7 @@ export const CameraRig: React.FC<{
       x: s.x,
       z: s.z,
       height: s.height,
+      floorY: s.groundY,
     });
   };
 
@@ -522,7 +530,7 @@ export const CameraRig: React.FC<{
         s.z >= rect.minZ - 0.3 && s.z <= rect.maxZ + 0.3
       );
       if (!overlap) return;
-      const safe = resolveCollision(s.x, s.z, 0.30, true, false, undefined, currentOtherPlayerPosition());
+      const safe = resolveCollision(s.x, s.z, 0.30, true, false, undefined, currentOtherPlayerPosition(), s.groundY);
       s.x = safe.x;
       s.z = safe.z;
       pointRoomCamera();
@@ -806,10 +814,13 @@ export const CameraRig: React.FC<{
       if (modeRef.current !== "room" || flyingRef.current) return;
       const c = (e as CustomEvent<StudyCamera>).detail;
       if (!c) return;
+      const resetPosition = clampRoomPosition(c.x ?? 0.9, c.z ?? 1.55);
+      const resetFloorY = groundHeightAt(resetPosition.x, resetPosition.z, c.floorY ?? 0);
       stateRef.current = {
         ...stateRef.current,
-        x: c.x ?? 0.9,
-        z: c.z ?? 1.55,
+        x: resetPosition.x,
+        z: resetPosition.z,
+        groundY: resetFloorY,
         height: clampHeight(c.height ?? 1.5),
         eyeHeight: interactionRef.current.seated ? stateRef.current.eyeHeight : clampHeight(c.height ?? 1.5),
         yaw: THREE.MathUtils.degToRad(c.yaw),
@@ -892,7 +903,8 @@ export const CameraRig: React.FC<{
       }
       const chairX = chairRig?.group.position.x ?? CHAIR.x;
       const chairZ = chairRig?.group.position.z ?? CHAIR.z;
-      const inChairTrigger = isWithinSitTrigger(stateRef.current.x, stateRef.current.z, chairX, chairZ);
+      const inChairTrigger = stateRef.current.groundY < 0.1 &&
+        isWithinSitTrigger(stateRef.current.x, stateRef.current.z, chairX, chairZ);
       interactionRef.current.chairInTrigger = inChairTrigger;
       if (inChairTrigger !== previousChairTriggerRef.current) {
         previousChairTriggerRef.current = inChairTrigger;
@@ -946,11 +958,18 @@ export const CameraRig: React.FC<{
           seatedNow || seatedApproach,
           seatedNow,
           { x: chairX, z: chairZ },
-          currentOtherPlayerPosition()
+          currentOtherPlayerPosition(),
+          stateRef.current.groundY
         );
         const pos = clampRoomPosition(separated.x, separated.z);
-        stateRef.current.x = pos.x;
-        stateRef.current.z = pos.z;
+        const currentFloorY = stateRef.current.groundY;
+        const nextFloorY = groundHeightAt(pos.x, pos.z, currentFloorY);
+        // 沒有相連樓板／斜坡時不跨越樓層落差，避免從挑空邊緣直接掉回地面。
+        if (Math.abs(nextFloorY - currentFloorY) <= MAX_WALKABLE_STEP) {
+          stateRef.current.x = pos.x;
+          stateRef.current.z = pos.z;
+          stateRef.current.groundY = nextFloorY;
+        }
         pointRoomCamera();
       } else {
         if (jumpChanged || seatChanged) pointRoomCamera();
@@ -964,6 +983,7 @@ export const CameraRig: React.FC<{
         x: nowState.x,
         z: nowState.z,
         eyeY: nowState.eyeHeight,
+        floorY: nowState.groundY,
         jumpOffset: nowState.jumpOffset,
         yaw: nowState.yaw,
         pitch: nowState.pitch,

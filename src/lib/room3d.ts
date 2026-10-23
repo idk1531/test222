@@ -1,6 +1,5 @@
-// v8.1 全景書房：房間參數純資料＋純函式。
-// 集中管理：房間尺寸、窗／桌／書架位置、光源參數（預留未來晝夜切換，本輪不做切換 UI）、
-// 相機限制、畫質分級、3D→CSS 投影幫助函式、書架佈局計算。
+// 嵌套之城 3D 書房：尺寸、建築層級、家具與相機／碰撞的純資料＋純函式。
+// 集中管理：窗／桌／書架位置、光源參數、畫質分級、3D→CSS 投影幫助函式與書架佈局。
 // three.js 元件（StudyScene/RoomGeometry/WindowLight/CameraRig）皆由此取參數。
 import * as THREE from "three";
 import { CHARACTER } from "./character";
@@ -12,31 +11,122 @@ import {
   type StudyBookLayout,
   type StudyCategory,
 } from "./study";
-import { ROOM_DIMENSIONS } from "./roomDimensions";
+import { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } from "./roomDimensions";
 
 export { ROOM_AREA_SCALE } from "./roomDimensions";
 
-// ================= 房間尺寸（公尺） =================
-export const ROOM = ROOM_DIMENSIONS; // X：8.49 m、Z：7.07 m；高度與牆厚不變
+// ================= 房間尺寸與嵌套之城初始假設（公尺） =================
+export const ROOM = ROOM_DIMENSIONS; // 初始假設：24 × 20 × 16 m；不是由概念圖精確量測
 
-// 大窗（北牆 z = −depth/2；窗台略高於桌面，溫和日光由窗外右上方射入）
-// 西側窗墩 0.35 m、東側窗墩 1.20 m，窗寬與中心隨房寬推導。
+export type CityMaterial = "timber" | "stone" | "core";
+export interface CityPlatform {
+  id: string;
+  level: 1 | 2 | 3;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  material: CityMaterial;
+}
+export interface CityRamp {
+  id: string;
+  start: { x: number; z: number; y: number };
+  end: { x: number; z: number; y: number };
+  width: number;
+  material: CityMaterial;
+}
+export interface CityFrame {
+  id: string;
+  plane: "x" | "z" | "box";
+  x: number;
+  z: number;
+  bottom: number;
+  width: number;
+  depth?: number;
+  height: number;
+  thickness: number;
+  beamHeight: number;
+  rotationY: number;
+  material: CityMaterial;
+  bands?: readonly number[];
+}
+
+/**
+ * 嵌套之城的尺寸真相。所有值都是概念模型的「初始假設」；參考圖沒有可供精確量測的比例尺。
+ * 四個可行走高度（地面 + 三層）、偏移／旋轉框架與可走斜坡在此共用，避免幾何、碰撞各自猜尺寸。
+ */
+export const NESTED_CITY = {
+  levels: [0, 4, 8, 12] as const,
+  atrium: { x: 1.2, z: -0.8, width: 9.2, depth: 7.8 },
+  frames: [
+    { id: "outer-front-timber", plane: "x", x: -0.35, z: 9.25, bottom: 0, width: 22.7, height: 15.4, thickness: 0.92, beamHeight: 1.05, rotationY: 0, material: "timber" },
+    { id: "outer-west-timber", plane: "z", x: -11.35, z: 0.1, bottom: 0, width: 18.2, height: 15.2, thickness: 0.86, beamHeight: 0.98, rotationY: 0, material: "timber" },
+    { id: "outer-east-timber", plane: "z", x: 11.35, z: 0.1, bottom: 0.2, width: 18.2, height: 14.95, thickness: 0.82, beamHeight: 0.96, rotationY: 0, material: "timber", bands: [7.6] },
+    { id: "outer-back-timber", plane: "x", x: 0.8, z: -9.15, bottom: 0.45, width: 21.3, height: 14.6, thickness: 0.78, beamHeight: 0.9, rotationY: 0, material: "timber", bands: [8.4] },
+    { id: "crossing-stone-frame", plane: "x", x: -0.65, z: 2.55, bottom: 1.05, width: 17.4, height: 11.5, thickness: 0.72, beamHeight: 0.78, rotationY: 0, material: "stone", bands: [8.0] },
+    { id: "deep-stone-frame", plane: "z", x: 3.55, z: -0.2, bottom: 1.7, width: 16.3, height: 10.4, thickness: 0.68, beamHeight: 0.72, rotationY: 0, material: "stone", bands: [7.9] },
+    { id: "offset-rotated-core", plane: "box", x: 1.8, z: -0.95, bottom: 3.55, width: 11.4, depth: 8.8, height: 9.65, thickness: 0.62, beamHeight: 0.7, rotationY: Math.PI / 14, material: "core" },
+  ] satisfies readonly CityFrame[],
+  platforms: [
+    // Level 1: 四邊環廊＋跨越中央挑空的窄橋。
+    { id: "level-1-west-gallery", level: 1, x: -9.75, z: 0, width: 4.5, depth: 17.4, material: "timber" },
+    { id: "level-1-east-gallery", level: 1, x: 9.75, z: 0, width: 4.5, depth: 17.4, material: "timber" },
+    { id: "level-1-north-gallery", level: 1, x: 0, z: -8.3, width: 15, depth: 2.8, material: "stone" },
+    { id: "level-1-south-gallery", level: 1, x: 0, z: 8.3, width: 15, depth: 2.8, material: "stone" },
+    { id: "level-1-crossing-bridge", level: 1, x: 0, z: 0, width: 15, depth: 1.45, material: "core" },
+    // Level 2: 相對下層平移的石廊與縱向橋，避免形成等距同心盒。
+    { id: "level-2-west-gallery", level: 2, x: -7.6, z: -0.55, width: 2.8, depth: 14.4, material: "stone" },
+    { id: "level-2-east-gallery", level: 2, x: 8.4, z: -0.55, width: 2.8, depth: 14.4, material: "stone" },
+    { id: "level-2-north-gallery", level: 2, x: 0.4, z: -6.95, width: 12, depth: 2.6, material: "core" },
+    { id: "level-2-south-gallery", level: 2, x: 0.4, z: 5.85, width: 12, depth: 2.6, material: "stone" },
+    { id: "level-2-long-bridge", level: 2, x: 1, z: -0.45, width: 1.7, depth: 11.2, material: "timber" },
+    // Level 3: 從西北高台通往偏心內核的閱讀廊橋與兩側平台。
+    { id: "level-3-ramp-landing", level: 3, x: -10.45, z: -6.7, width: 4.1, depth: 3.8, material: "stone" },
+    { id: "level-3-west-gallery", level: 3, x: -7.25, z: -1.7, width: 4.3, depth: 8.4, material: "timber" },
+    { id: "level-3-core-bridge", level: 3, x: -1.15, z: -1.7, width: 10, depth: 1.8, material: "core" },
+    { id: "level-3-east-gallery", level: 3, x: 5.1, z: -1.7, width: 3.8, depth: 8.4, material: "stone" },
+    { id: "level-3-east-reading-terrace", level: 3, x: 8.15, z: 4.3, width: 4, depth: 4.2, material: "timber" },
+  ] satisfies readonly CityPlatform[],
+  ramps: [
+    { id: "ramp-ground-to-level-1", start: { x: -10.8, z: 6.7, y: 0 }, end: { x: 1.2, z: 6.7, y: 4 }, width: 1.8, material: "stone" },
+    { id: "ramp-level-1-to-level-2", start: { x: 1.2, z: 6.7, y: 4 }, end: { x: 1.2, z: -6.7, y: 8 }, width: 1.8, material: "timber" },
+    { id: "ramp-level-2-to-level-3", start: { x: 1.2, z: -6.7, y: 8 }, end: { x: -10.8, z: -6.7, y: 12 }, width: 1.8, material: "stone" },
+  ] satisfies readonly CityRamp[],
+  bridgeRails: [
+    { id: "level-1-bridge-rail-near", level: 1, x: 0, z: -0.73, width: 15, depth: 0.1 },
+    { id: "level-1-bridge-rail-far", level: 1, x: 0, z: 0.73, width: 15, depth: 0.1 },
+    { id: "level-2-bridge-rail-west", level: 2, x: 0.06, z: -0.45, width: 0.1, depth: 11.2 },
+    { id: "level-2-bridge-rail-east", level: 2, x: 1.94, z: -0.45, width: 0.1, depth: 11.2 },
+    { id: "level-3-bridge-rail-near", level: 3, x: -1.15, z: -2.65, width: 10, depth: 0.1 },
+    { id: "level-3-bridge-rail-far", level: 3, x: -1.15, z: -0.75, width: 10, depth: 0.1 },
+  ] as const,
+  columns: [
+    { id: "stone-support-west", x: -8.25, z: 2.55, width: 0.76, depth: 0.72, bottom: 1.05, top: 12.55, material: "stone" },
+    { id: "stone-support-east", x: 6.95, z: -0.2, width: 0.68, depth: 0.68, bottom: 1.7, top: 12.1, material: "stone" },
+  ] as const,
+  /** Ramp rails stop before each landing so their posts do not seal the turn between floors. */
+  rampRailInset: 1.15,
+  /** Platform bridge/ramp guardrails: y is the walking-surface level index. */
+  railHeight: 1.05,
+} as const;
+
+// 大面積玻璃窗（北牆 z = −depth/2），以落地採光取代單層小房間窗洞。
+// 墩寬、窗高與窗寬是概念模型假設；保留既有桌面、書本與工作視角的公尺尺度。
 const WINDOW_WEST_PIER = 0.35;
 const WINDOW_EAST_PIER = 1.2;
 const WINDOW_LEFT = -ROOM.width / 2 + WINDOW_WEST_PIER;
 const WINDOW_RIGHT = ROOM.width / 2 - WINDOW_EAST_PIER;
-// v8.3：框變細、單中挺、無橫櫺（圖一＝大玻璃＋一條直中挺）
 export const WINDOW = {
   cx: (WINDOW_LEFT + WINDOW_RIGHT) / 2,
   width: WINDOW_RIGHT - WINDOW_LEFT,
-  sill: 0.9, // 窗台高（大理石檯面頂）
-  top: 2.58,
-  frame: 0.055, // 窗框寬（原 0.085）
-  depth: 0.16,
-  mullions: 2, // 直向窗櫺（附圖：大面窗分成三格）
-  bars: 0, // 無橫向窗櫺
-  sillDepth: 0.3, // 窗台大理石深（與桌板同材質）
-  sillThickness: 0.12, // 窗台石塊厚（自桌面 0.78 墊到 0.90）
+  sill: 0.24,
+  top: ROOM.height - 0.65,
+  frame: 0.09,
+  depth: 0.2,
+  mullions: 4,
+  bars: 0,
+  sillDepth: 0.34,
+  sillThickness: 0.08,
 };
 
 // L 形大理石檯面：沿北窗延伸，並沿西側回折；只平移到新窗位，不隨房間放大。
@@ -123,7 +213,7 @@ export const SHELF = {
   plank: 0.035, // 板厚
   pitch: 0.335, // 層板間距（v8.5：附圖 5 排，原 4 排 0.40）
   minRows: 5, // 至少 5 排懸浮層板（資料列不足時以空板＋裝飾書補滿）
-  xBack: (ROOM.width / 2 - 0.16) * FIDELITY.shelfWallSign, // 背牆 X（西牆 −2.84）
+  xBack: (ROOM.width / 2 - 0.16) * FIDELITY.shelfWallSign, // 西側書牆背板 X（−11.84 m）
   baseY: 0,
   bookDepth: 0.19, // 書本深度（X 向）
   bookGap: 0.006,
@@ -249,11 +339,11 @@ export function clampToDesk(x: number, z: number): { x: number; z: number } {
 
 // ================= 光源（參數集中於此，預留晝夜切換） =================
 export const SUN = {
-  color: "#fff5e6", // 暖白斜陽（比 v8.5 更中性，避免整間變橘）
-  // 附圖是「亮窗＋霧感庭園」的柔光：方向光負責可讀陰影，其餘交給窗光與環境光。
-  intensity: 2.15,
-  position: new THREE.Vector3(ROOM.width * 0.35, 3.0, -ROOM.depth / 2 - 1.8),
-  target: new THREE.Vector3(-ROOM.width * 0.125, 0.2, ROOM.depth * 0.25),
+  color: "#fff5e6",
+  // 初始假設的高窗晨光：主光由北側高窗斜入多層挑空，柔度由環境光補足。
+  intensity: 2.35,
+  position: new THREE.Vector3(ROOM.width * 0.34, ROOM.height + 1.5, -ROOM.depth / 2 - 2.1),
+  target: new THREE.Vector3(-ROOM.width * 0.08, 0.45, ROOM.depth * 0.22),
   shadowMap: { desktop: 2048, mobile: 1024 },
   /** PCFSoft 陰影模糊半徑（桌機較柔） */
   shadowRadius: { desktop: 7, mobile: 4 },
@@ -265,12 +355,12 @@ export const SUN_SHADOW_CAMERA = {
   bottom: -ROOM.depth * 0.76,
 };
 export const AMBIENT = {
-  // 中性偏暖的環境光：降低整體填充，保留窗光與層板燈的明暗對比。
+  // 多層構件會遮住大量直射窗光；提高低頻填充，讓深處木／石材質仍可辨識。
   hemisphereSky: "#e8eae8",
   hemisphereGround: "#d2ccc1",
-  hemisphereIntensity: 0.5,
+  hemisphereIntensity: 0.64,
   ambientColor: "#f7f0e6",
-  ambientIntensity: 0.16,
+  ambientIntensity: 0.24,
 };
 
 /** 窗外柔光（無陰影補光；手機只留一盞）——讓窗邊與桌面有附圖的柔亮漸層。 */
@@ -278,8 +368,8 @@ export const WINDOW_FILL = {
   color: "#f2f5f8",
   intensityDesktop: 1.1,
   intensityMobile: 0.7,
-  position: new THREE.Vector3(WINDOW.cx - 0.1, 1.9, -ROOM.depth / 2 + 1.2),
-  target: new THREE.Vector3(WINDOW.cx - 0.3, 0.75, ROOM.depth * 0.34),
+  position: new THREE.Vector3(WINDOW.cx - 0.1, ROOM.height * 0.8, -ROOM.depth / 2 + 1.2),
+  target: new THREE.Vector3(WINDOW.cx - 0.3, 1.2, ROOM.depth * 0.34),
 };
 
 function evenlySpaced(start: number, end: number, count: number): number[] {
@@ -303,7 +393,7 @@ export const SHELF_WASH = {
 /** 附圖的橫向百葉：上段遮蔽、下段透空，深色底桿。 */
 export const BLINDS = {
   /** 簾片覆蓋窗洞高度比例（附圖只遮上段，下面整片見景） */
-  cover: 0.31,
+  cover: 0.05,
   slatPitch: 0.055,
   slatThickness: 0.015,
   slatDepth: 0.065,
@@ -332,12 +422,12 @@ export const MARBLE_ROUGH = {
 export const CAMERA = {
   fov: 62,
   near: 0.05,
-  far: 80,
+  far: 110,
   pitchMin: THREE.MathUtils.degToRad(-70),
   pitchMax: THREE.MathUtils.degToRad(40),
   heightMin: 1.0,
   heightMax: 2.3,
-  wallMargin: 0.35, // 離牆最小距離（不可穿牆）
+  wallMargin: ROOM_EDGE_MARGIN, // 離開放結構外緣最小距離
   walkSpeed: 2.2, // m/s
   sprintMultiplier: 2,
   lookSensitivity: 0.0042, // rad/px
@@ -402,8 +492,8 @@ export const TEXTURES: {
   repeat: {
     wall: [3, 2],
     microcement: [2.2, 1.6],
-    floorOak: [2.2, 1.8],
-    floorMarble: [1.25, 1.05],
+    floorOak: [6.4, 5.4],
+    floorMarble: [3.6, 3.0],
     desk: [2.4, 1.2],
     shelf: [3.6, 1],
     spines: [1, 1],
@@ -640,28 +730,147 @@ export function shelfPlankY(row: number, _rowCount: number): number {
   return SHELF.height - row * SHELF.pitch;
 }
 
-export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair" | "player";
+export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair" | "player" | "structure" | "railing";
 export interface Aabb extends RoomRect {
   kind: RoomColliderKind;
+  bottom?: number;
   top: number;
   standable: boolean;
 }
 export type RoomCollider = Aabb;
 
-/** 2D 玩家碰撞採 XZ 平面 AABB；高度保留給地面/可站立物判定。 */
+/** 玩家以 XZ 圓形近似；bottom/top 讓樓層碰撞只阻擋與角色身高相交的物件。 */
+interface LocalFrameMember {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  bottom: number;
+  top: number;
+}
+function frameMembers(frame: CityFrame): LocalFrameMember[] {
+  const members: LocalFrameMember[] = [];
+  const postTop = frame.bottom + frame.height - frame.beamHeight;
+  const add = (x: number, z: number, width: number, depth: number, bottom: number, top: number) => {
+    members.push({ x, z, width, depth, bottom, top });
+  };
+  if (frame.plane === "x") {
+    for (const side of [-1, 1]) add(side * frame.width / 2, 0, frame.thickness, frame.thickness, frame.bottom, postTop);
+    add(0, 0, frame.width, frame.thickness, postTop, frame.bottom + frame.height);
+    for (const band of frame.bands ?? []) {
+      const half = frame.beamHeight * 0.36;
+      add(0, 0, frame.width, frame.thickness, frame.bottom + band - half, frame.bottom + band + half);
+    }
+  } else if (frame.plane === "z") {
+    for (const side of [-1, 1]) add(0, side * frame.width / 2, frame.thickness, frame.thickness, frame.bottom, postTop);
+    add(0, 0, frame.thickness, frame.width, postTop, frame.bottom + frame.height);
+    for (const band of frame.bands ?? []) {
+      const half = frame.beamHeight * 0.36;
+      add(0, 0, frame.thickness, frame.width, frame.bottom + band - half, frame.bottom + band + half);
+    }
+  } else {
+    const depth = frame.depth ?? frame.width;
+    for (const xSide of [-1, 1]) {
+      for (const zSide of [-1, 1]) add(xSide * frame.width / 2, zSide * depth / 2, frame.thickness, frame.thickness, frame.bottom, postTop);
+    }
+    const topY0 = postTop;
+    const topY1 = frame.bottom + frame.height;
+    for (const zSide of [-1, 1]) add(0, zSide * depth / 2, frame.width, frame.thickness, topY0, topY1);
+    for (const xSide of [-1, 1]) add(xSide * frame.width / 2, 0, frame.thickness, depth, topY0, topY1);
+    for (const band of frame.bands ?? []) {
+      const half = frame.beamHeight * 0.29;
+      const bottom = frame.bottom + band - half;
+      const top = frame.bottom + band + half;
+      for (const zSide of [-1, 1]) add(0, zSide * depth / 2, frame.width, frame.thickness, bottom, top);
+      for (const xSide of [-1, 1]) add(xSide * frame.width / 2, 0, frame.thickness, depth, bottom, top);
+    }
+  }
+  return members;
+}
+const frameStructureColliders: Aabb[] = NESTED_CITY.frames.flatMap((frame) =>
+  frameMembers(frame).map((member) => {
+    const cos = Math.cos(frame.rotationY);
+    const sin = Math.sin(frame.rotationY);
+    const x = frame.x + member.x * cos + member.z * sin;
+    const z = frame.z - member.x * sin + member.z * cos;
+    const halfX = Math.abs(cos) * member.width / 2 + Math.abs(sin) * member.depth / 2;
+    const halfZ = Math.abs(sin) * member.width / 2 + Math.abs(cos) * member.depth / 2;
+    return {
+      minX: x - halfX,
+      maxX: x + halfX,
+      minZ: z - halfZ,
+      maxZ: z + halfZ,
+      kind: "structure" as const,
+      bottom: member.bottom,
+      top: member.top,
+      standable: false,
+    };
+  })
+);
 const chairCos = Math.abs(Math.cos(CHAIR.yaw));
 const chairSin = Math.abs(Math.sin(CHAIR.yaw));
 const chairHalfX = (CHAIR.width * chairCos + CHAIR.depth * chairSin) / 2;
 const chairHalfZ = (CHAIR.width * chairSin + CHAIR.depth * chairCos) / 2;
+const structureColliders: Aabb[] = NESTED_CITY.columns.map((column) => ({
+  minX: column.x - column.width / 2,
+  maxX: column.x + column.width / 2,
+  minZ: column.z - column.depth / 2,
+  maxZ: column.z + column.depth / 2,
+  kind: "structure",
+  bottom: column.bottom,
+  top: column.top,
+  standable: false,
+}));
+const bridgeRailColliders: Aabb[] = NESTED_CITY.bridgeRails.map((rail) => {
+  const floorY = NESTED_CITY.levels[rail.level];
+  return {
+    minX: rail.x - rail.width / 2,
+    maxX: rail.x + rail.width / 2,
+    minZ: rail.z - rail.depth / 2,
+    maxZ: rail.z + rail.depth / 2,
+    kind: "railing",
+    bottom: floorY + 0.02,
+    top: floorY + NESTED_CITY.railHeight,
+    standable: false,
+  };
+});
+const rampRailColliders: Aabb[] = NESTED_CITY.ramps.flatMap((ramp) => {
+  const dx = ramp.end.x - ramp.start.x;
+  const dz = ramp.end.z - ramp.start.z;
+  const length = Math.hypot(dx, dz);
+  const insetT = Math.min(0.35, NESTED_CITY.rampRailInset / length);
+  const railStartT = insetT;
+  const railEndT = 1 - insetT;
+  const samples = Math.max(2, Math.ceil(length * (railEndT - railStartT) / 1.8));
+  const sideX = -dz / length;
+  const sideZ = dx / length;
+  return [-1, 1].flatMap((side) => Array.from({ length: samples + 1 }, (_, i) => {
+    const t = railStartT + (railEndT - railStartT) * i / samples;
+    const y = ramp.start.y + (ramp.end.y - ramp.start.y) * t;
+    const x = ramp.start.x + dx * t + sideX * (ramp.width / 2 - 0.08) * side;
+    const z = ramp.start.z + dz * t + sideZ * (ramp.width / 2 - 0.08) * side;
+    return {
+      minX: x - 0.07,
+      maxX: x + 0.07,
+      minZ: z - 0.07,
+      maxZ: z + 0.07,
+      kind: "railing" as const,
+      bottom: y,
+      top: y + NESTED_CITY.railHeight,
+      standable: false,
+    };
+  }));
+});
 export const COLLIDERS: readonly Aabb[] = [
-  ...DESK_FOOTPRINT.map((rect) => ({ ...rect, kind: "desk" as const, top: DESK.top, standable: false })),
-  ...CABINET_FOOTPRINT.map((rect) => ({ ...rect, kind: "cabinet" as const, top: CABINET.height, standable: false })),
+  ...DESK_FOOTPRINT.map((rect) => ({ ...rect, kind: "desk" as const, bottom: 0, top: DESK.top, standable: false })),
+  ...CABINET_FOOTPRINT.map((rect) => ({ ...rect, kind: "cabinet" as const, bottom: 0, top: CABINET.height, standable: false })),
   {
     minX: Math.min(SHELF.xBack, shelfFrontX()),
     maxX: Math.max(SHELF.xBack, shelfFrontX()),
     minZ: SHELF.z - SHELF.width / 2,
     maxZ: SHELF.z + SHELF.width / 2,
     kind: "shelf",
+    bottom: 0,
     top: SHELF.height,
     standable: false,
   },
@@ -671,9 +880,14 @@ export const COLLIDERS: readonly Aabb[] = [
     minZ: CHAIR.z - chairHalfZ,
     maxZ: CHAIR.z + chairHalfZ,
     kind: "chair",
+    bottom: 0,
     top: CHAIR.seatHeight,
     standable: false,
   },
+  ...structureColliders,
+  ...frameStructureColliders,
+  ...bridgeRailColliders,
+  ...rampRailColliders,
 ];
 
 export const PLAYER_RADIUS = 0.22;
@@ -691,7 +905,8 @@ export function resolveCollision(
   ignoreChair = false,
   ignoreDeskAndCabinet = false,
   chairPosition?: { x: number; z: number },
-  otherPlayerPosition?: { x: number; z: number } | null
+  otherPlayerPosition?: { x: number; z: number; floorY?: number } | null,
+  floorY = 0
 ): { x: number; z: number } {
   const start = clampRoomPosition(x, z);
   let px = start.x;
@@ -703,13 +918,16 @@ export function resolveCollision(
         minZ: otherPlayerPosition.z - PLAYER_RADIUS,
         maxZ: otherPlayerPosition.z + PLAYER_RADIUS,
         kind: "player",
-        top: 1.7,
+        bottom: otherPlayerPosition.floorY ?? 0,
+        top: (otherPlayerPosition.floorY ?? 0) + 1.7,
         standable: false,
       }]
     : [];
+  const playerTop = floorY + 1.75;
   const colliders = [...COLLIDERS, ...dynamicPlayerCollider].filter((collider) =>
     !(ignoreChair && collider.kind === "chair") &&
-    !(ignoreDeskAndCabinet && (collider.kind === "desk" || collider.kind === "cabinet"))
+    !(ignoreDeskAndCabinet && (collider.kind === "desk" || collider.kind === "cabinet")) &&
+    collider.top > floorY + 0.05 && (collider.bottom ?? 0) < playerTop
   );
   for (let pass = 0; pass < colliders.length; pass++) {
     let changed = false;
@@ -752,9 +970,43 @@ export function resolveCollision(
   return { x: px, z: pz };
 }
 
-/** 目前房間只有單一地板；獨立 helper 讓起跳/安全起立共用地面真相。 */
-export function groundHeightAt(_x: number, _z: number): number {
-  return 0;
+/** 最大無跳躍垂直落差；斜坡每幀的高度增量遠低於此值。 */
+export const MAX_WALKABLE_STEP = 0.62;
+
+/**
+ * 回傳最接近目前樓層的可行走面高度。堆疊平台可投影到同一 XZ 區域，
+ * 因此必須帶入目前高度，避免玩家從地面瞬移到上層；斜坡只在腳下可接續時採用。
+ */
+export function groundHeightAt(x: number, z: number, referenceY = 0): number {
+  const rampHeights: number[] = [];
+  for (const ramp of NESTED_CITY.ramps) {
+    const dx = ramp.end.x - ramp.start.x;
+    const dz = ramp.end.z - ramp.start.z;
+    const lengthSq = dx * dx + dz * dz;
+    if (lengthSq <= 1e-9) continue;
+    const t = ((x - ramp.start.x) * dx + (z - ramp.start.z) * dz) / lengthSq;
+    if (t < 0 || t > 1) continue;
+    const closestX = ramp.start.x + dx * t;
+    const closestZ = ramp.start.z + dz * t;
+    if (Math.hypot(x - closestX, z - closestZ) > ramp.width / 2) continue;
+    const height = ramp.start.y + (ramp.end.y - ramp.start.y) * t;
+    if (Math.abs(height - referenceY) <= MAX_WALKABLE_STEP) rampHeights.push(height);
+  }
+  if (rampHeights.length) {
+    return rampHeights.reduce((best, height) =>
+      Math.abs(height - referenceY) < Math.abs(best - referenceY) ? height : best
+    );
+  }
+
+  const floorCandidates = [0, ...NESTED_CITY.platforms
+    .filter((platform) =>
+      x >= platform.x - platform.width / 2 && x <= platform.x + platform.width / 2 &&
+      z >= platform.z - platform.depth / 2 && z <= platform.z + platform.depth / 2
+    )
+    .map((platform) => NESTED_CITY.levels[platform.level])];
+  return floorCandidates.reduce((best, height) =>
+    Math.abs(height - referenceY) < Math.abs(best - referenceY) ? height : best
+  );
 }
 
 export const JUMP = {
@@ -986,6 +1238,8 @@ export interface PlayerPose {
   x: number;
   z: number;
   eyeY: number;
+  /** World-space walking surface; optional for peers running the earlier v1 presence shape. */
+  floorY?: number;
   jumpOffset: number;
   yaw: number;
   pitch: number;
@@ -1075,7 +1329,7 @@ function thirdPersonBlocked(x: number, y: number, z: number): boolean {
     z > ROOM.depth / 2 - THIRD_PERSON.wallMargin
   ) return true;
   return COLLIDERS.some((collider) =>
-    y < collider.top + 0.12 &&
+    y > (collider.bottom ?? 0) - 0.1 && y < collider.top + 0.12 &&
     x > collider.minX - 0.18 && x < collider.maxX + 0.18 &&
     z > collider.minZ - 0.18 && z < collider.maxZ + 0.18
   );
@@ -1086,12 +1340,12 @@ function thirdPersonBlocked(x: number, y: number, z: number): boolean {
  * 只回傳位置；lookAt 由 CameraRig 依角色前方計算。
  */
 export function resolveThirdPersonCamera(
-  pose: Pick<PlayerPose, "x" | "z" | "eyeY" | "jumpOffset">,
+  pose: Pick<PlayerPose, "x" | "z" | "eyeY" | "jumpOffset" | "floorY">,
   viewYaw: number,
   viewPitch: number,
   distance = THIRD_PERSON.distance
 ): { x: number; y: number; z: number } {
-  const eyeY = groundHeightAt(pose.x, pose.z) + pose.eyeY + pose.jumpOffset;
+  const eyeY = groundHeightAt(pose.x, pose.z, pose.floorY ?? 0) + pose.eyeY + pose.jumpOffset;
   const dir = forwardFromYawPitch(viewYaw, viewPitch);
   const back = new THREE.Vector3(-dir.x, 0, -dir.z);
   if (back.lengthSq() < 1e-6) back.set(0, 0, 1);
@@ -1105,9 +1359,17 @@ export function resolveThirdPersonCamera(
     const bx = back.x * Math.cos(angle) + back.z * Math.sin(angle);
     const bz = -back.x * Math.sin(angle) + back.z * Math.cos(angle);
     return {
-      x: pose.x + bx * d + right.x * shoulder,
+      x: THREE.MathUtils.clamp(
+        pose.x + bx * d + right.x * shoulder,
+        -ROOM.width / 2 + THIRD_PERSON.wallMargin,
+        ROOM.width / 2 - THIRD_PERSON.wallMargin
+      ),
       y,
-      z: pose.z + bz * d + right.z * shoulder,
+      z: THREE.MathUtils.clamp(
+        pose.z + bz * d + right.z * shoulder,
+        -ROOM.depth / 2 + THIRD_PERSON.wallMargin,
+        ROOM.depth / 2 - THIRD_PERSON.wallMargin
+      ),
     };
   };
 

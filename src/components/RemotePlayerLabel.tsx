@@ -25,7 +25,7 @@ export function RemotePlayerLabel({
       return;
     }
     const scale = Math.max(0.72, Math.min(1.35, pose.eyeY / 1.62));
-    const y = pose.jumpOffset - (pose.seated ? 0.2 : 0) + 1.9 * scale;
+    const y = (pose.floorY ?? 0) + pose.jumpOffset - (pose.seated ? 0.2 : 0) + 1.9 * scale;
     const point = api.projectToScreen(new THREE.Vector3(pose.x, y, pose.z));
     if (!point.visible) {
       element.style.visibility = "hidden";

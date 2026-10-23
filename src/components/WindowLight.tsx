@@ -63,15 +63,15 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
       const spot = new THREE.SpotLight(
         "#ffe4c2",
         api.quality.mobile ? 0.5 : 0.72,
-        6.2,
+        ROOM.height * 1.18,
         Math.PI / 4.2,
         0.92,
         1.4
       );
       const lightX = -ROOM.width * 0.12 + i * ROOM.width * 0.24;
       const lightZ = i % 2 === 0 ? -ROOM.depth * 0.15 : ROOM.depth * 0.23;
-      spot.position.set(lightX, ROOM.height - 0.08, lightZ);
-      spot.target.position.set(lightX * 0.85, 0, lightZ + ROOM.depth * 0.25);
+      spot.position.set(lightX, ROOM.height - 0.8, lightZ);
+      spot.target.position.set(lightX * 0.85, ROOM.height * 0.3, lightZ + ROOM.depth * 0.25);
       spot.castShadow = false;
       g.add(spot, spot.target);
     }
@@ -94,8 +94,8 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     // 不再用低面數球體擋在照片前面（實際預覽看起來像卡通樹）。
     // v8.6：窗加寬到 4.9 m 後，原本 6 m 寬的景片不再覆蓋整個窗洞，
     // 左側會露出空白（實際預覽是窗內一片死白）。景片必須比窗洞寬、也更高。
-    const sky = new THREE.Mesh(new THREE.PlaneGeometry(16, 8), skyMat);
-    sky.position.set(WINDOW.cx, 2.4, outsideZ - 1.2);
+    const sky = new THREE.Mesh(new THREE.PlaneGeometry(WINDOW.width + 12, WINDOW.top - WINDOW.sill + 6), skyMat);
+    sky.position.set(WINDOW.cx, (WINDOW.top + WINDOW.sill) / 2, outsideZ - 1.2);
     g.add(sky);
     // v8.2：遠景換照片級庭園（單張、不平貼）。分層樹冠／灌木景片留在前方提供視差與投影。
     const skyDisposer = attachPhotoMap(skyMat, "garden", {
@@ -118,12 +118,12 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
 
     // 窗外只留照片景片＋最底層草地；照片本身有足夠的層次與視差，
     // 低面數樹冠會破壞附圖的寫實感（實測會擋住整片窗景）。
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(14, 9), groundMat);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(WINDOW.width + 12, ROOM.depth + 8), groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(WINDOW.cx, -0.03, outsideZ + 0.6);
     ground.receiveShadow = false;
     g.add(ground);
-    const grass = new THREE.Mesh(new THREE.PlaneGeometry(12, 2.2), grassMat);
+    const grass = new THREE.Mesh(new THREE.PlaneGeometry(WINDOW.width + 8, 3.4), grassMat);
     grass.rotation.x = -Math.PI / 2;
     grass.position.set(WINDOW.cx, -0.018, outsideZ + 0.35);
     grass.receiveShadow = false;

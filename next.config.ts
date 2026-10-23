@@ -27,6 +27,9 @@ const isStaticExport = process.env.STATIC_EXPORT === "1";
 const basePath = process.env.NEXT_BASE_PATH || "";
 
 const nextConfig: NextConfig = {
+  // Arena 透過 e2b.app 代理 dev server；允許代理主機載入 Next 開發資源，
+  // 並保留 127.0.0.1 供本機／自動化瀏覽器驗收。僅影響 dev server。
+  allowedDevOrigins: ["127.0.0.1", "*.e2b.app"],
   ...(isStaticExport
     ? {
         output: "export",

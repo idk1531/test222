@@ -42,14 +42,15 @@ export interface StudyBookLayout {
  * v8.1：書房相機狀態（可序列化，預留同步介面）。
  * yaw/pitch 為「角度」（與 v8.0 儲存格式相容；three.js 用時再轉弧度）。
  * yaw：360° 連續（水平任意轉）；pitch：−70°～+40°。
- * x/z：房間中的走動位置（公尺，缺省＝房間中央偏後）；height：視高（缺省 1.5）。
+ * x/z：房間中的走動位置（公尺）；floorY：目前樓層；height：相對樓板的視高。
  */
 export interface StudyCamera {
   yaw: number; // 角度，連續（不夾限，寫入前正規化至 (−180, 180]）
   pitch: number; // 角度，夾限 −70～+40
   x?: number; // 公尺
   z?: number; // 公尺
-  height?: number; // 公尺
+  height?: number; // 相對目前樓板的公尺
+  floorY?: number; // 目前腳下樓板高度（向下相容：缺省為 0）
 }
 
 export interface StudyLayout {
@@ -84,17 +85,16 @@ export const UNCATEGORIZED_COLOR = "#a8a29e";
  */
 export const CAMERA_LIMITS = { pitchMin: -70, pitchMax: 40 };
 /**
- * v8.5：初始取景對齊附圖（站東南側、望向西北：左側書牆、右側窗景、桌面與椅子入鏡）。
- * 只影響「第一次進書房」與「重置視角」；已存在的使用者相機不被覆寫。
+ * 嵌套之城初始取景：退到東南側並朝西北穿過交錯框架，讓樓層、中央挑空、木／石構件與北側窗光同時可讀。
+ * 只影響「第一次進書房」與「重置視角」；已有完整相機資料的使用者不被覆寫。
  */
 export const DEFAULT_CAMERA: StudyCamera = {
-  // 房間擴大後仍站在南側偏東、面向西北，維持書牆與窗景同框。
-  // 水平位置依房間寬／深比例推導；不貼牆，保留第三人稱相機的後退空間。
-  yaw: -25,
-  pitch: -6,
-  x: ROOM_DIMENSIONS.width * 0.247,
-  z: ROOM_DIMENSIONS.depth * 0.311,
-  height: 1.55,
+  yaw: -48,
+  pitch: -2,
+  x: ROOM_DIMENSIONS.width * 0.424,
+  z: ROOM_DIMENSIONS.depth * 0.418,
+  height: 1.52,
+  floorY: 0,
 };
 
 /** 分類預設色票（低飽和暖色系） */
@@ -383,6 +383,7 @@ export function ensureStudyState<T extends StudyMigratable>(s: T): T & StudyStat
     x: num(rawCam?.x, DEFAULT_CAMERA.x ?? 0.9),
     z: num(rawCam?.z, DEFAULT_CAMERA.z ?? 1.55),
     height: num(rawCam?.height, DEFAULT_CAMERA.height ?? 1.5),
+    floorY: Math.max(0, Math.min(ROOM_DIMENSIONS.height - 1.8, num(rawCam?.floorY, DEFAULT_CAMERA.floorY ?? 0))),
   };
   const studyLayout: StudyLayout = {
     camera,
