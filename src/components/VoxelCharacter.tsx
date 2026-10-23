@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
-import { CHARACTER, characterAnim } from "@/lib/character";
+import { CHARACTER, characterAnim, type CharacterAnim } from "@/lib/character";
 import { VIEW_MODEL, firstPersonViewVisibility } from "@/lib/room3d";
 import type { PlayerPose, ViewMode } from "@/lib/room3d";
 
@@ -26,7 +26,7 @@ function pixelTexture(
   return texture;
 }
 
-/** 自製像素臉：深色頭髮、兩顆眼睛、嘴與腮紅（無任何外部角色 skin）。 */
+/** 原創像素臉：眉眼高光、柔和腮紅與不對稱瀏海，保持清楚的 voxel 輪廓。 */
 function makeFaceTexture(): THREE.CanvasTexture {
   return pixelTexture((ctx) => {
     const { skin, hair, eye, mouth } = CHARACTER.colors;
@@ -34,40 +34,57 @@ function makeFaceTexture(): THREE.CanvasTexture {
     ctx.fillRect(0, 0, 16, 16);
     ctx.fillStyle = hair;
     ctx.fillRect(0, 0, 16, 4);
-    ctx.fillRect(0, 4, 2, 6);
-    ctx.fillRect(14, 4, 2, 6);
-    // 瀏海鋸齒
-    for (let x = 1; x < 15; x += 3) ctx.fillRect(x, 4, 2, 2);
-    ctx.fillStyle = eye;
-    ctx.fillRect(3, 7, 2, 2);
-    ctx.fillRect(11, 7, 2, 2);
+    ctx.fillRect(0, 4, 2, 7);
+    ctx.fillRect(14, 4, 2, 7);
+    // 像素瀏海略不對稱，增加髮型辨識度。
+    ctx.fillRect(2, 4, 3, 2);
+    ctx.fillRect(6, 4, 3, 3);
+    ctx.fillRect(10, 4, 4, 2);
+    // 眉毛與眼白先分層繪製，光線較暗時眼神仍看得清。
+    ctx.fillRect(3, 6, 3, 1);
+    ctx.fillRect(10, 6, 3, 1);
     ctx.fillStyle = "#f4efe6";
+    ctx.fillRect(3, 7, 3, 2);
+    ctx.fillRect(10, 7, 3, 2);
+    ctx.fillStyle = eye;
+    ctx.fillRect(4, 7, 2, 2);
+    ctx.fillRect(10, 7, 2, 2);
+    ctx.fillStyle = "#fff8ea";
     ctx.fillRect(4, 7, 1, 1);
-    ctx.fillRect(12, 7, 1, 1);
-    ctx.fillStyle = "#b27a52";
-    ctx.fillRect(1, 10, 2, 1);
-    ctx.fillRect(13, 10, 2, 1);
+    ctx.fillRect(10, 7, 1, 1);
+    ctx.fillStyle = "#c88d67";
+    ctx.fillRect(7, 9, 2, 2);
+    ctx.fillStyle = "#c88570";
+    ctx.fillRect(2, 10, 2, 1);
+    ctx.fillRect(12, 10, 2, 1);
     ctx.fillStyle = mouth;
     ctx.fillRect(6, 12, 4, 1);
+    ctx.fillRect(7, 13, 2, 1);
   });
 }
 
-/** 連帽外套正面：口袋、拉鍊、抽繩。 */
+/** 連帽外套正面貼圖：明確的拉鍊、抽繩與口袋縫線。 */
 function makeHoodieTexture(): THREE.CanvasTexture {
   return pixelTexture((ctx) => {
-    const { hoodie, hoodieDark } = CHARACTER.colors;
+    const { hoodie, hoodieDark, hoodieLight } = CHARACTER.colors;
     ctx.fillStyle = hoodie;
     ctx.fillRect(0, 0, 16, 16);
     ctx.fillStyle = hoodieDark;
     ctx.fillRect(0, 0, 16, 1);
     ctx.fillRect(7, 1, 2, 15);
-    ctx.fillRect(4, 10, 8, 4);
+    ctx.fillRect(3, 10, 10, 1);
+    ctx.fillRect(3, 10, 1, 4);
+    ctx.fillRect(12, 10, 1, 4);
+    ctx.fillRect(4, 13, 8, 1);
+    ctx.fillStyle = hoodieLight;
+    ctx.fillRect(8, 2, 1, 13);
+    ctx.fillRect(4, 11, 2, 1);
+    ctx.fillRect(10, 11, 2, 1);
     ctx.fillStyle = "#e8e1d3";
-    ctx.fillRect(5, 3, 1, 4);
-    ctx.fillRect(10, 3, 1, 4);
-    ctx.fillStyle = "#cfc5b4";
-    ctx.fillRect(5, 7, 1, 1);
-    ctx.fillRect(10, 7, 1, 1);
+    ctx.fillRect(5, 2, 1, 5);
+    ctx.fillRect(10, 2, 1, 5);
+    ctx.fillStyle = "#f0d39a";
+    ctx.fillRect(7, 7, 2, 2);
   });
 }
 
@@ -84,6 +101,12 @@ export const VoxelCharacter: React.FC<{
   const viewModeRef = useRef<ViewMode>(viewMode);
   const bodyRef = useRef<THREE.Group | null>(null);
   const torsoRef = useRef<THREE.Mesh | null>(null);
+  const gaitPhaseRef = useRef(0);
+  const moveWeightRef = useRef(0);
+  const sprintWeightRef = useRef(0);
+  const wasAirborneRef = useRef(false);
+  const landingRef = useRef(0);
+  const smoothAnimRef = useRef<CharacterAnim | null>(null);
   const partsRef = useRef<{
     leftArm: THREE.Group;
     rightArm: THREE.Group;
@@ -153,6 +176,26 @@ export const VoxelCharacter: React.FC<{
       color: CHARACTER.colors.shoeAccent,
       roughness: 0.75,
     }));
+    const hoodieLightMat = own(new THREE.MeshStandardMaterial({
+      color: CHARACTER.colors.hoodieLight,
+      roughness: 0.88,
+    }));
+    const patchMat = own(new THREE.MeshStandardMaterial({
+      color: CHARACTER.colors.patch,
+      roughness: 0.76,
+    }));
+    const trouserLightMat = own(new THREE.MeshStandardMaterial({
+      color: CHARACTER.colors.trouserLight,
+      roughness: 0.92,
+    }));
+    const soleMat = own(new THREE.MeshStandardMaterial({
+      color: CHARACTER.colors.shoeSole,
+      roughness: 0.94,
+    }));
+    const laceMat = own(new THREE.MeshStandardMaterial({
+      color: CHARACTER.colors.shoeLace,
+      roughness: 0.82,
+    }));
 
     const box = (
       w: number,
@@ -199,6 +242,12 @@ export const VoxelCharacter: React.FC<{
     body.add(hood);
     const hoodInner = box(0.2, 0.06, 0.04, hoodieFrontMat, 0, CHARACTER.headBaseY + 0.02, 0.045);
     body.add(hoodInner);
+    // 胸前的小書籤徽章與雙頁亮線，讓外套有一個可辨識的 SciNotes 主題細節。
+    const badge = box(0.085, 0.09, 0.014, patchMat, -0.135, torsoY + 0.11, -t.depth / 2 - 0.008);
+    const badgeSpine = box(0.008, 0.055, 0.008, hoodieDarkMat, -0.135, torsoY + 0.11, -t.depth / 2 - 0.019);
+    const badgePageL = box(0.022, 0.045, 0.008, laceMat, -0.15, torsoY + 0.11, -t.depth / 2 - 0.019);
+    const badgePageR = box(0.022, 0.045, 0.008, laceMat, -0.12, torsoY + 0.11, -t.depth / 2 - 0.019);
+    body.add(badge, badgeSpine, badgePageL, badgePageR);
 
     // ---- 頭 ----
     const head = new THREE.Group();
@@ -223,8 +272,13 @@ export const VoxelCharacter: React.FC<{
       0
     );
     head.add(headMesh);
-    const fringe = box(headSize + 0.012, 0.09, 0.06, hairMat, 0, headSize - 0.01, -headSize / 2 + 0.03);
-    head.add(fringe);
+    const fringe = box(headSize + 0.012, 0.07, 0.06, hairMat, 0, headSize - 0.01, -headSize / 2 + 0.03);
+    const bangL = box(0.13, 0.11, 0.062, hairMat, -0.105, 0.315, -headSize / 2 + 0.026);
+    const bangC = box(0.12, 0.14, 0.062, hairMat, 0.005, 0.305, -headSize / 2 + 0.026);
+    const bangR = box(0.12, 0.095, 0.062, hairMat, 0.112, 0.325, -headSize / 2 + 0.026);
+    const sideburnL = box(0.048, 0.14, 0.07, hairMat, -headSize / 2 + 0.025, 0.22, -0.175);
+    const sideburnR = box(0.048, 0.14, 0.07, hairMat, headSize / 2 - 0.025, 0.22, -0.175);
+    head.add(fringe, bangL, bangC, bangR, sideburnL, sideburnR);
     const earL = box(0.035, 0.08, 0.08, skinMat, -headSize / 2 - 0.012, headSize * 0.52, 0);
     const earR = box(0.035, 0.08, 0.08, skinMat, headSize / 2 + 0.012, headSize * 0.52, 0);
     head.add(earL, earR);
@@ -242,9 +296,12 @@ export const VoxelCharacter: React.FC<{
         -CHARACTER.arm.height / 2,
         0
       );
+      const cuff = box(CHARACTER.arm.width + 0.012, 0.07, CHARACTER.arm.depth + 0.014, hoodieDarkMat, 0, -CHARACTER.arm.height + 0.09, 0);
+      const cuffLine = box(CHARACTER.arm.width + 0.016, 0.018, CHARACTER.arm.depth + 0.018, hoodieLightMat, 0, -CHARACTER.arm.height + 0.12, 0);
       const hand = box(CHARACTER.arm.width + 0.01, 0.09, CHARACTER.arm.depth + 0.01, skinMat, 0, -CHARACTER.arm.height + 0.01, 0);
+      const thumb = box(0.035, 0.055, 0.07, skinMat, side * (CHARACTER.arm.width / 2 + 0.015), -CHARACTER.arm.height + 0.035, -0.015);
       hand.name = side === 1 ? "player-right-hand" : "player-left-hand";
-      pivot.add(arm, hand);
+      pivot.add(arm, cuff, cuffLine, hand, thumb);
       return pivot;
     };
     const leftArm = makeArm(-1);
@@ -264,9 +321,17 @@ export const VoxelCharacter: React.FC<{
         -CHARACTER.leg.height / 2,
         0
       );
-      const shoe = box(CHARACTER.leg.width + 0.02, 0.09, CHARACTER.leg.depth + 0.06, shoeMat, 0, -CHARACTER.leg.height + 0.03, -0.03);
-      const stripe = box(CHARACTER.leg.width + 0.024, 0.018, CHARACTER.leg.depth + 0.064, accentMat, 0, -CHARACTER.leg.height + 0.075, -0.03);
-      pivot.add(leg, shoe, stripe);
+      const knee = box(CHARACTER.leg.width * 0.72, 0.13, 0.012, trouserLightMat, 0, -CHARACTER.leg.height * 0.48, -CHARACTER.leg.depth / 2 - 0.007);
+      const kneeSeam = box(CHARACTER.leg.width * 0.56, 0.012, 0.014, hoodieDarkMat, 0, -CHARACTER.leg.height * 0.48 - 0.035, -CHARACTER.leg.depth / 2 - 0.009);
+      const shoeY = -CHARACTER.leg.height + 0.03;
+      const shoeZ = -0.03;
+      const shoe = box(CHARACTER.leg.width + 0.02, 0.09, CHARACTER.leg.depth + 0.06, shoeMat, 0, shoeY, shoeZ);
+      const sole = box(CHARACTER.leg.width + 0.026, 0.028, CHARACTER.leg.depth + 0.066, soleMat, 0, shoeY - 0.052, shoeZ);
+      const stripe = box(CHARACTER.leg.width + 0.024, 0.018, CHARACTER.leg.depth + 0.064, accentMat, 0, -CHARACTER.leg.height + 0.075, shoeZ);
+      const laceFront = shoeZ - (CHARACTER.leg.depth + 0.06) / 2 - 0.006;
+      const lace1 = box(CHARACTER.leg.width * 0.5, 0.012, 0.01, laceMat, 0, shoeY + 0.015, laceFront);
+      const lace2 = box(CHARACTER.leg.width * 0.5, 0.012, 0.01, laceMat, 0, shoeY - 0.012, laceFront);
+      pivot.add(leg, knee, kneeSeam, shoe, sole, stripe, lace1, lace2);
       return pivot;
     };
     const leftLeg = makeLeg(-1);
@@ -310,7 +375,10 @@ export const VoxelCharacter: React.FC<{
     fpChest.userData.kind = "player";
     // 領口＋拉鍊：讓低頭看到的胸口有可讀細節（不新增材質）
     const collar = box(VIEW_MODEL.chest.width * 0.58, 0.034, 0.034, hoodieDarkMat, 0, VIEW_MODEL.chest.height / 2 - 0.008, -VIEW_MODEL.chest.depth / 2 + 0.018);
-    for (const part of [collar]) {
+    const fpZipper = box(0.012, VIEW_MODEL.chest.height * 0.5, 0.012, hoodieLightMat, 0, -0.025, -VIEW_MODEL.chest.depth / 2 - 0.01);
+    const fpBadge = box(0.055, 0.06, 0.012, patchMat, -VIEW_MODEL.chest.width * 0.28, 0.02, -VIEW_MODEL.chest.depth / 2 - 0.01);
+    const fpBadgePage = box(0.008, 0.038, 0.008, laceMat, -VIEW_MODEL.chest.width * 0.28, 0.02, -VIEW_MODEL.chest.depth / 2 - 0.019);
+    for (const part of [collar, fpZipper, fpBadge, fpBadgePage]) {
       part.userData.kind = "player";
       part.castShadow = false;
       part.receiveShadow = false;
@@ -320,7 +388,7 @@ export const VoxelCharacter: React.FC<{
     chestGroup.rotation.x = VIEW_MODEL.chest.tilt;
     fpChest.position.set(0, 0, 0);
     collar.position.set(0, VIEW_MODEL.chest.height / 2 - 0.008, -VIEW_MODEL.chest.depth / 2 + 0.018);
-    chestGroup.add(fpChest, collar);
+    chestGroup.add(fpChest, collar, fpZipper, fpBadge, fpBadgePage);
     fpHands.add(chestGroup, fpArms);
     api.camera.add(fpHands);
 
@@ -331,15 +399,55 @@ export const VoxelCharacter: React.FC<{
 
     const cameraWorld = new THREE.Vector3();
     const chestWorld = new THREE.Vector3();
-    const removeFrame = api.addFrameCallback((_dt, tNow) => {
+    const removeFrame = api.addFrameCallback((dt) => {
       const pose = playerRef.current;
       root.visible = !!pose?.visible;
       if (!pose) return;
+      const frameDt = Math.max(0, Math.min(dt, 0.05));
+      const moving = pose.moving && !pose.seated;
+      const moveTarget = moving ? 1 : 0;
+      const moveResponse = 1 - Math.exp(-frameDt * (moveTarget > moveWeightRef.current ? 14 : 9));
+      moveWeightRef.current += (moveTarget - moveWeightRef.current) * moveResponse;
+      const sprintTarget = moving && pose.sprinting ? 1 : 0;
+      sprintWeightRef.current += (sprintTarget - sprintWeightRef.current) * (1 - Math.exp(-frameDt * 10));
+      gaitPhaseRef.current += frameDt * (1.6 + moveWeightRef.current * (7.6 + sprintWeightRef.current * 5.1));
+
+      if (!pose.onGround) {
+        wasAirborneRef.current = true;
+        landingRef.current = 0;
+      } else if (wasAirborneRef.current) {
+        wasAirborneRef.current = false;
+        landingRef.current = 1;
+      } else {
+        landingRef.current *= Math.exp(-frameDt * 8);
+      }
+
+      const targetAnim = characterAnim({
+        phase: gaitPhaseRef.current,
+        moving,
+        sprinting: sprintWeightRef.current > 0.5,
+        moveWeight: moveWeightRef.current,
+        sprintWeight: sprintWeightRef.current,
+        airborne: !pose.onGround,
+        seated: pose.seated,
+        holding: !!pose.holding,
+        pitch: -pose.pitch,
+        landing: landingRef.current,
+      });
+      const previousAnim = smoothAnimRef.current;
+      if (!previousAnim) {
+        smoothAnimRef.current = { ...targetAnim };
+      } else {
+        const transition = 1 - Math.exp(-frameDt * 14);
+        for (const key of Object.keys(targetAnim) as Array<keyof CharacterAnim>) {
+          previousAnim[key] = THREE.MathUtils.lerp(previousAnim[key], targetAnim[key], transition);
+        }
+      }
+      const anim = smoothAnimRef.current!;
       const scale = Math.max(0.72, Math.min(1.35, pose.eyeY / CHARACTER.eyeHeight));
       root.scale.setScalar(scale);
       root.rotation.y = -pose.yaw;
-      const drop = pose.seated ? 0.2 : 0;
-      root.position.set(pose.x, Math.max(0, pose.jumpOffset) - drop, pose.z);
+      root.position.set(pose.x, Math.max(0, pose.jumpOffset) + anim.bodyDrop, pose.z);
 
       // 第三人稱撞牆／家具時相機會被拉到 0.55 m 內，此時淡化角色避免整個畫面被身體擋住。
       let bodyOpacity = 1;
@@ -347,7 +455,6 @@ export const VoxelCharacter: React.FC<{
         api.camera.getWorldPosition(cameraWorld);
         chestWorld.set(pose.x, root.position.y + 1.18 * scale, pose.z);
         const dist = cameraWorld.distanceTo(chestWorld);
-        // 貼牆時相機會被拉近；先在 0.55 m 內淡出，避免整個畫面只剩後腦勺。
         bodyOpacity = 0.12 + 0.88 * Math.max(0, Math.min(1, (dist - 0.55) / 0.75));
         head.visible = viewModeRef.current === "third" && dist > 0.9;
       }
@@ -360,43 +467,31 @@ export const VoxelCharacter: React.FC<{
         if (Math.abs(m.opacity - bodyOpacity) > 0.004) m.opacity = bodyOpacity;
       }
 
-      const phase = tNow * (pose.moving ? 9.2 : 2.1);
-      const anim = characterAnim({
-        phase,
-        moving: pose.moving,
-        airborne: !pose.onGround,
-        seated: pose.seated,
-        holding: !!pose.holding,
-        pitch: -pose.pitch,
-      });
       const parts = partsRef.current;
       if (!parts) return;
       const firstPerson = viewModeRef.current === "first";
       const vm = firstPersonViewVisibility(pose.pitch, !!pose.holding);
       parts.fpHands.visible = firstPerson && (vm.arms || vm.chest);
-      // 手持書時由 HeldBook 的手掌／前臂負責，不再另外伸出 view model 手臂。
       parts.fpArms.visible = firstPerson && vm.arms && !pose.holding;
       parts.fpChest.visible = firstPerson && vm.chest;
-      // 第一人稱看不到自己的上臂／垂放的手臂：那會變成貼在鏡頭兩側的方塊牆。
-      // 手臂的視覺由相機上的 view model（前臂＋手掌）負責，第三人稱仍完整顯示。
       parts.leftArm.visible = !firstPerson;
       parts.rightArm.visible = !firstPerson;
-      // 第一人稱：真實身體（頭／軀幹／手臂）全部隱藏，改由相機上的 view model
-      // （胸口＋前臂＋手掌）呈現「看見自己的身體」，避免相機在模型內部穿模。
-      // 第三人稱：完整模型；兩者共用同一組動畫角度與碰撞。
       if (bodyRef.current) bodyRef.current.visible = !firstPerson;
-      if (torsoRef.current) torsoRef.current.scale.set(1, 1, 1);
-      // 走動時手臂微幅上下（view model 的搖擺，不影響碰撞與射線）。
-      const bob = pose.moving ? Math.sin(phase) * 0.012 : Math.sin(phase * 0.5) * 0.004;
-      parts.fpHands.position.set(0, pose.onGround ? bob : 0.03, 0);
-      parts.fpHands.rotation.z = pose.moving ? Math.sin(phase * 0.5) * 0.02 : 0;
+      if (torsoRef.current) torsoRef.current.scale.set(1, anim.torsoScaleY, 1);
+
+      // 第一人稱 view model 與第三人稱肢體共用平滑步態；跳躍落地有短促的緩衝。
+      const strideSway = Math.sin(gaitPhaseRef.current) * moveWeightRef.current;
+      const bob = anim.torsoBob + landingRef.current * 0.012;
+      parts.fpHands.position.set(strideSway * 0.006, pose.onGround ? bob : 0.025, 0);
+      parts.fpHands.rotation.x = pose.onGround ? Math.cos(gaitPhaseRef.current) * moveWeightRef.current * 0.012 : -0.025;
+      parts.fpHands.rotation.z = strideSway * (0.018 + sprintWeightRef.current * 0.012);
       parts.leftLeg.rotation.x = anim.leftLeg;
       parts.rightLeg.rotation.x = anim.rightLeg;
-      parts.leftArm.rotation.x = anim.leftArm;
-      parts.rightArm.rotation.x = anim.rightArm;
+      parts.leftArm.rotation.set(anim.leftArm, 0, anim.leftArmZ);
+      parts.rightArm.rotation.set(anim.rightArm, 0, anim.rightArmZ);
       body.position.y = anim.torsoBob;
-      body.rotation.x = anim.torsoLean;
-      head.rotation.x = anim.headPitch * 0.65;
+      body.rotation.set(anim.torsoLean, 0, anim.torsoRoll);
+      head.rotation.set(anim.headPitch * 0.65, anim.headYaw, anim.headRoll);
     });
 
     return () => {

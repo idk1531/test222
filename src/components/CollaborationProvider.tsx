@@ -613,6 +613,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
         yaw: pose.yaw,
         pitch: pose.pitch,
         moving: pose.moving,
+        sprinting: pose.sprinting === true,
         onGround: pose.onGround,
         seated: pose.seated,
         visible: pose.visible,

@@ -968,6 +968,7 @@ export const CameraRig: React.FC<{
         yaw: nowState.yaw,
         pitch: nowState.pitch,
         moving: movingRef.current,
+        sprinting: movingRef.current && !interactionRef.current.seated && keys.has("shift"),
         onGround: nowState.onGround,
         seated: interactionRef.current.seated,
         visible: modeRef.current === "room" && !flyingRef.current,
