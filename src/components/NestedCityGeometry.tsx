@@ -415,23 +415,30 @@ function addLibraryWall(
 }
 
 /** Reference floor program: 1F entrance/exhibition, 2F public stacks, 3F quiet study, 4F sky terrace. */
-export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boolean }> = ({ api, whiteModel = false }) => {
+export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boolean; structureOnly?: boolean }> = ({ api, whiteModel = false, structureOnly = false }) => {
   useEffect(() => {
     const group = new THREE.Group();
     group.name = "nested-city-architecture";
     api.scene.add(group);
     const textureDisposers: Array<() => void> = [];
+    const originalEnvironmentIntensity = api.scene.environmentIntensity;
+    // Three.js owns this mutable scene property; clear reflections only for the isolated inspection scene.
+    // eslint-disable-next-line react-hooks/immutability -- intentional imperative Three.js scene mutation
+    if (structureOnly) api.scene.environmentIntensity = 0;
 
     const materialColor = (base: string) => whiteModel ? "#d8d5cf" : base;
-    const timber = new THREE.MeshStandardMaterial({ color: materialColor("#8b6545"), roughness: 0.78, metalness: 0.02, envMapIntensity: 0.08 });
-    const timberLight = new THREE.MeshStandardMaterial({ color: materialColor("#ae8a63"), roughness: 0.72, metalness: 0.02 });
-    const stone = new THREE.MeshStandardMaterial({ color: materialColor("#99958c"), roughness: 0.91, metalness: 0.015, envMapIntensity: 0.05 });
-    const stoneLight = new THREE.MeshStandardMaterial({ color: materialColor("#b9b2a7"), roughness: 0.86, metalness: 0.01 });
-    const core = new THREE.MeshStandardMaterial({ color: materialColor("#665e60"), roughness: 0.84, metalness: 0.025, envMapIntensity: 0.08 });
-    const coreLight = new THREE.MeshStandardMaterial({ color: materialColor("#87787b"), roughness: 0.78, metalness: 0.025 });
-    const deckTimber = new THREE.MeshStandardMaterial({ color: materialColor("#59483a"), roughness: 0.88 });
-    const deckStone = new THREE.MeshStandardMaterial({ color: materialColor("#88847c"), roughness: 0.92 });
-    const deckCore = new THREE.MeshStandardMaterial({ color: materialColor("#514a4d"), roughness: 0.87 });
+    const timberBase = structureOnly ? "#c7894f" : "#8b6545";
+    const stoneBase = structureOnly ? "#8799a8" : "#99958c";
+    const coreBase = structureOnly ? "#9874c7" : "#665e60";
+    const timber = new THREE.MeshStandardMaterial({ color: materialColor(timberBase), roughness: 1, metalness: 0, envMapIntensity: structureOnly ? 0 : 0.08 });
+    const timberLight = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#d19a60" : "#ae8a63"), roughness: 1, metalness: 0 });
+    const stone = new THREE.MeshStandardMaterial({ color: materialColor(stoneBase), roughness: 1, metalness: 0, envMapIntensity: structureOnly ? 0 : 0.05 });
+    const stoneLight = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#a7b3bd" : "#b9b2a7"), roughness: 1, metalness: 0 });
+    const core = new THREE.MeshStandardMaterial({ color: materialColor(coreBase), roughness: 1, metalness: 0, envMapIntensity: structureOnly ? 0 : 0.08 });
+    const coreLight = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#b49bdd" : "#87787b"), roughness: 1, metalness: 0 });
+    const deckTimber = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#dfc4a2" : "#59483a"), roughness: 1, metalness: 0, envMapIntensity: 0 });
+    const deckStone = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#d5dce1" : "#88847c"), roughness: 1, metalness: 0, envMapIntensity: 0 });
+    const deckCore = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#d2c4e3" : "#514a4d"), roughness: 1, metalness: 0, envMapIntensity: 0 });
     const rail = new THREE.MeshStandardMaterial({ color: materialColor("#4a3a30"), roughness: 0.7 });
     const railStone = new THREE.MeshStandardMaterial({ color: materialColor("#69655f"), roughness: 0.82, metalness: 0.12 });
     const metal = new THREE.MeshStandardMaterial({ color: materialColor("#79736a"), roughness: 0.42, metalness: 0.68 });
@@ -472,42 +479,56 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       rail, railStone, metal, glass, entranceGlass, tread, planterMat, soilMat, trunkMat, foliageMat, led,
     ];
 
-    if (!whiteModel) {
+    const disposeSceneGroup = () => {
+      api.scene.remove(group);
+      if (structureOnly) api.scene.environmentIntensity = originalEnvironmentIntensity;
+      textureDisposers.forEach((dispose) => dispose());
+      group.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.geometry && mesh.geometry !== UNIT_BOX_GEOMETRY) mesh.geometry.dispose();
+      });
+      allMaterials.forEach((material) => material.dispose());
+    };
+
+    if (!whiteModel && !structureOnly) {
       const anisotropy = Math.min(8, api.renderer.capabilities.getMaxAnisotropy());
       textureDisposers.push(attachPhotoMap(timber, "walnut", { repeat: [5, 1], tint: "#d0ad86", anisotropy }));
       textureDisposers.push(attachPhotoMap(stone, "microcement", { repeat: [4, 3], tint: "#c5c0b7", anisotropy }));
       textureDisposers.push(attachPhotoMap(core, "microcement", { repeat: [3, 2], tint: "#958d87", anisotropy }));
     }
 
-    // Three primary nested frames plus the platform, bridge and library volumes from the dimension table.
-    for (const frame of [...NESTED_CITY.frames, ...NESTED_CITY.featureFrames]) {
+    // Structure inspection deliberately renders only the three dimensioned primary frames.
+    const visibleFrames = structureOnly ? NESTED_CITY.frames : [...NESTED_CITY.frames, ...NESTED_CITY.featureFrames];
+    for (const frame of visibleFrames) {
       const material = frame.material === "timber" ? timber : frame.material === "stone" ? stone : core;
       addFrame(group, frame, material);
     }
 
-    // Open stone plinths leave a 7 m front lobby opening for the entrance doors.
-    const entranceWidth = 7;
-    const halfOpening = entranceWidth / 2;
-    const sideWidth = ROOM.width / 2 - halfOpening;
-    const sideCenter = (ROOM.width / 2 + halfOpening) / 2;
-    const southZ = ROOM.depth / 2 - 0.25;
-    group.add(makeBox(sideWidth, 1.15, 0.38, stone, -sideCenter, 0.575, southZ));
-    group.add(makeBox(sideWidth, 1.15, 0.38, stone, sideCenter, 0.575, southZ));
-    group.add(makeBox(0.38, 1.15, ROOM.depth - 0.7, stone, ROOM.width / 2 - 0.25, 0.575, 0));
-    group.add(makeBox(0.38, 1.15, ROOM.depth - 0.7, stone, -ROOM.width / 2 + 0.25, 0.575, 0));
+    if (!structureOnly) {
+      // Open stone plinths leave a 7 m front lobby opening for the entrance doors.
+      const entranceWidth = 7;
+      const halfOpening = entranceWidth / 2;
+      const sideWidth = ROOM.width / 2 - halfOpening;
+      const sideCenter = (ROOM.width / 2 + halfOpening) / 2;
+      const southZ = ROOM.depth / 2 - 0.25;
+      group.add(makeBox(sideWidth, 1.15, 0.38, stone, -sideCenter, 0.575, southZ));
+      group.add(makeBox(sideWidth, 1.15, 0.38, stone, sideCenter, 0.575, southZ));
+      group.add(makeBox(0.38, 1.15, ROOM.depth - 0.7, stone, ROOM.width / 2 - 0.25, 0.575, 0));
+      group.add(makeBox(0.38, 1.15, ROOM.depth - 0.7, stone, -ROOM.width / 2 + 0.25, 0.575, 0));
 
-    // Full-height glass entry doors and slim bronze framing at the south lobby.
-    const doorY = 1.52;
-    const doorZ = ROOM.depth / 2 - 0.48;
-    const doorWidth = 3.28;
-    for (const x of [-1.68, 1.68]) {
-      group.add(makeBox(doorWidth, 2.76, 0.075, entranceGlass, x, doorY, doorZ, false));
-      group.add(makeBox(0.045, 2.82, 0.1, metal, x - doorWidth / 2, doorY, doorZ, false));
-      group.add(makeBox(0.045, 2.82, 0.1, metal, x + doorWidth / 2, doorY, doorZ, false));
+      // Full-height glass entry doors and slim bronze framing at the south lobby.
+      const doorY = 1.52;
+      const doorZ = ROOM.depth / 2 - 0.48;
+      const doorWidth = 3.28;
+      for (const x of [-1.68, 1.68]) {
+        group.add(makeBox(doorWidth, 2.76, 0.075, entranceGlass, x, doorY, doorZ, false));
+        group.add(makeBox(0.045, 2.82, 0.1, metal, x - doorWidth / 2, doorY, doorZ, false));
+        group.add(makeBox(0.045, 2.82, 0.1, metal, x + doorWidth / 2, doorY, doorZ, false));
+      }
+      group.add(makeBox(entranceWidth, 0.11, 0.12, timber, 0, 2.96, doorZ, false));
+      group.add(makeBox(0.055, 0.62, 0.06, metal, -0.14, 1.5, doorZ - 0.07, false));
+      group.add(makeBox(0.055, 0.62, 0.06, metal, 0.14, 1.5, doorZ - 0.07, false));
     }
-    group.add(makeBox(entranceWidth, 0.11, 0.12, timber, 0, 2.96, doorZ, false));
-    group.add(makeBox(0.055, 0.62, 0.06, metal, -0.14, 1.5, doorZ - 0.07, false));
-    group.add(makeBox(0.055, 0.62, 0.06, metal, 0.14, 1.5, doorZ - 0.07, false));
 
     for (const column of NESTED_CITY.columns) {
       group.add(makeBox(column.width, column.top - column.bottom, column.depth, stone, column.x, (column.top + column.bottom) / 2, column.z));
@@ -536,6 +557,26 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
     }
     for (const platformRail of nestedCityPlatformRails()) {
       addPlatformGuardrail(group, platformRail, railStone, metal, glass);
+    }
+
+    if (structureOnly) {
+      // A ground-only base makes the structural model readable without adding walls or room décor.
+      group.add(makeBox(ROOM.width, 0.3, ROOM.depth, deckStone, 0, -0.15, 0, false));
+      const hemi = new THREE.HemisphereLight("#f5f7fb", "#85817a", 2.1);
+      const key = new THREE.DirectionalLight("#fff4e6", 2.6);
+      key.position.set(42, 64, 38);
+      key.target.position.set(0, 7, 0);
+      key.castShadow = true;
+      key.shadow.mapSize.set(api.quality.shadowMap, api.quality.shadowMap);
+      key.shadow.camera.left = -34;
+      key.shadow.camera.right = 34;
+      key.shadow.camera.top = 34;
+      key.shadow.camera.bottom = -34;
+      key.shadow.camera.near = 0.1;
+      key.shadow.camera.far = 120;
+      key.shadow.bias = -0.0002;
+      group.add(hemi, key, key.target);
+      return disposeSceneGroup;
     }
 
     // 1F: welcome counter, exhibition plinths, and planted lobby edges.
@@ -591,16 +632,8 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       group.add(point);
     }
 
-    return () => {
-      api.scene.remove(group);
-      textureDisposers.forEach((dispose) => dispose());
-      group.traverse((object) => {
-        const mesh = object as THREE.Mesh;
-        if (mesh.geometry && mesh.geometry !== UNIT_BOX_GEOMETRY) mesh.geometry.dispose();
-      });
-      allMaterials.forEach((material) => material.dispose());
-    };
-  }, [api, whiteModel]);
+    return disposeSceneGroup;
+  }, [api, whiteModel, structureOnly]);
 
   return null;
 };
