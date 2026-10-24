@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { ArrowUp, ArrowDown, BookOpen, Eye, Hand, Library, RotateCcw, Tags, X } from "lucide-react";
+import { ArrowUp, ArrowDown, BookOpen, Box, Eye, Hand, Library, RotateCcw, Tags, X } from "lucide-react";
 import { DeskWorkView } from "./DeskWorkView";
 import { StudyScene, type StudySceneApi } from "./StudyScene";
 import { RoomGeometry } from "./RoomGeometry";
@@ -77,6 +77,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   const [chairInTrigger, setChairInTrigger] = useState(false);
   const [pointerLocked, setPointerLocked] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("first");
+  const [whiteModel, setWhiteModel] = useState(false);
   const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const [isTouch, setIsTouch] = useState(false);
   const playerRef = useRef<PlayerPose>({
@@ -190,6 +191,12 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
       ? "第三人稱 · V／按鈕切回第一人稱"
       : "第一人稱 · V／按鈕切換第三人稱");
   }, [viewMode, showRoomHint]);
+
+  const toggleWhiteModel = useCallback(() => {
+    const next = !whiteModel;
+    setWhiteModel(next);
+    showRoomHint(next ? "白模結構檢視 · 書房資料與互動不變" : "已恢復木／石材質");
+  }, [showRoomHint, whiteModel]);
 
   const handleOpenCard = (card: CardData) => {
     setPreview(null);
@@ -340,7 +347,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               cards={state.cards as CardData[]}
               shelfRows={layout.rows.length}
             />
-            <NestedCityGeometry api={api} />
+            <NestedCityGeometry api={api} whiteModel={whiteModel} />
             <WindowLight api={api} />
             <Book3D api={api} layout={layout} deskBooks={deskBookModels} heldCardId={heldCardId} titleOf={titleOf} />
             <HeldBook api={api} cardId={heldCardId} placement={heldBookPlacement} title={titleOf(heldCardId || "")} viewMode={viewMode} playerRef={playerRef} />
@@ -448,6 +455,16 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               title="重置房間視角"
             >
               <RotateCcw className="h-3.5 w-3.5" /><span className="hidden sm:inline">重置</span>
+            </button>
+            <button
+              type="button"
+              onClick={toggleWhiteModel}
+              className={`touch-target flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold ${whiteModel ? "bg-stone-200 text-stone-900" : "text-stone-700 hover:bg-stone-200/70"}`}
+              aria-label={whiteModel ? "關閉白模檢視" : "檢視白模結構"}
+              aria-pressed={whiteModel}
+              title={whiteModel ? "恢復木／石材質" : "切換結構白模（書本與房間資料不變）"}
+            >
+              <Box className="h-3.5 w-3.5" /><span className="hidden sm:inline">{whiteModel ? "材質" : "白模"}</span>
             </button>
             <button
               type="button"

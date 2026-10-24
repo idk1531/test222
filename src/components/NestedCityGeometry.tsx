@@ -179,26 +179,27 @@ function addBridgeRail(
 }
 
 /** 三重框架、挑空樓板與斜坡幾何；既有 RoomGeometry 繼續供應書桌／書本資料。 */
-export const NestedCityGeometry: React.FC<{ api: StudySceneApi }> = ({ api }) => {
+export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boolean }> = ({ api, whiteModel = false }) => {
   useEffect(() => {
     const group = new THREE.Group();
     group.name = "nested-city-architecture";
     api.scene.add(group);
 
-    const timber = new THREE.MeshStandardMaterial({ color: "#8b6545", roughness: 0.78, metalness: 0.02 });
-    const timberLight = new THREE.MeshStandardMaterial({ color: "#ae8a63", roughness: 0.72, metalness: 0.02 });
-    const stone = new THREE.MeshStandardMaterial({ color: "#99958c", roughness: 0.91, metalness: 0.015 });
-    const stoneLight = new THREE.MeshStandardMaterial({ color: "#b9b2a7", roughness: 0.86, metalness: 0.01 });
-    const core = new THREE.MeshStandardMaterial({ color: "#665e60", roughness: 0.84, metalness: 0.025 });
-    const coreLight = new THREE.MeshStandardMaterial({ color: "#87787b", roughness: 0.78, metalness: 0.025 });
-    const deckTimber = new THREE.MeshStandardMaterial({ color: "#59483a", roughness: 0.88 });
-    const deckStone = new THREE.MeshStandardMaterial({ color: "#88847c", roughness: 0.92 });
-    const deckCore = new THREE.MeshStandardMaterial({ color: "#514a4d", roughness: 0.87 });
-    const underside = new THREE.MeshStandardMaterial({ color: "#4d4743", roughness: 0.92 });
-    const rail = new THREE.MeshStandardMaterial({ color: "#4a3a30", roughness: 0.7 });
-    const railStone = new THREE.MeshStandardMaterial({ color: "#69655f", roughness: 0.82 });
-    const tread = new THREE.MeshStandardMaterial({ color: "#c2a17b", roughness: 0.85 });
-    const led = new THREE.MeshBasicMaterial({ color: "#ffc887", toneMapped: false });
+    const materialColor = (base: string) => whiteModel ? "#d8d5cf" : base;
+    const timber = new THREE.MeshStandardMaterial({ color: materialColor("#8b6545"), roughness: 0.78, metalness: 0.02 });
+    const timberLight = new THREE.MeshStandardMaterial({ color: materialColor("#ae8a63"), roughness: 0.72, metalness: 0.02 });
+    const stone = new THREE.MeshStandardMaterial({ color: materialColor("#99958c"), roughness: 0.91, metalness: 0.015 });
+    const stoneLight = new THREE.MeshStandardMaterial({ color: materialColor("#b9b2a7"), roughness: 0.86, metalness: 0.01 });
+    const core = new THREE.MeshStandardMaterial({ color: materialColor("#665e60"), roughness: 0.84, metalness: 0.025 });
+    const coreLight = new THREE.MeshStandardMaterial({ color: materialColor("#87787b"), roughness: 0.78, metalness: 0.025 });
+    const deckTimber = new THREE.MeshStandardMaterial({ color: materialColor("#59483a"), roughness: 0.88 });
+    const deckStone = new THREE.MeshStandardMaterial({ color: materialColor("#88847c"), roughness: 0.92 });
+    const deckCore = new THREE.MeshStandardMaterial({ color: materialColor("#514a4d"), roughness: 0.87 });
+    const underside = new THREE.MeshStandardMaterial({ color: materialColor("#4d4743"), roughness: 0.92 });
+    const rail = new THREE.MeshStandardMaterial({ color: materialColor("#4a3a30"), roughness: 0.7 });
+    const railStone = new THREE.MeshStandardMaterial({ color: materialColor("#69655f"), roughness: 0.82 });
+    const tread = new THREE.MeshStandardMaterial({ color: materialColor("#c2a17b"), roughness: 0.85 });
+    const led = new THREE.MeshBasicMaterial({ color: whiteModel ? "#f4f2ed" : "#ffc887", toneMapped: false });
     const materials: Record<CityMaterial, THREE.Material> = { timber, stone, core };
     const platformMaterials: Record<CityMaterial, THREE.Material> = { timber: deckTimber, stone: deckStone, core: deckCore };
     const allMaterials: THREE.Material[] = [
@@ -284,7 +285,7 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi }> = ({ api }) =>
     for (const [x, y, z] of [
       [-8.1, 5.2, 0], [8.6, 9.2, -1], [2.8, 13.1, -1.7],
     ] as const) {
-      const point = new THREE.PointLight("#ffd5a0", 0.34, 7.5, 2);
+      const point = new THREE.PointLight(whiteModel ? "#ffffff" : "#ffd5a0", whiteModel ? 0.22 : 0.34, 7.5, 2);
       point.position.set(x, y, z);
       point.castShadow = false;
       group.add(point);
@@ -298,7 +299,7 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi }> = ({ api }) =>
       });
       allMaterials.forEach((material) => material.dispose());
     };
-  }, [api]);
+  }, [api, whiteModel]);
 
   return null;
 };
