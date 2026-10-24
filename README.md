@@ -45,7 +45,7 @@ npx serve out                                  # 本機驗證
 
 配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 由配對碼雜湊導出；應用訊息內容（含類型、ID、peer 資訊及協作資料）先加密再發送。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。加入房間後每 3 秒送出加密 hello，10 秒未收到對方活動則標記離線；收到 relay 應用訊息亦會更新 peer 活動與名單。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
 
-固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。transport `send()` 等 broker 的 QoS 1 PUBACK；這不保證接收端應用已處理訊息，書樓同步仍按既有同步協定確認與合併。relay 不作資料庫，暫存與解密都在接收端記憶體。
+固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。transport `send()` 預設等候所有可用 broker 的 QoS 1 PUBACK；高頻角色姿態則使用 `acknowledgementPolicy: "first"`，仍以 QoS 1 並行發布到所有可用 broker，但只等第一個 PUBACK 就繼續送最新姿態，避免慢 broker 阻塞姿態佇列。PUBACK 不保證接收端應用已處理訊息，書樓同步仍按既有同步協定確認與合併。relay 不作資料庫，暫存與解密都在接收端記憶體。
 
 ### 瀏覽器點對點連線（WebRTC）
 

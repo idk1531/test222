@@ -1,5 +1,6 @@
 import mqtt, { type MqttClient } from "mqtt";
 import { TRANSPORT_CONFIG, type BrokerId } from "./config";
+import { waitForPublishAcknowledgements } from "./publishAcknowledgements";
 import { isRoomWireMessage, type PayloadEncoding, type RoomWireMessage } from "./protocol";
 import {
   createRoomCode,
@@ -247,16 +248,28 @@ export class SecureRoomTransport {
       throw new Error("加密後的訊息超過中繼大小上限；請縮小內容或使用之後啟用的直連路由。");
     }
 
-    const results = await Promise.all(activeBrokers.map(async ({ id: brokerId, client }) => {
+    let acknowledgedByBrokers: BrokerId[];
+    if (options.acknowledgementPolicy === "first") {
+      const publishAttempts = activeBrokers.map(({ id: brokerId, client }) =>
+        this.publish(client, packet).then(() => brokerId)
+      );
       try {
-        await this.publish(client, packet);
-        return { brokerId, ok: true as const };
+        acknowledgedByBrokers = await waitForPublishAcknowledgements(publishAttempts, "first");
       } catch {
-        return { brokerId, ok: false as const };
+        throw new Error("中繼 broker 未確認訊息；訊息未送出。");
       }
-    }));
-    const acknowledgedByBrokers = results.filter((result) => result.ok).map((result) => result.brokerId);
-    if (!acknowledgedByBrokers.length) throw new Error("中繼 broker 未確認訊息；訊息未送出。");
+    } else {
+      const results = await Promise.all(activeBrokers.map(async ({ id: brokerId, client }) => {
+        try {
+          await this.publish(client, packet);
+          return { brokerId, ok: true as const };
+        } catch {
+          return { brokerId, ok: false as const };
+        }
+      }));
+      acknowledgedByBrokers = results.filter((result) => result.ok).map((result) => result.brokerId);
+      if (!acknowledgedByBrokers.length) throw new Error("中繼 broker 未確認訊息；訊息未送出。");
+    }
     return {
       id,
       route: "relay",

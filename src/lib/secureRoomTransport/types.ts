@@ -54,6 +54,8 @@ export interface SendOptions {
   to?: string;
   route?: TransportRoute;
   reliable?: boolean;
+  /** `first` still publishes QoS 1 to every available broker, but returns after the first PUBACK. */
+  acknowledgementPolicy?: "all" | "first";
 }
 
 export interface SendReceipt {

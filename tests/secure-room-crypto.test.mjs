@@ -25,6 +25,10 @@ const crypto = await compileModule(
   "crypto.mjs",
   [["./config", "./config.mjs"]]
 );
+const publishAcknowledgements = await compileModule(
+  "../src/lib/secureRoomTransport/publishAcknowledgements.ts",
+  "publishAcknowledgements.mjs"
+);
 
 after(async () => {
   await rm(temporaryDirectory, { recursive: true, force: true });
@@ -84,4 +88,34 @@ test("repeats peer discovery hello every three seconds and expires peers after t
   assert.equal(transportConfig.TRANSPORT_CONFIG.helloIntervalMs, 3_000);
   assert.equal(transportConfig.TRANSPORT_CONFIG.peerExpiryMs, 10_000);
   assert.equal(transportConfig.TRANSPORT_CONFIG.peerSweepIntervalMs, 1_000);
+});
+
+test("latency-sensitive relay sends can proceed after the first broker PUBACK", async () => {
+  let resolveSlowBroker;
+  const slowBroker = new Promise((resolve) => { resolveSlowBroker = resolve; });
+  const firstAck = await publishAcknowledgements.waitForPublishAcknowledgements([
+    Promise.resolve("emqx"),
+    slowBroker,
+  ], "first");
+  assert.deepEqual(firstAck, ["emqx"]);
+  resolveSlowBroker("hivemq");
+});
+
+test("default relay sends still wait for every broker PUBACK", async () => {
+  let resolveFirstBroker;
+  let resolveSecondBroker;
+  let settled = false;
+  const allAcks = publishAcknowledgements.waitForPublishAcknowledgements([
+    new Promise((resolve) => { resolveFirstBroker = resolve; }),
+    new Promise((resolve) => { resolveSecondBroker = resolve; }),
+  ]).then((result) => {
+    settled = true;
+    return result;
+  });
+
+  resolveFirstBroker("emqx");
+  await Promise.resolve();
+  assert.equal(settled, false);
+  resolveSecondBroker("hivemq");
+  assert.deepEqual(await allAcks, ["emqx", "hivemq"]);
 });
