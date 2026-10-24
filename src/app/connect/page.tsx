@@ -64,6 +64,7 @@ function StateMetric({ label, value }: { label: string; value: string }) {
 export default function ConnectionPage() {
   const {
     manager,
+    snapshot: collaborationSnapshot,
     webrtcSnapshot: snapshot,
     relayRoomActive,
     displayName,
@@ -101,6 +102,10 @@ export default function ConnectionPage() {
     if (snapshot.phase === "idle") return "border-slate-200 bg-slate-50 text-slate-800";
     return "border-sky-300 bg-sky-50 text-sky-950";
   }, [snapshot.phase]);
+  const relayOnline = collaborationSnapshot.phase === "open";
+  const displayedStatusColor = relayRoomActive
+    ? relayOnline ? "border-emerald-300 bg-emerald-50 text-emerald-950" : "border-amber-300 bg-amber-50 text-amber-950"
+    : statusColor;
 
   const createInvite = async () => {
     setErrorMessage("");
@@ -214,56 +219,81 @@ export default function ConnectionPage() {
               <ArrowLeft className="h-4 w-4" />回到 SciNotes
             </Link>
             <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
-              <Link2 className="h-6 w-6 text-blue-700" />點對點連線
+              <Link2 className={`h-6 w-6 ${relayRoomActive ? "text-indigo-700" : "text-blue-700"}`} />{relayRoomActive ? "書樓協作連線" : "點對點連線"}
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-slate-600">
-              使用瀏覽器原生 WebRTC 建立 PeerConnection 與 DataChannel；Offer／Answer 由你手動複製貼上，不經本網站伺服器。
+              {relayRoomActive
+                ? relayOnline
+                  ? "書樓協作目前使用加密 WSS relay；手動 WebRTC 點對點診斷會在房間有效期間隱藏。"
+                  : "加密 relay 房間仍有效，但目前沒有可用 broker；房間離開或失效後才顯示手動 P2P 介面。"
+                : "使用瀏覽器原生 WebRTC 建立 PeerConnection 與 DataChannel；Offer／Answer 由你手動複製貼上，不經本網站伺服器。"}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={interruptConnection}
-            disabled={!pairingInProgress && !busy}
-            className="touch-target inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <Unplug className="h-4 w-4" />中斷連線
-          </button>
+          {!relayRoomActive && (
+            <button
+              type="button"
+              onClick={interruptConnection}
+              disabled={!pairingInProgress && !busy}
+              className="touch-target inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Unplug className="h-4 w-4" />中斷連線
+            </button>
+          )}
         </header>
 
-        <section className={`mb-4 rounded-xl border p-4 shadow-sm ${statusColor}`} role="status" aria-live="polite" aria-atomic="true">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {snapshot.phase === "open" ? <Check className="h-5 w-5" /> : busy ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Link2 className="h-5 w-5" />}
-              <strong>{phaseText}</strong>
-              {snapshot.role && <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-medium">{snapshot.role === "initiator" ? "發起端 A" : "加入端 B"}</span>}
-            </div>
-            <span className="text-xs">未開啟 DataChannel 前不會顯示成功</span>
-          </div>
-          <p className="mt-2 text-sm">{statusNote}</p>
-          {snapshot.phase === "open" && (
-            <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-sm">
-              對方：<strong>{remoteParticipant?.name ?? "等待名稱資料"}</strong>
-              {remoteParticipant && <> · 權限：{remoteParticipant.role === "reader" ? "唯讀" : remoteParticipant.role === "pending" ? "等待指定" : "可編輯"}</>}
-              {localRole && <> · 你的權限：{localRole === "owner" ? "房主" : localRole === "reader" ? "唯讀" : localRole === "pending" ? "等待指定" : "可編輯"}</>}
-            </p>
-          )}
-          {snapshot.phase === "open" && (
-            <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${contentSyncStatus === "error" ? "bg-rose-100 text-rose-900" : "bg-white/70"}`}>
-              書本／筆記卡同步：<strong>{contentSyncStatus === "synced" ? "已完成" : contentSyncStatus === "error" ? "失敗；資料仍保存在本機" : "同步中"}</strong>
-              {contentSyncStatus === "synced" && " · 新增、編輯、移動、排序與刪除會直接透過 P2P 同步。"}
-            </p>
-          )}
-          {waitingForIceGathering && (
-            <p className="mt-1 text-xs text-slate-600">完整訊號需等候 ICE 候選收集完成；超過 {iceGatheringTimeoutSeconds} 秒會逾時，可檢查網路或 STUN 設定後重試。</p>
-          )}
-          {waitingForConnection && (
-            <p className="mt-1 text-xs text-slate-600">
-              {snapshot.connectionTimeoutActive
-                ? `連線等待計時已啟動，最長 ${connectionTimeoutSeconds} 秒；逾時時請先比對診斷狀態。`
-                : isJoiner
-                  ? `B 端先把 Answer 傳回 A，再按下方確認按鈕；這時才開始 ${connectionTimeoutSeconds} 秒等待計時。`
-                  : `A 端成功套用 Answer 後才開始 ${connectionTimeoutSeconds} 秒等待計時。`}
-            </p>
+        <section className={`mb-4 rounded-xl border p-4 shadow-sm ${displayedStatusColor}`} role="status" aria-live="polite" aria-atomic="true">
+          {relayRoomActive ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {relayOnline ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
+                  <strong>{relayOnline ? "加密 relay 房間有效" : "加密 relay 暫時無 broker 可用"}</strong>
+                </div>
+                <span className="text-xs">有效房間期間隱藏未使用的手動 P2P 狀態</span>
+              </div>
+              <p className="mt-2 text-sm">
+                {relayOnline
+                  ? "書樓協作目前透過 WSS relay 傳輸；這不代表 WebRTC direct 已連線。"
+                  : "房間仍保留且尚未失效，但目前沒有可用 broker。請在下方加密房間面板等待 broker 恢復，或離開房間；離開／房間失效後才會顯示手動 P2P 介面。"}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {snapshot.phase === "open" ? <Check className="h-5 w-5" /> : busy ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Link2 className="h-5 w-5" />}
+                  <strong>{phaseText}</strong>
+                  {snapshot.role && <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-medium">{snapshot.role === "initiator" ? "發起端 A" : "加入端 B"}</span>}
+                </div>
+                <span className="text-xs">未開啟 DataChannel 前不會顯示成功</span>
+              </div>
+              <p className="mt-2 text-sm">{statusNote}</p>
+              {snapshot.phase === "open" && (
+                <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-sm">
+                  對方：<strong>{remoteParticipant?.name ?? "等待名稱資料"}</strong>
+                  {remoteParticipant && <> · 權限：{remoteParticipant.role === "reader" ? "唯讀" : remoteParticipant.role === "pending" ? "等待指定" : "可編輯"}</>}
+                  {localRole && <> · 你的權限：{localRole === "owner" ? "房主" : localRole === "reader" ? "唯讀" : localRole === "pending" ? "等待指定" : "可編輯"}</>}
+                </p>
+              )}
+              {snapshot.phase === "open" && (
+                <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${contentSyncStatus === "error" ? "bg-rose-100 text-rose-900" : "bg-white/70"}`}>
+                  書本／筆記卡同步：<strong>{contentSyncStatus === "synced" ? "已完成" : contentSyncStatus === "error" ? "失敗；資料仍保存在本機" : "同步中"}</strong>
+                  {contentSyncStatus === "synced" && " · 新增、編輯、移動、排序與刪除會直接透過 P2P 同步。"}
+                </p>
+              )}
+              {waitingForIceGathering && (
+                <p className="mt-1 text-xs text-slate-600">完整訊號需等候 ICE 候選收集完成；超過 {iceGatheringTimeoutSeconds} 秒會逾時，可檢查網路或 STUN 設定後重試。</p>
+              )}
+              {waitingForConnection && (
+                <p className="mt-1 text-xs text-slate-600">
+                  {snapshot.connectionTimeoutActive
+                    ? `連線等待計時已啟動，最長 ${connectionTimeoutSeconds} 秒；逾時時請先比對診斷狀態。`
+                    : isJoiner
+                      ? `B 端先把 Answer 傳回 A，再按下方確認按鈕；這時才開始 ${connectionTimeoutSeconds} 秒等待計時。`
+                      : `A 端成功套用 Answer 後才開始 ${connectionTimeoutSeconds} 秒等待計時。`}
+                </p>
+              )}
+            </>
           )}
         </section>
 
@@ -296,13 +326,15 @@ export default function ConnectionPage() {
             <p className="mt-1 text-xs text-slate-500">由發起端 A 決定加入端 B 的角色。</p>
           </div>
           <p className="rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-950 sm:col-span-2">
-            邀請是私下交換的 Offer／Answer bearer 憑證：持有並完成配對者可加入，轉傳後任何持有者都可能使用；目前沒有帳號、伺服器端撤銷或到期驗證。連線後，房主的書本／筆記卡會傳給加入者；可編輯者的本機書本／筆記卡也會按 ID 合併並傳給房主。只與可信任對象配對，勿放入不想分享的筆記。唯讀限制是客戶端約束，不能防止修改客戶端、複製內容或截圖。
+            {relayRoomActive
+              ? "房間配對碼是加入憑證，任何持有者都可能加入；只傳給可信任對象。顯示名稱由使用者自行填寫，並非已驗證身分。"
+              : "邀請是私下交換的 Offer／Answer bearer 憑證：持有並完成配對者可加入，轉傳後任何持有者都可能使用；目前沒有帳號、伺服器端撤銷或到期驗證。連線後，房主的書本／筆記卡會傳給加入者；可編輯者的本機書本／筆記卡也會按 ID 合併並傳給房主。只與可信任對象配對，勿放入不想分享的筆記。唯讀限制是客戶端約束，不能防止修改客戶端、複製內容或截圖。"}
           </p>
         </section>
 
-        <EncryptedRoomPanel nickname={displayName} manualSessionActive={pairingInProgress} />
+        <EncryptedRoomPanel nickname={displayName} manualSessionActive={!relayRoomActive && pairingInProgress} />
 
-        <section className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(260px,0.6fr)] sm:items-end">
+        <section hidden={relayRoomActive} className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(260px,0.6fr)] sm:items-end">
           <div>
             <label htmlFor="stun-server" className="mb-1 block text-sm font-semibold">STUN 伺服器（可修改）</label>
             <input
@@ -322,10 +354,10 @@ export default function ConnectionPage() {
           </p>
         </section>
 
-        {errorMessage && <p className="mb-4 rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900" role="alert">{errorMessage}</p>}
-        {notice && !errorMessage && <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status">{notice}</p>}
+        {errorMessage && <p hidden={relayRoomActive} className="mb-4 rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900" role="alert">{errorMessage}</p>}
+        {notice && !errorMessage && <p hidden={relayRoomActive} className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status">{notice}</p>}
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div hidden={relayRoomActive} className="grid gap-4 lg:grid-cols-2">
           <section className={`rounded-xl border bg-white p-4 shadow-sm sm:p-5 ${isJoiner ? "border-slate-200 opacity-75" : "border-slate-200"}`} aria-labelledby="initiator-heading">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
@@ -450,7 +482,7 @@ export default function ConnectionPage() {
           </section>
         </div>
 
-        <section className="mt-4 grid gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)] sm:p-5" aria-labelledby="details-heading">
+        <section hidden={relayRoomActive} className="mt-4 grid gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)] sm:p-5" aria-labelledby="details-heading">
           <div>
             <h2 id="details-heading" className="mb-1 text-sm font-bold">連線狀態與診斷</h2>
             <p className="mb-2 text-[11px] text-slate-500">中斷或失敗時保留清理前最後狀態；只顯示候選類型數量，不顯示候選位址。</p>
@@ -478,7 +510,7 @@ export default function ConnectionPage() {
           </div>
         </section>
 
-        <p className="mt-4 text-center text-[11px] text-slate-500">不建立自訂後端、不使用資料庫、不將 SDP 寫入 localStorage；跨頁切換會保留協作傳輸。手動 WebRTC 可在此中斷，relay 可在加密房間面板離開或到期時結束。</p>
+        <p hidden={relayRoomActive} className="mt-4 text-center text-[11px] text-slate-500">不建立自訂後端、不使用資料庫、不將 SDP 寫入 localStorage；跨頁切換會保留協作傳輸。手動 WebRTC 可在此中斷，relay 可在加密房間面板離開或到期時結束。</p>
       </div>
     </main>
   );

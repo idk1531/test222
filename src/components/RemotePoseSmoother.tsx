@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useState, type MutableRefObject } from "react";
 import type { PlayerPose } from "@/lib/room3d";
-import { smoothRemotePose } from "@/lib/remotePoseSmoothing";
+import { RemotePoseInterpolator } from "@/lib/remotePoseSmoothing";
 import type { StudySceneApi } from "./StudyScene";
 
 export function RemotePoseSmoother({
@@ -14,28 +14,27 @@ export function RemotePoseSmoother({
   sourcePoseRef: MutableRefObject<PlayerPose>;
   renderedPoseRef: MutableRefObject<PlayerPose>;
 }) {
-  const initializedRef = useRef(false);
+  const [interpolator] = useState(() => new RemotePoseInterpolator());
 
   useEffect(() => {
+    interpolator.clear();
     renderedPoseRef.current = { ...sourcePoseRef.current };
-    const removeFrame = api.addFrameCallback((deltaSeconds) => {
+
+    const removeFrame = api.addFrameCallback(() => {
       const target = sourcePoseRef.current;
       if (!target.visible) {
+        interpolator.clear();
         renderedPoseRef.current = { ...target };
-        initializedRef.current = false;
         return;
       }
 
-      const current = renderedPoseRef.current;
-      if (!initializedRef.current || !current.visible) {
-        renderedPoseRef.current = { ...target };
-        initializedRef.current = true;
-        return;
-      }
-      renderedPoseRef.current = smoothRemotePose(current, target, deltaSeconds);
+      const now = performance.now();
+      interpolator.push(target, now);
+      const sample = interpolator.sample(now);
+      if (sample) renderedPoseRef.current = sample;
     });
     return removeFrame;
-  }, [api, renderedPoseRef, sourcePoseRef]);
+  }, [api, interpolator, renderedPoseRef, sourcePoseRef]);
 
   return null;
 }

@@ -362,7 +362,7 @@ export default function EncryptedRoomPanel({ nickname, manualSessionActive = fal
             <ShieldCheck className="h-5 w-5 text-indigo-700" />加密房間
           </h2>
           <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
-            配對碼導出房間金鑰；書樓協作訊息以 AES-GCM 加密後，透過可用的 WSS broker 傳送。這代表 relay 協作，不代表 WebRTC direct 已連線；手動 WebRTC 診斷會顯示在下方獨立面板。
+            配對碼導出房間金鑰；書樓協作訊息以 AES-GCM 加密後，透過可用的 WSS broker 傳送。relay 協作不代表 WebRTC direct 已連線；有效房間期間會隱藏未使用的 P2P 診斷，離開或房間失效後才顯示。
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700" role="status" aria-live="polite">
