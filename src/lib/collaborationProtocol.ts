@@ -30,6 +30,8 @@ export interface PoseMessage {
   v: 1;
   type: "pose";
   participantId: string;
+  /** Monotonic per sender session; lets receivers discard poses that arrive out of order. */
+  sequence?: number;
   pose: PlayerPose;
 }
 
@@ -76,6 +78,11 @@ export function getRemotePoseForParticipant(
 ): PlayerPose | null {
   if (message.type !== "pose" || !expectedParticipantId || message.participantId !== expectedParticipantId) return null;
   return message.pose;
+}
+
+/** Older v1 peers omit sequence; otherwise accept only a strictly newer pose. */
+export function isPoseSequenceNewer(next: number, previous: number | null): boolean {
+  return Number.isSafeInteger(next) && next >= 0 && (previous === null || next > previous);
 }
 
 export const MAX_COLLABORATION_MESSAGE_LENGTH = 8_192;
@@ -164,8 +171,15 @@ export function parseCollaborationMessage(raw: unknown): CollaborationMessage | 
 
   if (value.type === "pose") {
     const pose = normalizeRemotePose(value.pose);
-    if (!pose) return null;
-    return { v: 1, type: "pose", participantId: value.participantId, pose };
+    if (!pose || (value.sequence !== undefined
+      && (!Number.isSafeInteger(value.sequence) || (value.sequence as number) < 0))) return null;
+    return {
+      v: 1,
+      type: "pose",
+      participantId: value.participantId,
+      ...(typeof value.sequence === "number" ? { sequence: value.sequence } : {}),
+      pose,
+    };
   }
 
   return null;

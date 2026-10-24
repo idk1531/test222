@@ -10,6 +10,8 @@ const temporaryDirectory = await mkdtemp(join(tmpdir(), "scinotes-collab-protoco
 const modulePath = join(temporaryDirectory, "collaborationProtocol.mjs");
 const source = await readFile(new URL("../src/lib/collaborationProtocol.ts", import.meta.url), "utf8");
 const dimensionsSource = await readFile(new URL("../src/lib/roomDimensions.ts", import.meta.url), "utf8");
+const queueSource = await readFile(new URL("../src/lib/latestValueSendQueue.ts", import.meta.url), "utf8");
+const smoothingSource = await readFile(new URL("../src/lib/remotePoseSmoothing.ts", import.meta.url), "utf8");
 const compilerOptions = { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 };
 const dimensionsModulePath = join(temporaryDirectory, "roomDimensions.mjs");
 const dimensionsCompiled = ts.transpileModule(dimensionsSource, { compilerOptions }).outputText;
@@ -17,7 +19,13 @@ await writeFile(dimensionsModulePath, dimensionsCompiled, "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions }).outputText
   .replaceAll('"./roomDimensions"', '"./roomDimensions.mjs"');
 await writeFile(modulePath, compiled, "utf8");
+const queueModulePath = join(temporaryDirectory, "latestValueSendQueue.mjs");
+const smoothingModulePath = join(temporaryDirectory, "remotePoseSmoothing.mjs");
+await writeFile(queueModulePath, ts.transpileModule(queueSource, { compilerOptions }).outputText, "utf8");
+await writeFile(smoothingModulePath, ts.transpileModule(smoothingSource, { compilerOptions }).outputText, "utf8");
 const protocol = await import(pathToFileURL(modulePath).href);
+const { LatestValueSendQueue } = await import(pathToFileURL(queueModulePath).href);
+const { smoothRemotePose } = await import(pathToFileURL(smoothingModulePath).href);
 const { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } = await import(pathToFileURL(dimensionsModulePath).href);
 
 after(async () => {
@@ -131,9 +139,11 @@ test("pose messages validate finite coordinates and clamp untrusted positions", 
     v: 1,
     type: "pose",
     participantId: "peer-b",
+    sequence: 12,
     pose: { ...validPose, x: 500, z: -500, jumpOffset: 9 },
   }));
   assert.equal(parsed.type, "pose");
+  assert.equal(parsed.sequence, 12);
   assert.equal(parsed.pose.x, ROOM_DIMENSIONS.width / 2 - ROOM_EDGE_MARGIN);
   assert.equal(parsed.pose.z, -ROOM_DIMENSIONS.depth / 2 + ROOM_EDGE_MARGIN);
   assert.equal(parsed.pose.floorY, 8);
@@ -164,6 +174,69 @@ test("pose messages validate finite coordinates and clamp untrusted positions", 
     participantId: "peer-b",
     pose: { ...validPose, yaw: null },
   })), null);
+  assert.equal(protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "pose",
+    participantId: "peer-b",
+    sequence: -1,
+    pose: validPose,
+  })), null);
+});
+
+test("pose sequence guards reject stale/out-of-order frames while accepting legacy peers", () => {
+  assert.equal(protocol.isPoseSequenceNewer(1, null), true);
+  assert.equal(protocol.isPoseSequenceNewer(4, 3), true);
+  assert.equal(protocol.isPoseSequenceNewer(3, 3), false);
+  assert.equal(protocol.isPoseSequenceNewer(2, 3), false);
+  assert.equal(protocol.isPoseSequenceNewer(-1, null), false);
+
+  const legacy = protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "pose",
+    participantId: "peer-old",
+    pose: validPose,
+  }));
+  assert.equal(legacy.sequence, undefined);
+});
+
+test("bounded latest-value queue sends concurrently and replaces stale backlogged poses", async () => {
+  const started = [];
+  const resolvers = new Map();
+  const queue = new LatestValueSendQueue((value) => new Promise((resolve) => {
+    started.push(value);
+    resolvers.set(value, resolve);
+  }), 2);
+  const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  queue.enqueue("pose-1");
+  queue.enqueue("pose-2");
+  await flushMicrotasks();
+  assert.deepEqual(started, ["pose-1", "pose-2"], "two QoS1 sends may be in flight instead of serially waiting for PUBACK");
+
+  queue.enqueue("stale-pose");
+  queue.enqueue("latest-pose");
+  assert.deepEqual(started, ["pose-1", "pose-2"]);
+  resolvers.get("pose-1")();
+  await flushMicrotasks();
+  assert.deepEqual(started, ["pose-1", "pose-2", "latest-pose"], "backpressure preserves only the newest queued pose");
+
+  resolvers.get("pose-2")();
+  resolvers.get("latest-pose")();
+  await flushMicrotasks();
+});
+
+test("remote pose smoothing moves positions and jumps gradually and wraps yaw over the short arc", () => {
+  const current = { ...validPose, x: 0, z: 0, yaw: Math.PI - 0.05, jumpOffset: 0, visible: true };
+  const target = { ...validPose, x: 3, z: 2, yaw: -Math.PI + 0.05, jumpOffset: 1, visible: true };
+  const smoothed = smoothRemotePose(current, target, 0.05);
+  assert.ok(smoothed.x > current.x && smoothed.x < target.x);
+  assert.ok(smoothed.z > current.z && smoothed.z < target.z);
+  assert.ok(smoothed.jumpOffset > 0 && smoothed.jumpOffset < 1);
+  assert.ok(Math.abs(smoothed.yaw - Math.PI) < 0.06, "yaw must not rotate almost a full circle around the wrap boundary");
+  assert.equal(smoothed.moving, target.moving, "animation state follows the newest received pose");
+
+  const hidden = { ...target, visible: false };
+  assert.deepEqual(smoothRemotePose(current, hidden, 0.016), hidden, "visibility changes take effect immediately");
 });
 
 test("malformed, oversized, and unknown messages are rejected", () => {
