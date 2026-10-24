@@ -3,6 +3,7 @@ export type {
   BrokerStatus,
   ReceivedTransportMessage,
   RoomCreated,
+  RoomLocalRole,
   RoomPeer,
   RoomTransportProgress,
   RoomTransportState,

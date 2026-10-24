@@ -9,6 +9,7 @@ import {
   type ConnectionSnapshot,
   type DataChannelMessageListener,
 } from "@/lib/connection";
+import { getSecureRoomTransport, type RoomTransportStatus } from "@/lib/secureRoomTransport";
 import type { PlayerPose } from "@/lib/room3d";
 import {
   createParticipantId,
@@ -75,6 +76,9 @@ interface LocalEditingPresence {
 interface CollaborationContextValue {
   manager: WebRTCConnectionManager;
   snapshot: ConnectionSnapshot;
+  webrtcSnapshot: ConnectionSnapshot;
+  relayRoomActive: boolean;
+  transportMode: "webrtc" | "relay" | null;
   displayName: string;
   setDisplayName: (name: string) => void;
   guestRole: GuestRole;
@@ -132,16 +136,19 @@ function CrossPageConnectionNotice({
   localRole,
   remoteParticipant,
   contentSyncStatus,
+  transportMode,
 }: {
   snapshot: ConnectionSnapshot;
   localRole: RoomRole | null;
   remoteParticipant: RoomParticipant | null;
   contentSyncStatus: SharedContentSyncStatus;
+  transportMode: "webrtc" | "relay" | null;
 }) {
   const pathname = usePathname();
   if (pathname?.replace(/\/+$/, "").endsWith("/connect") || snapshot.phase === "idle") return null;
 
   const connected = snapshot.phase === "open";
+  const linkLabel = transportMode === "relay" ? "加密 relay" : "P2P";
   const roleLabel = (role: RoomRole | null) => role === "owner"
     ? "房主"
     : role === "reader"
@@ -161,7 +168,7 @@ function CrossPageConnectionNotice({
       aria-live="polite"
     >
       <div className="min-w-0">
-        <p className="text-sm font-bold">{connected ? `P2P 已連線 · ${participantLabel}` : `P2P 連線：${connectionPhaseLabel(snapshot.phase)}`}</p>
+        <p className="text-sm font-bold">{connected ? `${linkLabel} 已連線 · ${participantLabel}` : `${linkLabel}：${connectionPhaseLabel(snapshot.phase)}`}</p>
         <p className="truncate text-[11px] opacity-80">
           {connected
             ? `你是${roleLabel(localRole)}；書本／筆記卡與畫布位置${contentSyncStatus === "synced" ? "已同步" : contentSyncStatus === "error" ? "同步失敗" : "同步中"}；卡片文字可即時合併並顯示遠端游標。切換頁面不會中斷。`
@@ -175,9 +182,52 @@ function CrossPageConnectionNotice({
   );
 }
 
+function isSharedCollaborationPayload(data: string): boolean {
+  if (parseSharedContentMessage(data) || parseCollaborativeEditingMessage(data)) return true;
+  try {
+    return JSON.parse(data)?.type === "shared-chunk";
+  } catch {
+    return false;
+  }
+}
+
+function makeRelaySnapshot(status: RoomTransportStatus): ConnectionSnapshot {
+  return {
+    role: status.localRole === "owner" ? "initiator" : "joiner",
+    phase: status.connectedBrokerCount > 0 ? "open" : "disconnected",
+    peerConnectionState: "unavailable",
+    iceConnectionState: "unavailable",
+    iceGatheringState: "unavailable",
+    signalingState: "unavailable",
+    dataChannelState: "unavailable",
+    localDescriptionSet: false,
+    remoteDescriptionSet: false,
+    hasRemoteCandidateInformation: false,
+    localCandidateTypes: null,
+    remoteCandidateTypes: null,
+    selectedCandidatePairState: "not-reported",
+    connectionTimeoutActive: false,
+    detail: status.connectedBrokerCount > 0
+      ? "書樓協作目前透過加密 WSS relay 傳輸；這不是 WebRTC DataChannel 直連。"
+      : "加密 relay 目前沒有可用 broker；書樓協作暫停。",
+  };
+}
+
 export function CollaborationProvider({ children }: { children: React.ReactNode }) {
   const [manager] = useState(() => new WebRTCConnectionManager());
-  const [snapshot, setSnapshot] = useState<ConnectionSnapshot>(() => manager.getState());
+  const [webrtcSnapshot, setWebrtcSnapshot] = useState<ConnectionSnapshot>(() => manager.getState());
+  const [relayTransport] = useState(() => getSecureRoomTransport());
+  const [relayStatus, setRelayStatus] = useState<RoomTransportStatus>(() => relayTransport.getStatus());
+  const relayRoomActive = relayStatus.roomReady && relayStatus.localRole !== null;
+  const snapshot = useMemo(
+    () => relayRoomActive ? makeRelaySnapshot(relayStatus) : webrtcSnapshot,
+    [relayRoomActive, relayStatus, webrtcSnapshot]
+  );
+  const transportMode: "webrtc" | "relay" | null = relayRoomActive
+    ? "relay"
+    : webrtcSnapshot.phase === "idle"
+      ? null
+      : "webrtc";
   const [displayName, setDisplayNameState] = useState("書房夥伴");
   const [guestRole, setGuestRole] = useState<GuestRole>("editor");
   const [sessionParticipantId, setSessionParticipantId] = useState<string | null>(null);
@@ -198,6 +248,9 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const pendingEditingPresenceRef = useRef<LocalEditingPresence | null>(null);
   const editingPresenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRef = useRef(snapshot);
+  const relaySendQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const relaySessionGenerationRef = useRef(0);
+  const relaySessionActiveRef = useRef(false);
   const sessionParticipantIdRef = useRef<string | null>(null);
   const guestRoleRef = useRef<GuestRole>("editor");
   const localRoleRef = useRef<RoomRole | null>(null);
@@ -205,6 +258,10 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const [signalingDrafts, setSignalingDrafts] = useState<SignalingDrafts>({ ...EMPTY_SIGNALING_DRAFTS });
   const lastPoseSentAtRef = useRef(0);
   const lastRemotePoseAtRef = useRef(0);
+
+  useEffect(() => {
+    if (relayRoomActive) snapshotRef.current = snapshot;
+  }, [relayRoomActive, snapshot]);
 
   const activeSession = snapshot.phase !== "idle" && snapshot.phase !== "failed" && snapshot.phase !== "disconnected";
   const localRole: RoomRole | null = !activeSession
@@ -218,6 +275,41 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const canCollaborateOnText = snapshot.phase === "open"
     && contentSyncStatus === "synced"
     && (localRole === "owner" || localRole === "editor");
+
+  const sendDataMessage = useCallback((data: string) => {
+    const status = relayTransport.getStatus();
+    if (status.roomReady && status.localRole) {
+      if (status.connectedBrokerCount === 0 || status.state === "leaving") return false;
+      const generation = relaySessionGenerationRef.current;
+      const queuedSend = relaySendQueueRef.current.then(async () => {
+        const latestStatus = relayTransport.getStatus();
+        if (generation !== relaySessionGenerationRef.current
+          || !latestStatus.roomReady
+          || !latestStatus.localRole
+          || latestStatus.connectedBrokerCount === 0
+          || latestStatus.state === "leaving") {
+          throw new Error("relay session is no longer active");
+        }
+        await relayTransport.send(data, { route: "relay" });
+      });
+      relaySendQueueRef.current = queuedSend.catch(() => {
+        if (generation === relaySessionGenerationRef.current && isSharedCollaborationPayload(data)) {
+          setContentSyncStatus("error");
+        }
+      });
+      return true;
+    }
+    return manager.sendDataMessage(data);
+  }, [manager, relayTransport]);
+
+  const subscribeDataMessages = useCallback((listener: DataChannelMessageListener) => {
+    const unsubscribeWebRTC = manager.subscribeDataMessages(listener);
+    const unsubscribeRelay = relayTransport.on("message", (event) => listener(event.payload));
+    return () => {
+      unsubscribeWebRTC();
+      unsubscribeRelay();
+    };
+  }, [manager, relayTransport]);
 
   const notifyRemoteEditingListeners = useCallback(() => {
     remoteEditingListenersRef.current.forEach((listener) => listener());
@@ -276,8 +368,8 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     const unsubscribe = manager.subscribe((next) => {
-      snapshotRef.current = next;
-      setSnapshot(next);
+      setWebrtcSnapshot(next);
+      if (!relaySessionActiveRef.current) snapshotRef.current = next;
     });
     return () => {
       unsubscribe();
@@ -285,6 +377,8 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       manager.disconnect();
     };
   }, [manager]);
+
+  useEffect(() => relayTransport.on("status", setRelayStatus), [relayTransport]);
 
   useEffect(() => {
     guestRoleRef.current = guestRole;
@@ -372,6 +466,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     sessionParticipantIdRef.current = null;
     setContentSyncStatus("idle");
     manager.disconnect();
+    void relayTransport.leave();
     setSessionParticipantId(null);
     setAssignedGuestRole(null);
     setRemoteParticipantState(null);
@@ -379,21 +474,52 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     remotePoseRef.current = { ...HIDDEN_POSE };
     lastPoseSentAtRef.current = 0;
     lastRemotePoseAtRef.current = 0;
-  }, [manager, remotePoseRef, resetCollaborativeEditing]);
+  }, [manager, relayTransport, remotePoseRef, resetCollaborativeEditing]);
+
+  useEffect(() => {
+    const wasActive = relaySessionActiveRef.current;
+    if (relayRoomActive && !wasActive) {
+      relaySessionActiveRef.current = true;
+      relaySessionGenerationRef.current += 1;
+      relaySendQueueRef.current = Promise.resolve();
+      manager.disconnect();
+      preparePairing();
+    } else if (!relayRoomActive && wasActive) {
+      relaySessionActiveRef.current = false;
+      relaySessionGenerationRef.current += 1;
+      relaySendQueueRef.current = Promise.resolve();
+      disconnect();
+    }
+  }, [relayRoomActive, manager, preparePairing, disconnect]);
+
+  useEffect(() => {
+    const unsubscribe = relayTransport.on("peers", (peers) => {
+      const status = relayTransport.getStatus();
+      if (!relayRoomActive || !status.roomReady || !status.localRole || peers.length > 0 || !remoteParticipantRef.current) return;
+      preparePairing();
+    });
+    return unsubscribe;
+  }, [relayTransport, relayRoomActive, preparePairing]);
 
   useEffect(() => {
     if (snapshot.phase !== "open" || !snapshot.role || !sessionParticipantId) return;
-    const role: "owner" | "pending" = snapshot.role === "initiator" ? "owner" : "pending";
-    const message: CollaborationMessage = {
-      v: 1,
-      type: "hello",
-      participantId: sessionParticipantId,
-      name: normalizeDisplayName(displayName),
-      role,
-      ...(snapshot.role === "initiator" ? { guestRole } : {}),
+    const sendHello = () => {
+      const role: "owner" | "pending" = snapshot.role === "initiator" ? "owner" : "pending";
+      const message: CollaborationMessage = {
+        v: 1,
+        type: "hello",
+        participantId: sessionParticipantId,
+        name: normalizeDisplayName(displayName),
+        role,
+        ...(snapshot.role === "initiator" ? { guestRole } : {}),
+      };
+      sendDataMessage(serializeCollaborationMessage(message));
     };
-    manager.sendDataMessage(serializeCollaborationMessage(message));
-  }, [manager, snapshot.phase, snapshot.role, sessionParticipantId, displayName, guestRole]);
+    sendHello();
+    if (transportMode !== "relay" || remoteParticipant) return;
+    const timer = window.setInterval(sendHello, 3_000);
+    return () => window.clearInterval(timer);
+  }, [sendDataMessage, snapshot.phase, snapshot.role, sessionParticipantId, displayName, guestRole, transportMode, remoteParticipant]);
 
   useEffect(() => {
     if (snapshot.phase !== "open" || !snapshot.role || !sessionParticipantId) {
@@ -413,7 +539,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
         const frames = serializeSharedContentMessage(message);
         if (!frames) return false;
         for (const frame of frames) {
-          if (!manager.sendDataMessage(frame)) return false;
+          if (!sendDataMessage(frame)) return false;
         }
         return true;
       },
@@ -431,7 +557,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       replicator.stop();
       if (sharedContentSyncRef.current === replicator) sharedContentSyncRef.current = null;
     };
-  }, [manager, restoreCollaborativeTextSnapshots, snapshot.phase, snapshot.role, sessionParticipantId]);
+  }, [sendDataMessage, restoreCollaborativeTextSnapshots, snapshot.phase, snapshot.role, sessionParticipantId]);
 
   useEffect(() => {
     if (snapshot.phase !== "open" || !sessionParticipantId) return;
@@ -445,7 +571,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
         const frames = serializeCollaborativeEditingMessage(message);
         if (!frames) return false;
         for (const frame of frames) {
-          if (!manager.sendDataMessage(frame)) return false;
+          if (!sendDataMessage(frame)) return false;
         }
         return true;
       },
@@ -467,7 +593,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       engine.stop();
       if (collaborativeTextEngineRef.current === engine) collaborativeTextEngineRef.current = null;
     };
-  }, [manager, snapshot.phase, sessionParticipantId]);
+  }, [sendDataMessage, snapshot.phase, sessionParticipantId]);
 
   useEffect(() => {
     const handlePayload = (payload: unknown) => {
@@ -538,12 +664,21 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       remoteParticipantRef.current = participant;
       setRemoteParticipantState(participant);
       if (currentSnapshot.role === "initiator") {
-        manager.sendDataMessage(serializeCollaborationMessage({
+        sendDataMessage(serializeCollaborationMessage({
+          v: 1,
+          type: "hello",
+          participantId: currentParticipantId,
+          name: normalizeDisplayName(displayName),
+          role: "owner",
+          guestRole: currentGuestRole,
+        }));
+        sendDataMessage(serializeCollaborationMessage({
           v: 1,
           type: "role",
           participantId: currentParticipantId,
           role: currentGuestRole,
         }));
+        sharedContentSyncRef.current?.resendSnapshot();
       } else if (message.guestRole) {
         localRoleRef.current = message.guestRole;
         setAssignedGuestRole(message.guestRole);
@@ -567,7 +702,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       }
     };
 
-    const unsubscribe = manager.subscribeDataMessages((raw) => {
+    const unsubscribe = subscribeDataMessages((raw) => {
       const chunk = contentChunkAssemblerRef.current.accept(raw);
       if (chunk.handled) {
         if (chunk.message) handlePayload(chunk.message);
@@ -576,7 +711,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       handlePayload(raw);
     });
     return unsubscribe;
-  }, [manager, notifyRemoteEditingListeners, remotePoseRef, restoreCollaborativeTextSnapshots]);
+  }, [subscribeDataMessages, sendDataMessage, displayName, notifyRemoteEditingListeners, remotePoseRef, restoreCollaborativeTextSnapshots]);
 
   useEffect(() => {
     if (snapshot.phase !== "open") return;
@@ -588,20 +723,13 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     return () => window.clearInterval(timer);
   }, [snapshot.phase, remotePoseRef]);
 
-  const sendDataMessage = useCallback(
-    (data: string) => manager.sendDataMessage(data),
-    [manager]
-  );
-  const subscribeDataMessages = useCallback(
-    (listener: DataChannelMessageListener) => manager.subscribeDataMessages(listener),
-    [manager]
-  );
   const publishPose = useCallback((pose: PlayerPose) => {
     if (snapshot.phase !== "open" || !sessionParticipantId) return;
     const now = performance.now();
-    if (now - lastPoseSentAtRef.current < POSE_SEND_INTERVAL_MS) return;
+    const sendInterval = transportMode === "relay" ? 250 : POSE_SEND_INTERVAL_MS;
+    if (now - lastPoseSentAtRef.current < sendInterval) return;
     lastPoseSentAtRef.current = now;
-    manager.sendDataMessage(serializeCollaborationMessage({
+    sendDataMessage(serializeCollaborationMessage({
       v: 1,
       type: "pose",
       participantId: sessionParticipantId,
@@ -621,7 +749,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
         holding: !!pose.holding,
       },
     }));
-  }, [manager, snapshot.phase, sessionParticipantId]);
+  }, [sendDataMessage, snapshot.phase, sessionParticipantId, transportMode]);
 
   const applyCollaborativeTextChange = useCallback((cardId: string, path: string, previousValue: string, nextValue: string) => {
     if (!canCollaborateOnText) return nextValue;
@@ -652,10 +780,10 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     const frames = serializeCollaborativeEditingMessage(message);
     if (!frames) return;
     for (const frame of frames) {
-      if (!manager.sendDataMessage(frame)) break;
+      if (!sendDataMessage(frame)) break;
     }
     lastEditingPresenceSentAtRef.current = performance.now();
-  }, [canCollaborateOnText, manager, sessionParticipantId]);
+  }, [canCollaborateOnText, sendDataMessage, sessionParticipantId]);
 
   const publishEditingPresence = useCallback((presence: LocalEditingPresence) => {
     if (!canCollaborateOnText || !sessionParticipantId) return;
@@ -668,7 +796,8 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     }
     pendingEditingPresenceRef.current = presence;
     const elapsed = performance.now() - lastEditingPresenceSentAtRef.current;
-    if (elapsed >= EDITING_PRESENCE_SEND_INTERVAL_MS) {
+    const sendInterval = transportMode === "relay" ? 250 : EDITING_PRESENCE_SEND_INTERVAL_MS;
+    if (elapsed >= sendInterval) {
       pendingEditingPresenceRef.current = null;
       sendPresenceMessage(presence);
       return;
@@ -679,13 +808,16 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
         const pending = pendingEditingPresenceRef.current;
         pendingEditingPresenceRef.current = null;
         if (pending) sendPresenceMessage(pending);
-      }, Math.max(0, EDITING_PRESENCE_SEND_INTERVAL_MS - elapsed));
+      }, Math.max(0, sendInterval - elapsed));
     }
-  }, [canCollaborateOnText, sendPresenceMessage, sessionParticipantId]);
+  }, [canCollaborateOnText, sendPresenceMessage, sessionParticipantId, transportMode]);
 
   const contextValue = useMemo(() => ({
     manager,
     snapshot,
+    webrtcSnapshot,
+    relayRoomActive,
+    transportMode,
     displayName,
     setDisplayName,
     guestRole,
@@ -709,12 +841,12 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     sendDataMessage,
     subscribeDataMessages,
     publishPose,
-  }), [manager, snapshot, displayName, setDisplayName, guestRole, localRole, remoteParticipant, contentSyncStatus, canCollaborateOnText, applyCollaborativeTextChange, getCollaborativeTextSnapshot, subscribeCollaborativeText, publishEditingPresence, getRemoteEditingPresence, subscribeRemoteEditing, remotePoseRef, signalingDrafts, setSignalingDraft, clearSignalingDrafts, preparePairing, disconnect, sendDataMessage, subscribeDataMessages, publishPose]);
+  }), [manager, snapshot, webrtcSnapshot, relayRoomActive, transportMode, displayName, setDisplayName, guestRole, localRole, remoteParticipant, contentSyncStatus, canCollaborateOnText, applyCollaborativeTextChange, getCollaborativeTextSnapshot, subscribeCollaborativeText, publishEditingPresence, getRemoteEditingPresence, subscribeRemoteEditing, remotePoseRef, signalingDrafts, setSignalingDraft, clearSignalingDrafts, preparePairing, disconnect, sendDataMessage, subscribeDataMessages, publishPose]);
 
   return (
     <CollaborationContext.Provider value={contextValue}>
       {children}
-      <CrossPageConnectionNotice snapshot={snapshot} localRole={localRole} remoteParticipant={remoteParticipant} contentSyncStatus={contentSyncStatus} />
+      <CrossPageConnectionNotice snapshot={snapshot} localRole={localRole} remoteParticipant={remoteParticipant} contentSyncStatus={contentSyncStatus} transportMode={transportMode} />
     </CollaborationContext.Provider>
   );
 }

@@ -41,15 +41,15 @@ npx serve out                                  # 本機驗證
 
 ## 加密房間（WSS MQTT relay）
 
-`/connect/` 的「加密房間」是獨立的傳輸層介接階段：可建立／加入房間、複製含 `#` 片段的連結、顯示 QR、掃描 QR，並檢視三個 WSS broker 與房間 peers。它目前尚未接入既有書房／卡片協作資料；目前應用資料仍走下方的 WebRTC 手動配對流程，業務資料模組不會由這個新面板改寫。
+`/connect/` 的「加密房間」可建立／加入房間、複製含 `#` 片段的連結、顯示 QR、掃描 QR，並檢視三個 WSS broker 與房間 peers。它已接入既有書樓協作 provider：hello／角色、角色姿態、書本與筆記卡同步、文字協作與編輯 presence 仍使用原有應用協定，僅由 transport adapter 在 WebRTC DataChannel 或加密 relay 間傳送；不改寫協作資料格式、儲存方式或合併／衝突邏輯。加密 relay 顯示在線不代表 WebRTC direct 已連線；下方手動 WebRTC 診斷仍是獨立流程。
 
-配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 是配對碼的 SHA-256 雜湊；MQTT payload 的訊息類型、ID、peer 資訊與測試內容都放在加密內容內。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。加入房間後每 3 秒送出加密 hello，10 秒未收到對方活動則標記離線；收到 relay 應用訊息亦會更新 peer 活動與名單。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
+配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 由配對碼雜湊導出；應用訊息內容（含類型、ID、peer 資訊及協作資料）先加密再發送。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。加入房間後每 3 秒送出加密 hello，10 秒未收到對方活動則標記離線；收到 relay 應用訊息亦會更新 peer 活動與名單。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
 
-固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。此階段的 `send()` 會等 broker 的 QoS 1 PUBACK，**不等於接收端應用層 ACK**；接收端 ACK／重送與直連傳輸尚未接入。
+固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。transport `send()` 等 broker 的 QoS 1 PUBACK；這不保證接收端應用已處理訊息，書樓同步仍按既有同步協定確認與合併。relay 不作資料庫，暫存與解密都在接收端記憶體。
 
 ### 瀏覽器點對點連線（WebRTC）
 
-`/connect/` 同頁保留既有手動 WebRTC 流程：使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`，Offer／Answer 等待 ICE gathering 完成後產生完整 JSON，必須由兩端人工複製／貼上。這條既有應用資料流程仍由 root-level `CollaborationProvider` 持有，切換 SciNotes 頁面不會關閉 DataChannel。
+`/connect/` 同頁保留既有手動 WebRTC 診斷流程：使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`，Offer／Answer 等待 ICE gathering 完成後產生完整 JSON，必須由兩端人工複製／貼上。書樓協作仍由 root-level `CollaborationProvider` 持有；加入加密 relay 房間時應用訊息走 relay，未加入 relay 而完成手動配對時走 DataChannel。切換 SciNotes 頁面不會關閉目前的協作傳輸。
 
 目前的應用訊息範圍包括**顯示名稱、房主指定的可編輯／唯讀角色、虛擬書房角色位置與動作，以及書本／筆記卡協作**。連線時發起端傳送書房快照；加入端的可編輯者會將本機書本／卡片按 ID 合併回房主，之後同步卡片內容、卡片畫布位置、書架分類／落點／排序及新增／刪除。筆記卡文字欄位逐字即時合併；卡片編輯器會顯示對方正在輸入的欄位與游標位置。一般畫布物件（含公式／圖表）、關係邊、書房視角、一般畫布游標，以及角色個人化外觀不在同步範圍。唯讀端不會回傳本機資料。
 
@@ -64,7 +64,7 @@ npx serve out                                  # 本機驗證
 
 ### 網路與隱私限制
 
-預設 STUN 為 `stun:stun.cloudflare.com:3478`，可在 UI 修改或留白停用；STUN 服務不保證永遠可用。瀏覽器會直接向所選 STUN 服務送出查詢，該服務可能看到連線來源的公網 IP。此功能**沒有 TURN 中繼**，公司防火牆、對稱 NAT 或受限行動網路可能阻擋點對點直連；逾時時需換網路或重新配對。邀請／回覆可能包含 ICE 候選位址等網路資訊，僅私下傳給預期對象，不要公開貼文或貼入日誌。頁面不把 SDP／ICE 上傳、寫入 localStorage 或記錄到 console；僅把顯示名稱偏好留在本機。配對後書本／卡片資料會透過 DataChannel 直接送給對方，且繼續保存在各端本機；建立連線前請確認卡片內容適合分享。可編輯端的初始資料會按 ID 合併，唯讀端只接收房主資料、不回傳本機卡片。唯讀仍只是前端限制，不是安全邊界。
+手動 WebRTC 預設 STUN 為 `stun:stun.cloudflare.com:3478`，可在 UI 修改或留白停用；STUN 服務不保證永遠可用。瀏覽器會直接向所選 STUN 服務送出查詢，該服務可能看到連線來源的公網 IP。此 direct 流程**沒有 TURN 中繼**，公司防火牆、對稱 NAT 或受限行動網路可能阻擋點對點直連；逾時時需換網路或重新配對，也可改用加密 relay。邀請／回覆可能包含 ICE 候選位址等網路資訊，僅私下傳給預期對象，不要公開貼文或貼入日誌。頁面不把 SDP／ICE 上傳、寫入 localStorage 或記錄到 console；僅把顯示名稱偏好留在本機。無論選擇 DataChannel 或 relay，書本／卡片仍保存在各端本機；relay 封包在接收端記憶體解密，不作伺服器端資料庫。建立協作前請確認卡片內容適合分享。可編輯端的初始資料會按 ID 合併，唯讀端只接收房主資料、不回傳本機卡片。唯讀仍只是前端限制，不是安全邊界。
 
 筆記卡文字欄位以字符序列 CRDT 合併並在連線期間即時寫入兩端本機工作區；同卡文字同時插入／刪除可合併，遠端 presence 顯示對方欄位、輸入狀態與游標位置。新建清單項目等結構變更先儲存後，該項文字才可即時協作。**文字以外的卡片欄位及清單結構仍採整筆記錄的確定性版本順序**，同時修改仍可能覆蓋另一端；一般畫布游標、公式／圖表物件及角色個人化外觀不會同步。離線修改只保存在本機，不會形成持久化操作佇列；重新連線按現存記錄合併時，另一端的舊副本可能讓離線刪除復現，需以手動匯出／匯入處理。唯讀是前端限制，不是安全邊界。這不代表已完成完整多人共同編輯。
 
@@ -80,11 +80,11 @@ npm run test:shared-content         # 書本／卡片同步、唯讀與分塊協
 
 | 檔案 | 職責 |
 |---|---|
-| `src/lib/secureRoomTransport/` | 獨立的加密房間傳輸 API：配對碼、PBKDF2／AES-GCM、SHA-256 topic、多 broker、peer/status/progress 事件與 QoS 1 relay |
-| `src/components/EncryptedRoomPanel.tsx` | 加密房間建立／加入、fragment 分享連結、QR 產生／掃描、broker 與 peer 狀態；尚未接入應用資料層 |
+| `src/lib/secureRoomTransport/` | 加密房間傳輸 API：配對碼、PBKDF2／AES-GCM、多 broker、peer/status/progress 事件與 QoS 1 relay |
+| `src/components/EncryptedRoomPanel.tsx` | 加密房間建立／加入、fragment 分享連結、QR 產生／掃描、broker／peer 狀態與 relay／WebRTC 區隔 |
 | `src/lib/connection.ts` | WebRTC 連線生命週期、STUN／訊號驗證、狀態／逾時／清理，以及不記錄內容的 DataChannel 訊息 API |
 | `src/components/CollaborationProvider.tsx` | root-level 連線生命週期、姓名／角色握手、角色姿態 presence、書本／卡片同步與跨頁狀態 |
-| `src/lib/sharedContent.ts` | 限定書本／卡片欄位的初始合併、版本化 CRUD 操作、輸入驗證與 DataChannel 分塊傳輸 |
+| `src/lib/sharedContent.ts` | 限定書本／卡片欄位的初始合併、版本化 CRUD 操作、輸入驗證與 DataChannel／relay 分塊傳輸 |
 | `src/lib/collaborationEditing.ts` | 卡片文字欄位的字符序列 CRDT、穩定欄位路徑、即時游標／輸入狀態訊息與分塊傳輸 |
 | `src/app/connect/page.tsx` | 加密房間與既有 A／B 手動 WebRTC 操作介面、名稱／加入權限、同步狀態及診斷 |
 | `tests/secure-room-crypto.test.mjs` | 配對碼格式、topic 雜湊、AES-GCM 加解密與錯誤金鑰驗證 |
