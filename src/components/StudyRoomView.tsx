@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { ArrowUp, ArrowDown, BookOpen, Box, Eye, Hand, Library, RotateCcw, Tags, X } from "lucide-react";
+import { ArrowUp, ArrowDown, BookOpen, Box, Eye, Hand, Layers, Library, RotateCcw, Tags, X } from "lucide-react";
 import { DeskWorkView } from "./DeskWorkView";
 import { StudyScene, type StudySceneApi } from "./StudyScene";
 import { RoomGeometry } from "./RoomGeometry";
@@ -25,6 +25,7 @@ import {
   computeShelfLayout,
   DESK,
   detectQuality,
+  nestedCityFloorLabel,
   shelfBookDims,
   type PlayerPose,
   type SceneQuality,
@@ -78,6 +79,8 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   const [pointerLocked, setPointerLocked] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("first");
   const [whiteModel, setWhiteModel] = useState(false);
+  const [floorLabel, setFloorLabel] = useState(() => nestedCityFloorLabel(state.studyLayout.camera.floorY ?? 0));
+  const floorLabelRef = useRef(floorLabel);
   const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const [isTouch, setIsTouch] = useState(false);
   const playerRef = useRef<PlayerPose>({
@@ -197,6 +200,15 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     setWhiteModel(next);
     showRoomHint(next ? "白模結構檢視 · 書房資料與互動不變" : "已恢復木／石材質");
   }, [showRoomHint, whiteModel]);
+
+  const handlePoseChange = useCallback((pose: PlayerPose) => {
+    publishPose(pose);
+    const nextLabel = nestedCityFloorLabel(pose.floorY ?? 0);
+    if (nextLabel.full !== floorLabelRef.current.full) {
+      floorLabelRef.current = nextLabel;
+      setFloorLabel(nextLabel);
+    }
+  }, [publishPose]);
 
   const handleOpenCard = (card: CardData) => {
     setPreview(null);
@@ -374,7 +386,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               onPointerLockChange={setPointerLocked}
               onChairTriggerChange={setChairInTrigger}
               onFocusChange={setFocusedCardId}
-              onPoseChange={publishPose}
+              onPoseChange={handlePoseChange}
               movementEnabled={collaborationSnapshot.phase !== "open" || localRole === "owner" || localRole === "editor"}
               viewMode={viewMode}
               onToggleView={toggleViewMode}
@@ -420,6 +432,18 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
             data-no-orbit="true"
             onPointerDown={(e) => e.stopPropagation()}
           >
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-label={`目前所在樓層：${floorLabel.full}`}
+              title={`目前所在樓層：${floorLabel.full}`}
+              className="flex shrink-0 items-center gap-1 rounded-lg bg-white/70 px-2 py-1.5 text-[10px] font-semibold text-stone-700 sm:text-[11px]"
+            >
+              <Layers aria-hidden="true" className="h-3.5 w-3.5" />
+              <span className="sm:hidden">{floorLabel.compact}</span>
+              <span className="hidden sm:inline">{floorLabel.full}</span>
+            </div>
             {collaborationSnapshot.phase === "open" && localRole === "reader" && (
               <span className="rounded-lg bg-amber-100 px-2 py-1.5 text-[11px] font-bold text-amber-900">唯讀</span>
             )}
