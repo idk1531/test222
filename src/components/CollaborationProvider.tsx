@@ -309,7 +309,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
               || latestStatus.connectedBrokerCount === 0
               || latestStatus.state === "leaving") break;
             try {
-              await relayTransport.send(nextPose, { route: "relay" });
+              await relayTransport.send(nextPose, { route: "relay", acknowledgementPolicy: "first" });
             } catch {
               failed = true;
               break;
