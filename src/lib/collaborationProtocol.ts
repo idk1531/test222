@@ -35,6 +35,49 @@ export interface PoseMessage {
 
 export type CollaborationMessage = HelloMessage | RoleMessage | PoseMessage;
 
+export interface RemoteHelloResolution {
+  participant: RoomParticipant;
+  isNewParticipant: boolean;
+  didChange: boolean;
+}
+
+/** Resolve an application-level hello against the current room role and participant. */
+export function resolveRemoteHello(
+  localConnectionRole: "initiator" | "joiner" | null,
+  localGuestRole: GuestRole,
+  currentParticipant: RoomParticipant | null,
+  message: CollaborationMessage
+): RemoteHelloResolution | null {
+  if (message.type !== "hello") return null;
+  if (localConnectionRole === "initiator" && message.role !== "pending") return null;
+  if (localConnectionRole === "joiner" && message.role !== "owner") return null;
+  if (localConnectionRole !== "initiator" && localConnectionRole !== "joiner") return null;
+
+  const participant: RoomParticipant = {
+    id: message.participantId,
+    name: message.name,
+    role: localConnectionRole === "initiator" ? localGuestRole : "owner",
+  };
+  const isNewParticipant = currentParticipant?.id !== participant.id;
+  const didChange = isNewParticipant
+    || currentParticipant?.name !== participant.name
+    || currentParticipant?.role !== participant.role;
+  return {
+    participant: didChange ? participant : currentParticipant!,
+    isNewParticipant,
+    didChange,
+  };
+}
+
+/** Ignore poses until hello identifies the remote participant; never apply another actor's pose. */
+export function getRemotePoseForParticipant(
+  message: CollaborationMessage,
+  expectedParticipantId: string | null
+): PlayerPose | null {
+  if (message.type !== "pose" || !expectedParticipantId || message.participantId !== expectedParticipantId) return null;
+  return message.pose;
+}
+
 export const MAX_COLLABORATION_MESSAGE_LENGTH = 8_192;
 
 export function sanitizeDisplayNameInput(value: string): string {

@@ -81,6 +81,51 @@ test("versioned hello and role messages validate their roles and preserve only a
   })), null);
 });
 
+test("repeated hello is idempotent and a visible pose is accepted only after its participant is known", () => {
+  const joinerHello = protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "hello",
+    participantId: "peer-joiner",
+    name: "Guest",
+    role: "pending",
+  }));
+  const first = protocol.resolveRemoteHello("initiator", "editor", null, joinerHello);
+  assert.deepEqual(first, {
+    participant: { id: "peer-joiner", name: "Guest", role: "editor" },
+    isNewParticipant: true,
+    didChange: true,
+  });
+
+  const duplicate = protocol.resolveRemoteHello("initiator", "editor", first.participant, joinerHello);
+  assert.equal(duplicate.isNewParticipant, false, "a duplicate hello must not start another snapshot transfer");
+  assert.equal(duplicate.didChange, false, "identical hello must not replace participant state or restart effects");
+  assert.equal(protocol.resolveRemoteHello("initiator", "editor", null, {
+    ...joinerHello,
+    role: "owner",
+  }), null);
+
+  const visiblePose = protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "pose",
+    participantId: "peer-joiner",
+    pose: { ...validPose, visible: true },
+  }));
+  assert.equal(protocol.getRemotePoseForParticipant(visiblePose, null), null, "poses before hello are ignored");
+  assert.equal(protocol.getRemotePoseForParticipant(visiblePose, "another-peer"), null);
+  assert.equal(protocol.getRemotePoseForParticipant(visiblePose, first.participant.id).visible, true);
+
+  const ownerHello = protocol.parseCollaborationMessage(JSON.stringify({
+    v: 1,
+    type: "hello",
+    participantId: "peer-owner",
+    name: "Owner",
+    role: "owner",
+    guestRole: "reader",
+  }));
+  const joinerView = protocol.resolveRemoteHello("joiner", "editor", null, ownerHello);
+  assert.deepEqual(joinerView.participant, { id: "peer-owner", name: "Owner", role: "owner" });
+});
+
 test("pose messages validate finite coordinates and clamp untrusted positions", () => {
   const parsed = protocol.parseCollaborationMessage(JSON.stringify({
     v: 1,

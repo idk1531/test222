@@ -530,6 +530,7 @@ export class SharedContentReplicator {
   private stopped = false;
   private applyingRemote = false;
   private remoteActorId: string | null;
+  private snapshotSentToActorId: string | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private status: SharedContentSyncStatus = "idle";
@@ -549,20 +550,17 @@ export class SharedContentReplicator {
     if (this.stopped || this.mode) return;
     this.mode = mode;
     this.setStatus("syncing");
-    this.syncTimer = setTimeout(() => {
-      this.syncTimer = null;
-      if (this.status === "syncing") this.setStatus("error");
-    }, 30_000);
+    if (mode === "joiner") this.startSyncTimer();
     if (mode === "owner") {
       this.initialized = true;
-      this.sendSnapshot();
+      this.sendSnapshotToKnownRemote();
     }
   }
 
-  /** Re-send the existing snapshot envelope when a relay peer joins after the owner. */
+  /** Send one snapshot after hello identifies a remote participant; duplicate hellos are harmless. */
   resendSnapshot(): boolean {
     if (this.stopped || this.mode !== "owner" || !this.initialized) return false;
-    return this.sendSnapshot();
+    return this.sendSnapshotToKnownRemote();
   }
 
   permissionsChanged(): void {
@@ -601,6 +599,31 @@ export class SharedContentReplicator {
       records,
       tombstones,
     });
+  }
+
+  private sendSnapshotToKnownRemote(): boolean {
+    const remoteActorId = this.getCurrentRemoteActorId();
+    if (!remoteActorId || this.snapshotSentToActorId === remoteActorId) return false;
+    if (!this.sendSnapshot()) return false;
+    this.snapshotSentToActorId = remoteActorId;
+    this.pendingOperations = [];
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    this.setStatus("syncing");
+    this.startSyncTimer();
+    return true;
+  }
+
+  private getCurrentRemoteActorId(): string | null {
+    return this.options.getRemoteActorId?.() ?? this.remoteActorId;
+  }
+
+  private startSyncTimer(): void {
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
+      if (this.status === "syncing") this.setStatus("error");
+    }, 30_000);
   }
 
   handleRaw(raw: unknown): boolean {
@@ -644,6 +667,10 @@ export class SharedContentReplicator {
     }
     if (this.stopped) return false;
     if (!this.initialized || !this.pendingOperations.length) return true;
+    if (this.mode === "owner") {
+      const remoteActorId = this.getCurrentRemoteActorId();
+      if (!remoteActorId || this.snapshotSentToActorId !== remoteActorId) return true;
+    }
     const role = this.options.getLocalRole();
     if (role === "reader") {
       this.pendingOperations = [];
