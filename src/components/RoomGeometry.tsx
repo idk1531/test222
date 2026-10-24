@@ -808,7 +808,7 @@ export const RoomGeometry: React.FC<{
     const plankFront = shelfFrontX();
     for (let r = 0; r < planks; r++) {
       const py = shelfPlankY(r, planks);
-      // 薄層板：深 0.28 × 厚 0.035 × 長 3.6
+      // 薄層板：深 0.28 × 厚 0.035 × 沿西牆延伸
       group.add(
         box(SHELF.depth, SHELF.plank, plankLen, plankMat, plankCx, py - SHELF.plank / 2, SHELF.z)
       );

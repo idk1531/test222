@@ -21,23 +21,42 @@ const edge = clampRoomPosition(100, -100);
 assert.equal(edge.x, ROOM.width / 2 - CAMERA.wallMargin);
 assert.equal(edge.z, -ROOM.depth / 2 + CAMERA.wallMargin);
 
-// 嵌套之城初始假設：四個可行走樓層；尺寸明確不是從概念圖精確量得。
+// Reference-board envelope and walkable floor rhythm (1F–4F).
 assert.equal(ROOM_AREA_SCALE, 16);
-assert.equal(ROOM.width, 24);
-assert.equal(ROOM.depth, 20);
-assert.equal(ROOM.width * ROOM.depth, 480);
+assert.equal(ROOM.width, 48);
+assert.equal(ROOM.depth, 24);
+assert.equal(ROOM.width * ROOM.depth, 1152);
 assert.equal(ROOM.height, 16);
 assert.equal(ROOM.wall, 0.32);
+assert.deepEqual(DEFAULT_CAMERA, { yaw: 70, pitch: 15, x: 0, z: 10.4, height: 1.52, floorY: 0 });
 assert.deepEqual(NESTED_CITY.levels, [0, 4, 8, 12]);
-assert.deepEqual(nestedCityFloorLabel(0), { full: "地面層 · 0 m", compact: "0m" });
-assert.deepEqual(nestedCityFloorLabel(4), { full: "第 1 層 · 4 m", compact: "4m" });
-assert.deepEqual(nestedCityFloorLabel(8), { full: "第 2 層 · 8 m", compact: "8m" });
-assert.deepEqual(nestedCityFloorLabel(12), { full: "第 3 層 · 12 m", compact: "12m" });
+assert.deepEqual(nestedCityFloorLabel(0), { full: "1F · 0 m", compact: "1F" });
+assert.deepEqual(nestedCityFloorLabel(4), { full: "2F · 4 m", compact: "2F" });
+assert.deepEqual(nestedCityFloorLabel(8), { full: "3F · 8 m", compact: "3F" });
+assert.deepEqual(nestedCityFloorLabel(12), { full: "4F · 12 m", compact: "4F" });
 assert.deepEqual(nestedCityFloorLabel(2), { full: "階梯", compact: "階梯" });
 assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compact: "未知" });
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 1).length, 5);
-assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 2).length, 5);
+assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 2).length, 4);
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 3).length, 4, "4F 應形成環繞挑空的觀景環廊");
+assert.equal(NESTED_CITY.frames.length, 3, "主構圖由外框、橫向穿插體與內核三重結構組成");
+assert.deepEqual(NESTED_CITY.frames.map(({ width, depth, height }) => ({ width, depth, height })), [
+  { width: 48, depth: 24, height: 16 },
+  { width: 36, depth: 18, height: 12 },
+  { width: 24, depth: 12, height: 8 },
+]);
+assert.deepEqual(NESTED_CITY.frames.map(({ x, z, bottom }) => ({ x, z, bottom })), [
+  { x: 0, z: 0, bottom: 0 },
+  { x: 6, z: 4, bottom: 2 },
+  { x: 12, z: 8, bottom: 4 },
+]);
+assert.ok(Math.abs(NESTED_CITY.frames[1].rotationY - THREE.MathUtils.degToRad(15)) < 1e-12);
+assert.ok(Math.abs(NESTED_CITY.frames[2].rotationY - THREE.MathUtils.degToRad(-10)) < 1e-12);
+assert.deepEqual(NESTED_CITY.featureFrames.map(({ x, z, width, depth, height, bottom }) => ({ x, z, width, depth, height, bottom })), [
+  { x: 4, z: 8, width: 30, depth: 16, height: 4, bottom: 4 },
+  { x: 10, z: 10, width: 20, depth: 4, height: 3, bottom: 8 },
+  { x: 5, z: 12, width: 40, depth: 3, height: 8, bottom: 0 },
+]);
 assert.equal(NESTED_CITY.frames.length, 3, "主構圖由外框、橫向穿插體與內核三重結構組成");
 assert.equal(NESTED_CITY.stairs.length, 3);
 assert.ok(NESTED_CITY.stairs.every((stair, index) =>
@@ -141,14 +160,14 @@ for (const rail of platformRails) {
     assert.ok(Math.abs(rail.fixed - (rail.edge === "west" ? bounds.minX : bounds.maxX)) <= PLATFORM_EPSILON);
   }
 }
+const stairMouthHalfWidth = NESTED_CITY.stairs[0].width / 2 - 0.05;
 for (const opening of [
-  { platformId: "level-1-south-gallery", edge: "north", along: -5.2 },
-  { platformId: "level-2-north-gallery", edge: "south", along: -5.2 },
-  { platformId: "level-2-south-gallery", edge: "north", along: -5.2 },
-  { platformId: "level-3-north-gallery", edge: "south", along: -5.2 },
+  { platformId: "level-1-east-gallery", edge: "west", along: 6.5 },
+  { platformId: "level-2-west-study-gallery", edge: "east", along: 6.5 },
+  { platformId: "level-3-east-observation-gallery", edge: "west", along: 6.5 },
 ]) {
   assert.ok(!platformRails.some((rail) => rail.platformId === opening.platformId && rail.edge === opening.edge &&
-    rail.start < opening.along + 0.89 && rail.end > opening.along - 0.89),
+    rail.start < opening.along + stairMouthHalfWidth && rail.end > opening.along - stairMouthHalfWidth),
   `${opening.platformId} 的 ${opening.edge} 邊需為階梯保留通口`);
 }
 
@@ -226,7 +245,7 @@ const categoryLabelSize = canvasSizeForPlane(CATEGORY_LABEL_PLANE.width, CATEGOR
 assert.ok(Math.abs(categoryLabelSize.aspect - CATEGORY_LABEL_PLANE.width / CATEGORY_LABEL_PLANE.height) < 1 / categoryLabelSize.height);
 const deskPreviewSize = canvasSizeForPlane(DESK_PREVIEW_PLANE.width, DESK_PREVIEW_PLANE.height, 512);
 assert.ok(Math.abs(deskPreviewSize.aspect - DESK_PREVIEW_PLANE.width / DESK_PREVIEW_PLANE.height) < 1 / deskPreviewSize.height);
-console.log("  ✓ 嵌套之城 4 層／480 m² 初始假設與既有書本／畫布標籤比例");
+console.log("  ✓ 48 × 24 × 16 m 參考建築／4 層樓板與既有書本／畫布標籤比例");
 
 // v8.4 家具 AABB：櫃體碰撞沿用 RoomGeometry 的同一 footprint，桌緣採玩家半徑擴張。
 assert.deepEqual(
@@ -385,24 +404,31 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   const outerMinX = outerFrame.x - outerFrame.width / 2;
   const outerMaxX = outerFrame.x + outerFrame.width / 2;
   const outerMinZ = outerFrame.z - outerFrame.depth! / 2;
+  const outerMaxZ = outerFrame.z + outerFrame.depth! / 2;
   const middleMinX = middleFrame.x - middleHalfX;
   const middleMaxX = middleFrame.x + middleHalfX;
   const middleMinZ = middleFrame.z - middleHalfZ;
-  assert.ok(middleMinX < outerMinX && middleMaxX > outerMaxX,
-    "橫向穿插體需實際越過外框兩側的垂直面，而不是縮在外框內形成套盒");
-  assert.ok(middleMinZ < outerMinZ, "中框後側需穿過外框後梁，固定視角才能讀出前後交錯");
-  assert.notEqual(middleFrame.rotationY, 0, "中框須相對外框轉向，避免只在前方疊一片平面");
-  assert.ok(Math.abs(middleFrame.z - outerFrame.z) > 1, "中框中心需相對外框錯位");
-  assert.ok(middleFrame.bottom < outerFrame.bottom + 4 &&
-    middleFrame.bottom + middleFrame.height > outerFrame.bottom + 8,
-  "中層穿插體需跨越外框 2F／3F 梁線並在高度上錯位");
-  assert.ok(coreFrame.width < middleFrame.width * 0.4 && coreFrame.depth! < middleFrame.depth! * 0.5,
-    "內核平面尺寸需明顯小於中層穿插體");
-  assert.ok(coreFrame.bottom < middleFrame.bottom + middleFrame.height &&
-    coreFrame.bottom + coreFrame.height > middleFrame.bottom + middleFrame.height,
-  "內核需由中層框架內部向上穿出，形成垂直交錯");
+  const middleMaxZ = middleFrame.z + middleHalfZ;
+  assert.ok(middleMinX > outerMinX && middleMaxX > outerMaxX,
+    "36 m 石框應與 48 m 外木框重疊並按參考表向東錯位");
+  assert.ok(middleMinZ > outerMinZ && middleMaxZ > outerMaxZ,
+    "18 m 石框應與 24 m 外框重疊並呈現參考圖的斜向穿插");
+  assert.notEqual(middleFrame.rotationY, 0, "中框須依參考表轉向 15°");
+  assert.equal(middleFrame.x, 6, "石框中心 X 依位置表");
+  assert.equal(middleFrame.z, 4, "石框中心 Z 依位置表");
+  assert.equal(middleFrame.bottom, 2, "石框垂直範圍依剖面落在 2–14 m");
+  assert.equal(middleFrame.bottom + middleFrame.height, 14);
+  assert.equal(coreFrame.x, 12, "核心中心 X 依位置表");
+  assert.equal(coreFrame.z, 8, "核心中心 Z 依位置表");
+  assert.equal(coreFrame.bottom, 4, "核心垂直範圍依剖面落在 4–12 m");
+  assert.ok(coreFrame.width < middleFrame.width && coreFrame.depth! < middleFrame.depth!,
+    "24 × 12 m 內核須小於 36 × 18 m 石框");
+  assert.ok(coreFrame.bottom >= middleFrame.bottom &&
+    coreFrame.bottom + coreFrame.height <= middleFrame.bottom + middleFrame.height,
+  "內核需落在石框高度範圍內，對應 2F–4F 挑空");
   assert.ok(cityFrameMembers(outerFrame).length >= 20 && cityFrameMembers(middleFrame).length >= 12 &&
-    cityFrameMembers(coreFrame).length >= 12, "每重框架均需由可碰撞的真實梁柱構成");
+    cityFrameMembers(coreFrame).length >= 12 && NESTED_CITY.featureFrames.every((frame) => cityFrameMembers(frame).length >= 8),
+  "三重主框架與平台／橋廊／書庫模組均需由真實梁柱構成");
 
   const onPlatform = (level: number, x: number, z: number) => NESTED_CITY.platforms.some((platform) =>
     platform.level === level &&
@@ -421,8 +447,8 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     }
     assert.ok(openSamples >= 20, `第 ${level} 層的中央挑空至少 25 個樣點中的 20 個必須保持開放`);
   }
-  assert.ok(![1, 2, 3].some((level) => onPlatform(level, 4, 3)), "中央挑空不能被樓板填滿");
-  assert.equal(groundHeightAt(4, 3, 0), 0, "地面仍可穿越挑空底部");
+  assert.ok(![1, 2, 3].some((level) => onPlatform(level, NESTED_CITY.atrium.x, NESTED_CITY.atrium.z)), "中央挑空不能被樓板填滿");
+  assert.equal(groundHeightAt(NESTED_CITY.atrium.x, NESTED_CITY.atrium.z, 0), 0, "地面仍可穿越挑空底部");
   assert.equal(groundHeightAt(-9.75, 0, 4), 4, "Level 1 西側環廊可行走");
   assert.equal(groundHeightAt(-8.5, 0, 8), 8, "同一投影位置依目前高度選取 Level 2");
   assert.equal(groundHeightAt(-8.5, 0, 0), 0, "不能從地面瞬移到重疊上層");
@@ -474,9 +500,10 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   const deskRect = DESK_FOOTPRINT[0];
   const deskCenter = { x: DESK.cx, z: (deskRect.minZ + deskRect.maxZ) / 2 };
   const lowerCollision = resolveCollision(deskCenter.x, deskCenter.z);
-  const upperClearance = resolveCollision(deskCenter.x, deskCenter.z, PLAYER_RADIUS, false, false, undefined, undefined, 4);
+  const upperWalkPoint = { x: 0, z: 0 };
+  const upperClearance = resolveCollision(upperWalkPoint.x, upperWalkPoint.z, PLAYER_RADIUS, false, false, undefined, undefined, 4);
   assert.notDeepEqual(lowerCollision, deskCenter, "地面仍要撞到桌體");
-  assert.deepEqual(upperClearance, deskCenter, "上層角色不應被地面桌櫃的投影碰撞阻擋");
+  assert.deepEqual(upperClearance, upperWalkPoint, "上層角色不應被地面桌櫃的投影碰撞阻擋");
 }
 
 // ---- v8.4 clampToDesk 與 resolveAction 完整輸入表（5 命中 × 7 輸入）----
@@ -713,7 +740,7 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
   assert.ok(landscapeAnchor.x > 0.1, "橫式手持書需偏右，不遮住準心");
   assert.ok(Math.abs(portraitAnchor.y) < 0.3 && Math.abs(landscapeAnchor.y) < 0.3);
   // 直式手機加寬視野，橫式維持 62°；手持書錨點要跟著 fov 走。
-  assert.equal(roomFovFor(1440 / 900), 62);
+  assert.equal(roomFovFor(1440 / 900), 60);
   assert.ok(roomFovFor(390 / 844) > 74, "直式手機房間視野需加寬到 74° 以上");
   const wideAnchor = firstPersonHeldAnchor(390 / 844, roomFovFor(390 / 844));
   assert.ok(wideAnchor.x < 0 && wideAnchor.z < 0);

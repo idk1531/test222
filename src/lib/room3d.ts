@@ -15,8 +15,8 @@ import { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } from "./roomDimensions";
 
 export { ROOM_AREA_SCALE } from "./roomDimensions";
 
-// ================= 房間尺寸與嵌套之城初始假設（公尺） =================
-export const ROOM = ROOM_DIMENSIONS; // 初始假設：24 × 20 × 16 m；不是由概念圖精確量測
+// ================= 建築尺寸與嵌套之城參考模型（公尺） =================
+export const ROOM = ROOM_DIMENSIONS; // 參考板外部木框：48 × 24 × 16 m
 
 export type CityMaterial = "timber" | "stone" | "core";
 export interface CityPlatform {
@@ -35,6 +35,15 @@ export interface CityStair {
   width: number;
   steps: number;
   material: CityMaterial;
+}
+export interface CityObstacle {
+  id: string;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  bottom: number;
+  top: number;
 }
 export interface CityFrameOpening {
   edge: "north" | "east" | "south" | "west";
@@ -81,60 +90,75 @@ export interface CityPlatformRail {
 }
 
 /**
- * 嵌套之城的尺寸真相。所有值都是概念模型的「初始假設」；參考圖沒有可供精確量測的比例尺。
- * 四個可行走高度（地面 + 三層）、偏移／旋轉框架與踏階路徑在此共用，避免幾何、碰撞各自猜尺寸。
+ * Shared reference-board model for the complete walkable building.
+ * X/Z on frame and module entries are confirmed centre positions; vertical extents are fitted to
+ * the section drawing (four 4 m floor-to-floor intervals with 3.0–3.2 m clear height).
  */
 export const NESTED_CITY = {
   levels: [0, 4, 8, 12] as const,
-  atrium: { x: 1.2, z: -0.8, width: 9.2, depth: 7.8 },
+  // The open atrium sits inside the offset 24 × 12 m core; its sampled area stays open at each upper level.
+  atrium: { x: 12, z: 6, width: 12, depth: 6 },
   frames: [
-    // 外框：連續的大尺度木構盒框，保留大面開口並以樓層橫樑閉合四角。
-    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 22.7, depth: 18.2, height: 15.4, thickness: 0.92, beamHeight: 1.05, rotationY: 0, material: "timber", bands: [4, 8, 12] },
-    // 中層：橫向石構穿插體，平面伸過外框側線；下、上弦分別錨定 2F／3F。
-    { id: "middle-horizontal-insert", plane: "horizontal", x: 0, z: -1.4, bottom: 3.6, width: 21.6, depth: 12.6, height: 4.8, thickness: 0.76, beamHeight: 0.68, rotationY: Math.PI / 18, material: "stone", openings: [{ edge: "south", start: -7.32, end: -5.32, bottom: 3.6, top: 4.28 }] },
-    // 內核：落在中層開口內，尺度縮小並轉向，跨越 2F–4F 的挑空。
-    { id: "offset-rotated-core", plane: "box", x: 1.2, z: -0.8, bottom: 4.15, width: 7, depth: 4.9, height: 7.7, thickness: 0.55, beamHeight: 0.65, rotationY: Math.PI / 6, material: "core", bands: [3.85] },
+    // Primary timber shell: 48 × 24 × 16 m; its horizontal bands mark the four-floor rhythm.
+    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 24, height: 16, thickness: 1.1, beamHeight: 1.2, rotationY: 0, material: "timber", bands: [4, 8, 12] },
+    // Stone insert: 36 × 18 × 12 m, placed at the table's (6, 4) X/Z centre and fitted from 2–14 m.
+    { id: "middle-horizontal-insert", plane: "horizontal", x: 6, z: 4, bottom: 2, width: 36, depth: 18, height: 12, thickness: 0.84, beamHeight: 0.9, rotationY: THREE.MathUtils.degToRad(15), material: "stone", bands: [6] },
+    // Offset mixed core: 24 × 12 × 8 m at the table's (12, 8) X/Z centre; it spans 2F–4F (4–12 m).
+    { id: "offset-rotated-core", plane: "box", x: 12, z: 8, bottom: 4, width: 24, depth: 12, height: 8, thickness: 0.64, beamHeight: 0.72, rotationY: THREE.MathUtils.degToRad(-10), material: "core", bands: [4] },
+  ] satisfies readonly CityFrame[],
+  // Secondary volumes are the table's main platform, 3F bridge corridor and double-height library zone.
+  featureFrames: [
+    { id: "main-library-platform-frame", plane: "box", x: 4, z: 8, bottom: 4, width: 30, depth: 16, height: 4, thickness: 0.52, beamHeight: 0.48, rotationY: 0, material: "timber" },
+    { id: "bridge-corridor-frame", plane: "box", x: 10, z: 10, bottom: 8, width: 20, depth: 4, height: 3, thickness: 0.26, beamHeight: 0.24, rotationY: 0, material: "core" },
+    { id: "library-zone-frame", plane: "box", x: 5, z: 12, bottom: 0, width: 40, depth: 3, height: 8, thickness: 0.24, beamHeight: 0.28, rotationY: 0, material: "timber" },
   ] satisfies readonly CityFrame[],
   platforms: [
-    // Level 1: 四邊環廊＋跨越中央挑空的窄橋。
-    { id: "level-1-west-gallery", level: 1, x: -9.75, z: 0, width: 4.5, depth: 17.4, material: "timber" },
-    { id: "level-1-east-gallery", level: 1, x: 9.75, z: 0, width: 4.5, depth: 17.4, material: "timber" },
-    { id: "level-1-north-gallery", level: 1, x: 0, z: -8.3, width: 15, depth: 2.8, material: "stone" },
-    { id: "level-1-south-gallery", level: 1, x: 0, z: 8.3, width: 15, depth: 2.8, material: "stone" },
-    { id: "level-1-crossing-bridge", level: 1, x: 0, z: 0, width: 15, depth: 1.45, material: "core" },
-    // Level 2: 相對下層平移；四角邊界相接，縱向橋端點與南北廊道齊平。
-    { id: "level-2-west-gallery", level: 2, x: -7.6, z: -0.55, width: 2.8, depth: 14.4, material: "stone" },
-    { id: "level-2-east-gallery", level: 2, x: 8.4, z: -0.55, width: 2.8, depth: 14.4, material: "stone" },
-    { id: "level-2-north-gallery", level: 2, x: 0.4, z: -6.95, width: 13.2, depth: 2.6, material: "core" },
-    { id: "level-2-south-gallery", level: 2, x: 0.4, z: 5.85, width: 13.2, depth: 2.6, material: "stone" },
-    { id: "level-2-long-bridge", level: 2, x: 1, z: -0.55, width: 1.7, depth: 10.2, material: "timber" },
-    // Level 3 / 4F：四邊觀景環廊繞開中央挑空；每塊樓板只在邊界相接。
-    { id: "level-3-west-gallery", level: 3, x: -9.3, z: -0.2, width: 5.4, depth: 15, material: "timber" },
-    { id: "level-3-east-gallery", level: 3, x: 9.4, z: -0.2, width: 5.2, depth: 15, material: "stone" },
-    { id: "level-3-north-gallery", level: 3, x: 0.1, z: -8.2, width: 13.4, depth: 3, material: "core" },
-    { id: "level-3-south-observation-terrace", level: 3, x: 0.1, z: 7.5, width: 13.4, depth: 2.8, material: "timber" },
+    // 2F: broad library ring around the atrium, with a transverse bridge and a clear stair landing.
+    { id: "level-1-west-library-gallery", level: 1, x: -8.5, z: 0, width: 29, depth: 22, material: "timber" },
+    { id: "level-1-east-gallery", level: 1, x: 20.5, z: 0, width: 5, depth: 22, material: "stone" },
+    { id: "level-1-north-library-gallery", level: 1, x: 12, z: -4, width: 12, depth: 14, material: "core" },
+    { id: "level-1-south-reading-gallery", level: 1, x: 12, z: 10, width: 12, depth: 2, material: "timber" },
+    { id: "level-1-crossing-bridge", level: 1, x: 12, z: 4, width: 12, depth: 1.4, material: "core" },
+    // 3F: private reading / note area; the 20 × 4 m bridge is the south-side connection.
+    { id: "level-2-west-study-gallery", level: 2, x: -8.5, z: -1.5, width: 29, depth: 19, material: "stone" },
+    { id: "level-2-east-study-gallery", level: 2, x: 20.5, z: -1.5, width: 5, depth: 19, material: "stone" },
+    { id: "level-2-north-study-gallery", level: 2, x: 12, z: -4, width: 12, depth: 14, material: "timber" },
+    { id: "level-2-long-bridge", level: 2, x: 10, z: 10, width: 20, depth: 4, material: "core" },
+    // 4F: observation / outdoor terrace ring; the central void remains open to the roof and sky.
+    { id: "level-3-west-observation-gallery", level: 3, x: -8.5, z: 0, width: 29, depth: 22, material: "timber" },
+    { id: "level-3-east-observation-gallery", level: 3, x: 20.5, z: 0, width: 5, depth: 22, material: "stone" },
+    { id: "level-3-north-observation-gallery", level: 3, x: 12, z: -4, width: 12, depth: 14, material: "core" },
+    { id: "level-3-sky-observation-terrace", level: 3, x: 12, z: 10, width: 12, depth: 2, material: "timber" },
   ] satisfies readonly CityPlatform[],
   stairs: [
-    // 開放式階梯沿中庭上升；每層由挑空側抵達平台邊緣，不穿越上層樓板。
-    { id: "stair-ground-to-level-1", start: { x: -5.2, z: 0, y: 0 }, end: { x: -5.2, z: 6.9, y: 4 }, width: 1.8, steps: 23, material: "stone" },
-    { id: "stair-level-1-to-level-2", start: { x: -5.2, z: 6.9, y: 4 }, end: { x: -5.2, z: -5.65, y: 8 }, width: 1.8, steps: 25, material: "timber" },
-    { id: "stair-level-2-to-level-3", start: { x: -5.2, z: 4.55, y: 8 }, end: { x: -5.2, z: -6.7, y: 12 }, width: 1.8, steps: 23, material: "stone" },
+    // Three broad open flights cross the atrium east–west; endpoints meet the gallery edges without passing under slabs.
+    { id: "stair-ground-to-level-1", start: { x: 6, z: 6.5, y: 0 }, end: { x: 18, z: 6.5, y: 4 }, width: 1.6, steps: 24, material: "stone" },
+    { id: "stair-level-1-to-level-2", start: { x: 18, z: 6.5, y: 4 }, end: { x: 6, z: 6.5, y: 8 }, width: 1.6, steps: 24, material: "timber" },
+    { id: "stair-level-2-to-level-3", start: { x: 6, z: 6.5, y: 8 }, end: { x: 18, z: 6.5, y: 12 }, width: 1.6, steps: 24, material: "stone" },
   ] satisfies readonly CityStair[],
   bridgeRails: [
-    { id: "level-1-bridge-rail-near", level: 1, x: 0, z: -0.675, width: 15, depth: 0.1 },
-    { id: "level-1-bridge-rail-far", level: 1, x: 0, z: 0.675, width: 15, depth: 0.1 },
-    { id: "level-2-bridge-rail-west", level: 2, x: 0.2, z: -0.55, width: 0.1, depth: 10.2 },
-    { id: "level-2-bridge-rail-east", level: 2, x: 1.8, z: -0.55, width: 0.1, depth: 10.2 },
+    { id: "level-1-bridge-rail-near", level: 1, x: 12, z: 3.35, width: 12, depth: 0.1 },
+    { id: "level-1-bridge-rail-far", level: 1, x: 12, z: 4.65, width: 12, depth: 0.1 },
+    { id: "level-2-bridge-rail-near", level: 2, x: 10, z: 8.05, width: 20, depth: 0.1 },
+    { id: "level-2-bridge-rail-far", level: 2, x: 10, z: 11.95, width: 20, depth: 0.1 },
   ] as const,
   columns: [
-    { id: "stone-support-west", x: -8.25, z: 2.55, width: 0.76, depth: 0.72, bottom: 1.05, top: 12.55, material: "stone" },
-    { id: "stone-support-east", x: 7.35, z: -0.2, width: 0.68, depth: 0.68, bottom: 1.7, top: 12.1, material: "stone" },
+    { id: "stone-support-west", x: -20, z: 0, width: 0.82, depth: 0.82, bottom: 0, top: 15.2, material: "stone" },
+    { id: "stone-support-east", x: 22, z: 0, width: 0.82, depth: 0.82, bottom: 0, top: 15.2, material: "stone" },
+    { id: "stone-support-north", x: 12, z: -9.5, width: 0.78, depth: 0.78, bottom: 0, top: 14.2, material: "stone" },
+    { id: "stone-support-terrace", x: 12, z: 10, width: 0.78, depth: 0.78, bottom: 0, top: 14.2, material: "stone" },
   ] as const,
+  // South entrance interrupts the 40 × 3 × 8 m library wall; shelving leaves a 7 m lobby opening.
+  obstacles: [
+    { id: "south-library-shelf-west", x: -9.5, z: 10.55, width: 11, depth: 0.52, bottom: 0, top: 7.7 },
+    { id: "south-library-shelf-east", x: 14.5, z: 10.55, width: 21, depth: 0.52, bottom: 0, top: 7.7 },
+  ] satisfies readonly CityObstacle[],
   /** Stair rails stop before each landing so their end posts do not block the threshold. */
   stairRailInset: 0.45,
   /** Platform / bridge / stair guardrail heights and light member section (metres). */
   railHeight: 1.05,
   platformRailPostWidth: 0.07,
+  glassRailThickness: 0.055,
 } as const;
 
 /** Shared member layout for rendering and collision, so the white model and movement use identical frames. */
@@ -360,10 +384,11 @@ export function nestedCityFloorLabel(floorY: number): NestedCityFloorLabel {
   if (!Number.isFinite(floorY)) return { full: "位置未知", compact: "未知" };
 
   const levelIndex = NESTED_CITY.levels.findIndex((level) => Math.abs(level - floorY) <= 0.32);
-  if (levelIndex === 0) return { full: "地面層 · 0 m", compact: "0m" };
+  if (levelIndex === 0) return { full: "1F · 0 m", compact: "1F" };
   if (levelIndex > 0) {
     const level = NESTED_CITY.levels[levelIndex];
-    return { full: `第 ${levelIndex} 層 · ${level} m`, compact: `${level}m` };
+    const floorNumber = levelIndex + 1;
+    return { full: `${floorNumber}F · ${level} m`, compact: `${floorNumber}F` };
   }
   return { full: "階梯", compact: "階梯" };
 }
@@ -678,7 +703,7 @@ export const MARBLE_ROUGH = {
 
 // ================= 相機 =================
 export const CAMERA = {
-  fov: 62,
+  fov: 60,
   near: 0.05,
   far: 110,
   pitchMin: THREE.MathUtils.degToRad(-70),
@@ -701,7 +726,7 @@ export function roomFovFor(aspect: number): number {
   if (!(aspect > 0)) return CAMERA.fov;
   if (aspect >= 0.85) return CAMERA.fov;
   const widen = THREE.MathUtils.clamp((0.85 - aspect) / 0.4, 0, 1);
-  return CAMERA.fov + widen * 18; // 直式最寬 80°
+  return CAMERA.fov + widen * 18; // 直式最寬 78°
 }
 
 // ================= 照片級貼圖（v8.2，對應參考圖拍板的材質） =================
@@ -1073,7 +1098,7 @@ function separateCircleFromOrientedRect(
 }
 
 /** 玩家以 XZ 圓形近似；bottom/top 讓樓層碰撞只阻擋與角色身高相交的物件。 */
-const frameStructureColliders: Aabb[] = NESTED_CITY.frames.flatMap((frame) =>
+const frameStructureColliders: Aabb[] = [...NESTED_CITY.frames, ...NESTED_CITY.featureFrames].flatMap((frame) =>
   cityFrameMembers(frame).map((member) => {
     const cos = Math.cos(frame.rotationY);
     const sin = Math.sin(frame.rotationY);
@@ -1110,6 +1135,16 @@ const structureColliders: Aabb[] = NESTED_CITY.columns.map((column) => ({
   top: column.top,
   standable: false,
 }));
+const cityObstacleColliders: Aabb[] = NESTED_CITY.obstacles.map((obstacle) => ({
+  minX: obstacle.x - obstacle.width / 2,
+  maxX: obstacle.x + obstacle.width / 2,
+  minZ: obstacle.z - obstacle.depth / 2,
+  maxZ: obstacle.z + obstacle.depth / 2,
+  kind: "structure",
+  bottom: obstacle.bottom,
+  top: obstacle.top,
+  standable: false,
+}));
 const bridgeRailColliders: Aabb[] = NESTED_CITY.bridgeRails.map((rail) => {
   const floorY = NESTED_CITY.levels[rail.level];
   return {
@@ -1125,16 +1160,16 @@ const bridgeRailColliders: Aabb[] = NESTED_CITY.bridgeRails.map((rail) => {
 });
 const platformRailColliders: Aabb[] = nestedCityPlatformRails().map((rail) => {
   const floorY = NESTED_CITY.levels[rail.level];
-  const halfWidth = NESTED_CITY.platformRailPostWidth / 2;
-  const fixed = rail.fixed + rail.inward * halfWidth;
+  const halfThickness = NESTED_CITY.glassRailThickness / 2;
+  const fixed = rail.fixed + rail.inward * halfThickness;
   return {
-    minX: rail.axis === "x" ? rail.start : fixed - halfWidth,
-    maxX: rail.axis === "x" ? rail.end : fixed + halfWidth,
-    minZ: rail.axis === "z" ? rail.start : fixed - halfWidth,
-    maxZ: rail.axis === "z" ? rail.end : fixed + halfWidth,
+    minX: rail.axis === "x" ? rail.start : fixed - halfThickness,
+    maxX: rail.axis === "x" ? rail.end : fixed + halfThickness,
+    minZ: rail.axis === "z" ? rail.start : fixed - halfThickness,
+    maxZ: rail.axis === "z" ? rail.end : fixed + halfThickness,
     kind: "railing",
-    bottom: floorY + NESTED_CITY.railHeight - halfWidth,
-    top: floorY + NESTED_CITY.railHeight + halfWidth,
+    bottom: floorY + 0.08,
+    top: floorY + NESTED_CITY.railHeight,
     standable: false,
   };
 });
@@ -1191,6 +1226,7 @@ export const COLLIDERS: readonly Aabb[] = [
     standable: false,
   },
   ...structureColliders,
+  ...cityObstacleColliders,
   ...frameStructureColliders,
   ...bridgeRailColliders,
   ...platformRailColliders,
