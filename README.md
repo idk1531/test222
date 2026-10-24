@@ -41,15 +41,15 @@ npx serve out                                  # 本機驗證
 
 ## 加密房間（WSS MQTT relay）
 
-`/connect/` 的「加密房間」可建立／加入房間、複製含 `#` 片段的連結、顯示 QR、掃描 QR，並檢視三個 WSS broker 與房間 peers。它已接入既有書樓協作 provider：hello／角色、角色姿態、書本與筆記卡同步、文字協作與編輯 presence 仍使用原有應用協定，僅由 transport adapter 在 WebRTC DataChannel 或加密 relay 間傳送；不改寫協作資料格式、儲存方式或合併／衝突邏輯。加密 relay 顯示在線不代表 WebRTC direct 已連線；下方手動 WebRTC 診斷仍是獨立流程。
+`/connect/` 的「加密房間」可建立／加入房間、複製含 `#` 片段的連結、顯示 QR、掃描 QR，並檢視三個 WSS broker 與房間 peers。它已接入既有書樓協作 provider：hello／角色、角色姿態、書本與筆記卡同步、文字協作與編輯 presence 仍使用原有應用協定，僅由 transport adapter 在 WebRTC DataChannel 或加密 relay 間傳送；不改寫協作資料格式、儲存方式或合併／衝突邏輯。加密 relay 顯示在線不代表 WebRTC direct 已連線；有效 relay 房間期間會隱藏未使用的手動 WebRTC 診斷介面，離開或房間失效後才顯示。
 
 配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 由配對碼雜湊導出；應用訊息內容（含類型、ID、peer 資訊及協作資料）先加密再發送。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。加入房間後每 3 秒送出加密 hello，10 秒未收到對方活動則標記離線；收到 relay 應用訊息會更新 peer 活動時間，但只有名單或狀態實際改變時才通知 UI，避免高頻姿態封包觸發多餘 React 重繪。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
 
-固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。transport `send()` 預設等候所有可用 broker 的 QoS 1 PUBACK；高頻角色姿態每 50 ms 取樣，使用 `acknowledgementPolicy: "first"` 並允許最多 8 筆 QoS 1 發布並行，仍 fanout 到所有可用 broker。背壓時只保留最新待送姿態；每幀帶遞增序號，接收端丟棄倒序的舊姿態。遠端角色的畫面位置／跳躍高度做短時間平滑，碰撞仍使用原始收到的位置。PUBACK 不保證接收端應用已處理訊息，也不等同端到端延遲；書樓同步仍按既有同步協定確認與合併。relay 不作資料庫，暫存與解密都在接收端記憶體。
+固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。transport `send()` 預設等候所有可用 broker 的 QoS 1 PUBACK；高頻角色姿態每 50 ms 取樣，使用 `acknowledgementPolicy: "first"` 並允許最多 8 筆 QoS 1 發布並行，仍 fanout 到所有可用 broker。背壓時只保留最新待送姿態；每幀帶遞增序號，接收端丟棄倒序的舊姿態。遠端角色的畫面位置／跳躍高度以約 75 ms 的時間戳緩衝插值呈現，碰撞仍使用原始收到的位置；這只平滑畫面，不降低傳輸延遲，實際網路效果仍需雙端驗收。PUBACK 不保證接收端應用已處理訊息，也不等同端到端延遲；書樓同步仍按既有同步協定確認與合併。relay 不作資料庫，暫存與解密都在接收端記憶體。
 
 ### 瀏覽器點對點連線（WebRTC）
 
-`/connect/` 同頁保留既有手動 WebRTC 診斷流程：使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`，Offer／Answer 等待 ICE gathering 完成後產生完整 JSON，必須由兩端人工複製／貼上。書樓協作仍由 root-level `CollaborationProvider` 持有；加入加密 relay 房間時應用訊息走 relay，未加入 relay 而完成手動配對時走 DataChannel。切換 SciNotes 頁面不會關閉目前的協作傳輸。
+`/connect/` 保留既有手動 WebRTC 診斷流程：使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`，Offer／Answer 等待 ICE gathering 完成後產生完整 JSON，必須由兩端人工複製／貼上；有效加密 relay 房間期間會隱藏此介面，離開或房間失效後重新顯示。書樓協作仍由 root-level `CollaborationProvider` 持有；加入加密 relay 房間時應用訊息走 relay，未加入 relay 而完成手動配對時走 DataChannel。切換 SciNotes 頁面不會關閉目前的協作傳輸。
 
 目前的應用訊息範圍包括**顯示名稱、房主指定的可編輯／唯讀角色、虛擬書房角色位置與動作，以及書本／筆記卡協作**。連線時發起端傳送書房快照；加入端的可編輯者會將本機書本／卡片按 ID 合併回房主，之後同步卡片內容、卡片畫布位置、書架分類／落點／排序及新增／刪除。筆記卡文字欄位逐字即時合併；卡片編輯器會顯示對方正在輸入的欄位與游標位置。一般畫布物件（含公式／圖表）、關係邊、書房視角、一般畫布游標，以及角色個人化外觀不在同步範圍。唯讀端不會回傳本機資料。
 

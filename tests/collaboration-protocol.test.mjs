@@ -25,7 +25,7 @@ await writeFile(queueModulePath, ts.transpileModule(queueSource, { compilerOptio
 await writeFile(smoothingModulePath, ts.transpileModule(smoothingSource, { compilerOptions }).outputText, "utf8");
 const protocol = await import(pathToFileURL(modulePath).href);
 const { LatestValueSendQueue } = await import(pathToFileURL(queueModulePath).href);
-const { smoothRemotePose } = await import(pathToFileURL(smoothingModulePath).href);
+const { RemotePoseInterpolator } = await import(pathToFileURL(smoothingModulePath).href);
 const { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } = await import(pathToFileURL(dimensionsModulePath).href);
 
 after(async () => {
@@ -225,18 +225,29 @@ test("bounded latest-value queue sends concurrently and replaces stale backlogge
   await flushMicrotasks();
 });
 
-test("remote pose smoothing moves positions and jumps gradually and wraps yaw over the short arc", () => {
+test("remote pose interpolation fills gaps between samples and wraps yaw over the short arc", () => {
   const current = { ...validPose, x: 0, z: 0, yaw: Math.PI - 0.05, jumpOffset: 0, visible: true };
   const target = { ...validPose, x: 3, z: 2, yaw: -Math.PI + 0.05, jumpOffset: 1, visible: true };
-  const smoothed = smoothRemotePose(current, target, 0.05);
+  const interpolator = new RemotePoseInterpolator(25);
+  interpolator.push(current, 0);
+  interpolator.push(target, 50);
+
+  const smoothed = interpolator.sample(62.5);
   assert.ok(smoothed.x > current.x && smoothed.x < target.x);
   assert.ok(smoothed.z > current.z && smoothed.z < target.z);
   assert.ok(smoothed.jumpOffset > 0 && smoothed.jumpOffset < 1);
   assert.ok(Math.abs(smoothed.yaw - Math.PI) < 0.06, "yaw must not rotate almost a full circle around the wrap boundary");
   assert.equal(smoothed.moving, target.moving, "animation state follows the newest received pose");
 
-  const hidden = { ...target, visible: false };
-  assert.deepEqual(smoothRemotePose(current, hidden, 0.016), hidden, "visibility changes take effect immediately");
+  const afterIdle = new RemotePoseInterpolator(0);
+  afterIdle.push({ ...current, x: 0 }, 0);
+  afterIdle.push({ ...current, x: 1 }, 10);
+  afterIdle.push({ ...current, x: 1 }, 1_000);
+  afterIdle.push({ ...current, x: 2 }, 1_010);
+  assert.equal(afterIdle.sample(1_005).x, 1.5, "held poses keep the interpolation timeline current after a long idle");
+
+  interpolator.push({ ...target, visible: false }, 100);
+  assert.equal(interpolator.sample(100), null, "hidden peers clear buffered samples immediately");
 });
 
 test("malformed, oversized, and unknown messages are rejected", () => {
