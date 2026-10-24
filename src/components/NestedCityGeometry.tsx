@@ -2,13 +2,35 @@
 
 import React, { useEffect } from "react";
 import * as THREE from "three";
-import { NESTED_CITY, ROOM, type CityFrame, type CityMaterial, type CityRamp } from "@/lib/room3d";
+import {
+  cityFrameMembers,
+  cityStairHeightAt,
+  nestedCityPlatformRails,
+  NESTED_CITY,
+  ROOM,
+  type CityFrame,
+  type CityMaterial,
+  type CityPlatformRail,
+  type CityStair,
+} from "@/lib/room3d";
 import type { StudySceneApi } from "./StudyScene";
 
 const SLAB_THICKNESS = 0.3;
-const RAMP_THICKNESS = 0.22;
+const STAIR_TREAD_THICKNESS = 0.12;
+const BRIDGE_POST_WIDTH = 0.085;
+const PLATFORM_RAIL_WIDTH = NESTED_CITY.platformRailPostWidth;
+const UNIT_BOX_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
 const LOCAL_Z = new THREE.Vector3(0, 0, 1);
-const LOCAL_UP = new THREE.Vector3(0, 1, 0);
+
+type BoxInstance = {
+  width: number;
+  height: number;
+  depth: number;
+  x: number;
+  y: number;
+  z: number;
+  rotationY?: number;
+};
 
 function makeBox(
   width: number,
@@ -20,12 +42,39 @@ function makeBox(
   z: number,
   castShadow = true
 ): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+  const mesh = new THREE.Mesh(UNIT_BOX_GEOMETRY, material);
   mesh.position.set(x, y, z);
+  mesh.scale.set(width, height, depth);
   mesh.castShadow = castShadow;
   mesh.receiveShadow = true;
   mesh.userData.kind = "nestedCityStructure";
   return mesh;
+}
+
+function addBoxInstances(
+  group: THREE.Group,
+  material: THREE.Material,
+  instances: readonly BoxInstance[],
+  name: string,
+  castShadow = true
+) {
+  if (!instances.length) return;
+  const batch = new THREE.InstancedMesh(UNIT_BOX_GEOMETRY, material, instances.length);
+  batch.name = name;
+  batch.castShadow = castShadow;
+  batch.receiveShadow = true;
+  batch.userData.kind = "nestedCityStructureBatch";
+  const transform = new THREE.Object3D();
+  instances.forEach((instance, index) => {
+    transform.position.set(instance.x, instance.y, instance.z);
+    transform.rotation.set(0, instance.rotationY ?? 0, 0);
+    transform.scale.set(instance.width, instance.height, instance.depth);
+    transform.updateMatrix();
+    batch.setMatrixAt(index, transform.matrix);
+  });
+  batch.instanceMatrix.needsUpdate = true;
+  batch.computeBoundingSphere();
+  group.add(batch);
 }
 
 function addFrame(group: THREE.Group, frame: CityFrame, material: THREE.Material) {
@@ -35,57 +84,19 @@ function addFrame(group: THREE.Group, frame: CityFrame, material: THREE.Material
   frameGroup.rotation.y = frame.rotationY;
   group.add(frameGroup);
 
-  const yMid = frame.bottom + (frame.height - frame.beamHeight) / 2;
-  const postHeight = frame.height - frame.beamHeight;
-  const topY = frame.bottom + frame.height - frame.beamHeight / 2;
-  const addLocal = (w: number, h: number, d: number, x: number, y: number, z: number) => {
-    frameGroup.add(makeBox(w, h, d, material, x, y, z));
-  };
-
-  if (frame.plane === "x") {
-    for (const side of [-1, 1]) {
-      addLocal(frame.thickness, postHeight, frame.thickness, side * frame.width / 2, yMid, 0);
-    }
-    addLocal(frame.width, frame.beamHeight, frame.thickness, 0, topY, 0);
-    for (const band of frame.bands ?? []) {
-      addLocal(frame.width, frame.beamHeight * 0.72, frame.thickness, 0, frame.bottom + band, 0);
-    }
-  } else if (frame.plane === "z") {
-    for (const side of [-1, 1]) {
-      addLocal(frame.thickness, postHeight, frame.thickness, 0, yMid, side * frame.width / 2);
-    }
-    addLocal(frame.thickness, frame.beamHeight, frame.width, 0, topY, 0);
-    for (const band of frame.bands ?? []) {
-      addLocal(frame.thickness, frame.beamHeight * 0.72, frame.width, 0, frame.bottom + band, 0);
-    }
-  } else {
-    const depth = frame.depth ?? frame.width;
-    for (const xSide of [-1, 1]) {
-      for (const zSide of [-1, 1]) {
-        addLocal(frame.thickness, postHeight, frame.thickness, xSide * frame.width / 2, yMid, zSide * depth / 2);
-      }
-    }
-    addLocal(frame.width, frame.beamHeight, frame.thickness, 0, topY, -depth / 2);
-    addLocal(frame.width, frame.beamHeight, frame.thickness, 0, topY, depth / 2);
-    addLocal(frame.thickness, frame.beamHeight, depth, -frame.width / 2, topY, 0);
-    addLocal(frame.thickness, frame.beamHeight, depth, frame.width / 2, topY, 0);
-    for (const band of frame.bands ?? []) {
-      const bandY = frame.bottom + band;
-      addLocal(frame.width, frame.beamHeight * 0.58, frame.thickness, 0, bandY, -depth / 2);
-      addLocal(frame.width, frame.beamHeight * 0.58, frame.thickness, 0, bandY, depth / 2);
-      addLocal(frame.thickness, frame.beamHeight * 0.58, depth, -frame.width / 2, bandY, 0);
-      addLocal(frame.thickness, frame.beamHeight * 0.58, depth, frame.width / 2, bandY, 0);
-    }
+  for (const member of cityFrameMembers(frame)) {
+    const mesh = makeBox(
+      member.width,
+      member.top - member.bottom,
+      member.depth,
+      material,
+      member.x,
+      (member.bottom + member.top) / 2,
+      member.z
+    );
+    mesh.userData.frameId = frame.id;
+    frameGroup.add(mesh);
   }
-}
-
-function rampQuaternion(ramp: CityRamp): THREE.Quaternion {
-  const direction = new THREE.Vector3(
-    ramp.end.x - ramp.start.x,
-    ramp.end.y - ramp.start.y,
-    ramp.end.z - ramp.start.z
-  ).normalize();
-  return new THREE.Quaternion().setFromUnitVectors(LOCAL_Z, direction);
 }
 
 function addBeamBetween(
@@ -105,56 +116,122 @@ function addBeamBetween(
   group.add(mesh);
 }
 
-function addRamp(group: THREE.Group, ramp: CityRamp, materials: Record<CityMaterial, THREE.Material>, railMat: THREE.Material, treadMat: THREE.Material) {
-  const start = new THREE.Vector3(ramp.start.x, ramp.start.y, ramp.start.z);
-  const end = new THREE.Vector3(ramp.end.x, ramp.end.y, ramp.end.z);
-  const delta = end.clone().sub(start);
-  const length = delta.length();
-  const quaternion = rampQuaternion(ramp);
-  const normal = LOCAL_UP.clone().applyQuaternion(quaternion).normalize();
-  const center = start.clone().add(end).multiplyScalar(0.5).addScaledVector(normal, -RAMP_THICKNESS / 2);
-  const slab = makeBox(ramp.width, RAMP_THICKNESS, length, materials[ramp.material], center.x, center.y, center.z);
-  slab.name = `nested-city-ramp:${ramp.id}`;
-  slab.quaternion.copy(quaternion);
-  group.add(slab);
+function addStair(group: THREE.Group, stair: CityStair, materials: Record<CityMaterial, THREE.Material>, railMat: THREE.Material, treadMat: THREE.Material) {
+  const dx = stair.end.x - stair.start.x;
+  const dz = stair.end.z - stair.start.z;
+  const horizontalLength = Math.hypot(dx, dz);
+  const stepRun = horizontalLength / stair.steps;
+  const yaw = Math.atan2(dx, dz);
+  const directionX = dx / horizontalLength;
+  const directionZ = dz / horizontalLength;
+  const sideX = -directionZ;
+  const sideZ = directionX;
+  const treadInstances: BoxInstance[] = [];
+  const noseInstances: BoxInstance[] = [];
 
-  // 橫向淺刻線讓斜坡讀成可走的石階／木階；角色仍沿連續斜面行走。
-  const treads = Math.max(12, Math.floor(length / 0.42));
-  for (let i = 1; i < treads; i++) {
-    const t = i / treads;
-    const point = start.clone().lerp(end, t).addScaledVector(normal, 0.018);
-    const tread = makeBox(ramp.width - 0.22, 0.035, 0.055, treadMat, point.x, point.y, point.z, false);
-    tread.quaternion.copy(quaternion);
-    group.add(tread);
+  for (let index = 0; index < stair.steps; index++) {
+    const progress = (index + 0.5) / stair.steps;
+    const x = stair.start.x + dx * progress;
+    const z = stair.start.z + dz * progress;
+    const topY = stair.start.y + ((stair.end.y - stair.start.y) * (index + 1)) / stair.steps;
+    treadInstances.push({
+      width: stair.width,
+      height: STAIR_TREAD_THICKNESS,
+      depth: stepRun,
+      x,
+      y: topY - STAIR_TREAD_THICKNESS / 2,
+      z,
+      rotationY: yaw,
+    });
+
+    const noseDistance = (index + 1) * stepRun - 0.025;
+    noseInstances.push({
+      width: stair.width - 0.12,
+      height: 0.025,
+      depth: 0.04,
+      x: stair.start.x + directionX * noseDistance,
+      y: topY - 0.012,
+      z: stair.start.z + directionZ * noseDistance,
+      rotationY: yaw,
+    });
   }
+  addBoxInstances(group, materials[stair.material], treadInstances, `nested-city-stair-treads:${stair.id}`);
+  addBoxInstances(group, treadMat, noseInstances, `nested-city-stair-noses:${stair.id}`, false);
 
-  const horizontalLength = Math.hypot(ramp.end.x - ramp.start.x, ramp.end.z - ramp.start.z);
-  const sideX = -(ramp.end.z - ramp.start.z) / horizontalLength;
-  const sideZ = (ramp.end.x - ramp.start.x) / horizontalLength;
+  const railInsetT = Math.min(0.15, NESTED_CITY.stairRailInset / horizontalLength);
+  const railStartT = railInsetT;
+  const railEndT = 1 - railInsetT;
   for (const side of [-1, 1]) {
-    const offset = (ramp.width / 2 - 0.07) * side;
-    const insetT = Math.min(0.35, NESTED_CITY.rampRailInset / horizontalLength);
-    const railStartT = insetT;
-    const railEndT = 1 - insetT;
+    const sideOffset = (stair.width / 2 - PLATFORM_RAIL_WIDTH / 2) * side;
+    const stringerOffset = (stair.width / 2 - 0.08) * side;
+    const stringerStart = new THREE.Vector3(
+      stair.start.x + sideX * stringerOffset,
+      stair.start.y - 0.1,
+      stair.start.z + sideZ * stringerOffset
+    );
+    const stringerEnd = new THREE.Vector3(
+      stair.end.x + sideX * stringerOffset,
+      stair.end.y - 0.1,
+      stair.end.z + sideZ * stringerOffset
+    );
+    addBeamBetween(group, stringerStart, stringerEnd, 0.08, 0.1, railMat);
+
     const railStart = new THREE.Vector3(
-      ramp.start.x + (ramp.end.x - ramp.start.x) * railStartT + sideX * offset,
-      ramp.start.y + (ramp.end.y - ramp.start.y) * railStartT + 0.92,
-      ramp.start.z + (ramp.end.z - ramp.start.z) * railStartT + sideZ * offset
+      stair.start.x + dx * railStartT + sideX * sideOffset,
+      cityStairHeightAt(stair, railStartT) + NESTED_CITY.railHeight - 0.04,
+      stair.start.z + dz * railStartT + sideZ * sideOffset
     );
     const railEnd = new THREE.Vector3(
-      ramp.start.x + (ramp.end.x - ramp.start.x) * railEndT + sideX * offset,
-      ramp.start.y + (ramp.end.y - ramp.start.y) * railEndT + 0.92,
-      ramp.start.z + (ramp.end.z - ramp.start.z) * railEndT + sideZ * offset
+      stair.start.x + dx * railEndT + sideX * sideOffset,
+      cityStairHeightAt(stair, railEndT) + NESTED_CITY.railHeight - 0.04,
+      stair.start.z + dz * railEndT + sideZ * sideOffset
     );
-    addBeamBetween(group, railStart, railEnd, 0.12, 0.12, railMat);
-    const posts = Math.max(3, Math.ceil(horizontalLength * (railEndT - railStartT) / 2.2));
-    for (let i = 0; i <= posts; i++) {
-      const t = railStartT + (railEndT - railStartT) * i / posts;
-      const x = ramp.start.x + (ramp.end.x - ramp.start.x) * t + sideX * offset;
-      const z = ramp.start.z + (ramp.end.z - ramp.start.z) * t + sideZ * offset;
-      const y = ramp.start.y + (ramp.end.y - ramp.start.y) * t;
-      group.add(makeBox(0.085, 0.94, 0.085, railMat, x, y + 0.48, z));
+    addBeamBetween(group, railStart, railEnd, PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, railMat);
+
+    const posts = Math.max(2, Math.ceil(horizontalLength * (railEndT - railStartT) / 1.65));
+    for (let index = 0; index <= posts; index++) {
+      const t = railStartT + (railEndT - railStartT) * index / posts;
+      const x = stair.start.x + dx * t + sideX * sideOffset;
+      const z = stair.start.z + dz * t + sideZ * sideOffset;
+      const surfaceY = cityStairHeightAt(stair, t);
+      group.add(makeBox(
+        PLATFORM_RAIL_WIDTH,
+        NESTED_CITY.railHeight,
+        PLATFORM_RAIL_WIDTH,
+        railMat,
+        x,
+        surfaceY + NESTED_CITY.railHeight / 2,
+        z
+      ));
     }
+  }
+}
+
+function addPlatformGuardrail(group: THREE.Group, rail: CityPlatformRail, material: THREE.Material, postMaterial: THREE.Material) {
+  const floorY = NESTED_CITY.levels[rail.level];
+  const length = rail.end - rail.start;
+  const fixed = rail.fixed + rail.inward * PLATFORM_RAIL_WIDTH / 2;
+  const center = (rail.start + rail.end) / 2;
+  const top = rail.axis === "x"
+    ? makeBox(length, PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, material, center, floorY + NESTED_CITY.railHeight, fixed)
+    : makeBox(PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, length, material, fixed, floorY + NESTED_CITY.railHeight, center);
+  top.name = `nested-city-platform-rail:${rail.id}`;
+  group.add(top);
+
+  const postCount = Math.max(1, Math.ceil(length / 1.65));
+  for (let index = 0; index <= postCount; index++) {
+    const along = rail.start + PLATFORM_RAIL_WIDTH / 2 + (length - PLATFORM_RAIL_WIDTH) * index / postCount;
+    const x = rail.axis === "x" ? along : fixed;
+    const z = rail.axis === "z" ? along : fixed;
+    group.add(makeBox(
+      PLATFORM_RAIL_WIDTH,
+      NESTED_CITY.railHeight,
+      PLATFORM_RAIL_WIDTH,
+      postMaterial,
+      x,
+      floorY + NESTED_CITY.railHeight / 2,
+      z
+    ));
   }
 }
 
@@ -170,15 +247,18 @@ function addBridgeRail(
   const top = makeBox(rail.width, 0.08, rail.depth, material, rail.x, floorY + NESTED_CITY.railHeight, rail.z);
   top.name = `nested-city-guardrail:${rail.id}`;
   group.add(top);
+  const railLength = isXLong ? rail.width : rail.depth;
   for (let i = 0; i <= postCount; i++) {
+    // Keep each end post fully over the deck instead of centering it on the slab's outer edge.
     const t = i / postCount;
-    const x = isXLong ? rail.x - rail.width / 2 + rail.width * t : rail.x;
-    const z = isXLong ? rail.z : rail.z - rail.depth / 2 + rail.depth * t;
-    group.add(makeBox(0.085, NESTED_CITY.railHeight, 0.085, postMaterial, x, floorY + NESTED_CITY.railHeight / 2, z));
+    const along = BRIDGE_POST_WIDTH / 2 + (railLength - BRIDGE_POST_WIDTH) * t;
+    const x = isXLong ? rail.x - rail.width / 2 + along : rail.x;
+    const z = isXLong ? rail.z : rail.z - rail.depth / 2 + along;
+    group.add(makeBox(BRIDGE_POST_WIDTH, NESTED_CITY.railHeight, BRIDGE_POST_WIDTH, postMaterial, x, floorY + NESTED_CITY.railHeight / 2, z));
   }
 }
 
-/** 三重框架、挑空樓板與斜坡幾何；既有 RoomGeometry 繼續供應書桌／書本資料。 */
+/** 三重框架、挑空樓板與開放踏階幾何；既有 RoomGeometry 繼續供應書桌／書本資料。 */
 export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boolean }> = ({ api, whiteModel = false }) => {
   useEffect(() => {
     const group = new THREE.Group();
@@ -206,22 +286,10 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       timber, timberLight, stone, stoneLight, core, coreLight, deckTimber, deckStone, deckCore, underside, rail, railStone, tread, led,
     ];
 
-    // 外側暖木主框、中層石構件、偏心旋轉的內核；各自朝向／深度不同，不是同心套盒。
+    // 三重主體以共用構件資料生成：連續外框、橫向穿插體、較小且偏轉的內核。
     for (const frame of NESTED_CITY.frames) {
       const material = frame.material === "timber" ? timber : frame.material === "stone" ? stone : core;
       addFrame(group, frame, material);
-      // 木構接點以一條細亮色壓條提示榫接，不把整個框做成發光輪廓。
-      if (frame.material === "timber") {
-        const y = frame.bottom + frame.height - frame.beamHeight + 0.06;
-        const width = frame.plane === "z" ? frame.thickness + 0.015 : frame.width;
-        const depth = frame.plane === "x" ? frame.thickness + 0.015 : frame.width;
-        const accent = makeBox(width, 0.035, depth, timberLight, frame.x, y, frame.z, false);
-        if (frame.rotationY) {
-          accent.position.set(frame.x, y, frame.z);
-          accent.rotation.y = frame.rotationY;
-        }
-        group.add(accent);
-      }
     }
 
     // 外殼僅留低矮石基座與高窗，不再用整圈實牆／平頂封住中央挑空。
@@ -246,25 +314,23 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       );
       slab.name = `nested-city-platform:${platform.id}`;
       group.add(slab);
-      // 平台外緣加入厚石／木封邊，讓懸挑樓板有明確的結構深度。
-      const fasciaMat = platform.material === "timber" ? timber : platform.material === "stone" ? stoneLight : coreLight;
-      const fasciaDepth = Math.min(0.12, platform.depth * 0.12);
-      group.add(makeBox(platform.width, 0.1, fasciaDepth, fasciaMat, platform.x, y - 0.12, platform.z + platform.depth / 2 - fasciaDepth / 2, false));
-      group.add(makeBox(platform.width, 0.018, 0.035, led, platform.x, y - 0.035, platform.z + platform.depth / 2 - 0.055, false));
     }
 
-    for (const ramp of NESTED_CITY.ramps) {
-      addRamp(group, ramp, materials, rail, tread);
+    for (const stair of NESTED_CITY.stairs) {
+      addStair(group, stair, materials, rail, tread);
     }
     for (const bridgeRail of NESTED_CITY.bridgeRails) {
       addBridgeRail(group, bridgeRail, railStone, rail);
+    }
+    for (const platformRail of nestedCityPlatformRails()) {
+      addPlatformGuardrail(group, platformRail, railStone, rail);
     }
 
     // 局部木作書格與閱讀平台：只提供空間層次，真實卡片書本仍由既有書架系統管理。
     for (const [y, x, z, width] of [
       [4.35, -9.55, -2.1, 3.6],
       [8.35, 8.15, 1.6, 2.1],
-      [12.35, -7.2, 0.3, 3.1],
+      [12.35, -9.3, 0.3, 3],
     ] as const) {
       for (let row = 0; row < 3; row++) {
         const shelfY = y + row * 0.48;
@@ -295,7 +361,7 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       api.scene.remove(group);
       group.traverse((object) => {
         const mesh = object as THREE.Mesh;
-        mesh.geometry?.dispose();
+        if (mesh.geometry && mesh.geometry !== UNIT_BOX_GEOMETRY) mesh.geometry.dispose();
       });
       allMaterials.forEach((material) => material.dispose());
     };
