@@ -78,10 +78,11 @@ class MemoryStore {
   };
 }
 
-function createPair({ hostState, guestState, guestRole = "editor" }) {
+function createPair({ hostState, guestState, guestRole = "editor", hostRemoteActorId = "peer-b" }) {
   const hostStore = new MemoryStore(hostState);
   const guestStore = new MemoryStore(guestState);
   const queue = [];
+  let currentHostRemoteActorId = hostRemoteActorId;
   const hostAssembler = new shared.SharedContentChunkAssembler();
   const guestAssembler = new shared.SharedContentChunkAssembler();
   let host;
@@ -102,7 +103,7 @@ function createPair({ hostState, guestState, guestRole = "editor" }) {
     send: (message) => enqueue("guest", message),
     getLocalRole: () => "owner",
     getRemoteRole: () => guestRole,
-    getRemoteActorId: () => "peer-b",
+    getRemoteActorId: () => currentHostRemoteActorId,
   });
   guest = new shared.SharedContentReplicator({
     actorId: "peer-b",
@@ -132,11 +133,20 @@ function createPair({ hostState, guestState, guestRole = "editor" }) {
     }
   };
 
-  return { host, guest, hostStore, guestStore, start: () => {
-    guest.start("joiner");
-    host.start("owner");
-    drain();
-  }, drain, queue };
+  return {
+    host,
+    guest,
+    hostStore,
+    guestStore,
+    setHostRemoteActorId: (actorId) => { currentHostRemoteActorId = actorId; },
+    start: () => {
+      guest.start("joiner");
+      host.start("owner");
+      drain();
+    },
+    drain,
+    queue,
+  };
 }
 
 test("shared content selection includes cards, card nodes, categories, and books only", () => {
@@ -248,19 +258,34 @@ test("applying remote records updates workspace-local ids and cascades card dele
   assert.equal(deleted.processLogs.length, 1);
 });
 
-test("owner can resend the existing snapshot after a joiner arrives late", () => {
+test("owner waits for hello before snapshot and ignores repeated hello resends for the same peer", () => {
   const pair = createPair({
     hostState: makeState("card-host", "Host card"),
     guestState: makeState("card-guest", "Guest card"),
+    hostRemoteActorId: null,
   });
 
   pair.host.start("owner");
-  pair.queue.length = 0; // MQTT does not retain the owner's first snapshot.
+  assert.equal(pair.queue.length, 0, "an owner alone should not publish an unnecessary snapshot");
+  pair.hostStore.mutate((state) => ({
+    ...state,
+    cards: state.cards.map((card) => ({ ...card, title: "Updated before join" })),
+  }));
+  assert.equal(pair.host.flushPendingOperations(), true);
+  assert.equal(pair.queue.length, 0, "local edits wait for the initial snapshot instead of being sent to an empty room");
+
+  pair.setHostRemoteActorId("peer-b"); // The provider sets this after accepting the joiner's hello.
   assert.equal(pair.host.resendSnapshot(), true);
+  const firstSnapshotFrameCount = pair.queue.length;
+  assert.ok(firstSnapshotFrameCount > 0);
+  assert.equal(pair.host.resendSnapshot(), false, "duplicate hellos must not enqueue another snapshot");
+  assert.equal(pair.queue.length, firstSnapshotFrameCount);
+
   pair.guest.start("joiner");
   pair.drain();
 
   assert.equal(pair.guestStore.getState().cards.some((card) => card.id === "card-host"), true);
+  assert.equal(pair.guestStore.getState().cards.find((card) => card.id === "card-host").title, "Updated before join");
   assert.equal(pair.queue.length, 0);
   pair.host.stop();
   pair.guest.stop();
