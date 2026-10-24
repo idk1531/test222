@@ -85,14 +85,14 @@ export const UNCATEGORIZED_COLOR = "#a8a29e";
  */
 export const CAMERA_LIMITS = { pitchMin: -70, pitchMax: 40 };
 /**
- * 嵌套之城初始取景：退到東南側並朝西北穿過交錯框架，讓樓層、中央挑空、木／石構件與北側窗光同時可讀。
- * 只影響「第一次進書房」與「重置視角」；已有完整相機資料的使用者不被覆寫。
+ * Reference-board entrance view: 1F at the south lobby, looking inward and 15° upward
+ * through the atrium. This affects only first entry/reset; saved camera poses remain intact.
  */
 export const DEFAULT_CAMERA: StudyCamera = {
-  yaw: -48,
-  pitch: -2,
-  x: ROOM_DIMENSIONS.width * 0.424,
-  z: ROOM_DIMENSIONS.depth * 0.418,
+  yaw: 70,
+  pitch: 15,
+  x: 0,
+  z: ROOM_DIMENSIONS.depth / 2 - 1.6,
   height: 1.52,
   floorY: 0,
 };

@@ -13,6 +13,7 @@ import {
   type CityPlatformRail,
   type CityStair,
 } from "@/lib/room3d";
+import { attachPhotoMap } from "@/lib/roomTextures";
 import type { StudySceneApi } from "./StudyScene";
 
 const SLAB_THICKNESS = 0.3;
@@ -116,7 +117,13 @@ function addBeamBetween(
   group.add(mesh);
 }
 
-function addStair(group: THREE.Group, stair: CityStair, materials: Record<CityMaterial, THREE.Material>, railMat: THREE.Material, treadMat: THREE.Material) {
+function addStair(
+  group: THREE.Group,
+  stair: CityStair,
+  materials: Record<CityMaterial, THREE.Material>,
+  railMat: THREE.Material,
+  treadMat: THREE.Material
+) {
   const dx = stair.end.x - stair.start.x;
   const dz = stair.end.z - stair.start.z;
   const horizontalLength = Math.hypot(dx, dz);
@@ -207,14 +214,28 @@ function addStair(group: THREE.Group, stair: CityStair, materials: Record<CityMa
   }
 }
 
-function addPlatformGuardrail(group: THREE.Group, rail: CityPlatformRail, material: THREE.Material, postMaterial: THREE.Material) {
+function addPlatformGuardrail(
+  group: THREE.Group,
+  rail: CityPlatformRail,
+  topRailMaterial: THREE.Material,
+  postMaterial: THREE.Material,
+  glassMaterial: THREE.Material
+) {
   const floorY = NESTED_CITY.levels[rail.level];
   const length = rail.end - rail.start;
-  const fixed = rail.fixed + rail.inward * PLATFORM_RAIL_WIDTH / 2;
+  const halfGlass = NESTED_CITY.glassRailThickness / 2;
+  const fixed = rail.fixed + rail.inward * halfGlass;
   const center = (rail.start + rail.end) / 2;
+  const panelHeight = NESTED_CITY.railHeight - 0.16;
+  const panel = rail.axis === "x"
+    ? makeBox(length, panelHeight, NESTED_CITY.glassRailThickness, glassMaterial, center, floorY + 0.08 + panelHeight / 2, fixed, false)
+    : makeBox(NESTED_CITY.glassRailThickness, panelHeight, length, glassMaterial, fixed, floorY + 0.08 + panelHeight / 2, center, false);
+  panel.name = `nested-city-glass-guard:${rail.id}`;
+  group.add(panel);
+
   const top = rail.axis === "x"
-    ? makeBox(length, PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, material, center, floorY + NESTED_CITY.railHeight, fixed)
-    : makeBox(PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, length, material, fixed, floorY + NESTED_CITY.railHeight, center);
+    ? makeBox(length, PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, topRailMaterial, center, floorY + NESTED_CITY.railHeight, fixed)
+    : makeBox(PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, length, topRailMaterial, fixed, floorY + NESTED_CITY.railHeight, center);
   top.name = `nested-city-platform-rail:${rail.id}`;
   group.add(top);
 
@@ -238,19 +259,36 @@ function addPlatformGuardrail(group: THREE.Group, rail: CityPlatformRail, materi
 function addBridgeRail(
   group: THREE.Group,
   rail: (typeof NESTED_CITY.bridgeRails)[number],
-  material: THREE.Material,
-  postMaterial: THREE.Material
+  topRailMaterial: THREE.Material,
+  postMaterial: THREE.Material,
+  glassMaterial: THREE.Material
 ) {
   const floorY = NESTED_CITY.levels[rail.level];
   const postCount = Math.max(2, Math.ceil(Math.max(rail.width, rail.depth) / 1.65));
   const isXLong = rail.width >= rail.depth;
-  const top = makeBox(rail.width, 0.08, rail.depth, material, rail.x, floorY + NESTED_CITY.railHeight, rail.z);
-  top.name = `nested-city-guardrail:${rail.id}`;
+  const panelHeight = NESTED_CITY.railHeight - 0.16;
+  const panel = isXLong
+    ? makeBox(rail.width, panelHeight, NESTED_CITY.glassRailThickness, glassMaterial, rail.x, floorY + 0.08 + panelHeight / 2, rail.z, false)
+    : makeBox(NESTED_CITY.glassRailThickness, panelHeight, rail.depth, glassMaterial, rail.x, floorY + 0.08 + panelHeight / 2, rail.z, false);
+  panel.name = `nested-city-glass-bridge-guard:${rail.id}`;
+  group.add(panel);
+
+  const top = makeBox(
+    rail.width,
+    PLATFORM_RAIL_WIDTH,
+    rail.depth,
+    topRailMaterial,
+    rail.x,
+    floorY + NESTED_CITY.railHeight,
+    rail.z
+  );
+  top.name = `nested-city-bridge-rail:${rail.id}`;
   group.add(top);
+
   const railLength = isXLong ? rail.width : rail.depth;
-  for (let i = 0; i <= postCount; i++) {
+  for (let index = 0; index <= postCount; index++) {
     // Keep each end post fully over the deck instead of centering it on the slab's outer edge.
-    const t = i / postCount;
+    const t = index / postCount;
     const along = BRIDGE_POST_WIDTH / 2 + (railLength - BRIDGE_POST_WIDTH) * t;
     const x = isXLong ? rail.x - rail.width / 2 + along : rail.x;
     const z = isXLong ? rail.z : rail.z - rail.depth / 2 + along;
@@ -258,44 +296,218 @@ function addBridgeRail(
   }
 }
 
-/** 三重框架、挑空樓板與開放踏階幾何；既有 RoomGeometry 繼續供應書桌／書本資料。 */
+function addReadingTable(
+  group: THREE.Group,
+  x: number,
+  floorY: number,
+  z: number,
+  width: number,
+  depth: number,
+  wood: THREE.Material,
+  metal: THREE.Material,
+  seating = true
+) {
+  const topY = floorY + 0.78;
+  group.add(makeBox(width, 0.1, depth, wood, x, topY, z));
+  for (const dx of [-1, 1]) {
+    for (const dz of [-1, 1]) {
+      group.add(makeBox(0.075, 0.72, 0.075, metal, x + dx * (width / 2 - 0.12), floorY + 0.36, z + dz * (depth / 2 - 0.1), false));
+    }
+  }
+  if (!seating) return;
+
+  for (const side of [-1, 1]) {
+    const chairX = x + side * (width * 0.33);
+    const chairZ = z + depth / 2 + 0.46;
+    group.add(makeBox(0.62, 0.08, 0.5, wood, chairX, floorY + 0.48, chairZ));
+    group.add(makeBox(0.62, 0.56, 0.08, wood, chairX, floorY + 0.76, chairZ + 0.22));
+    group.add(makeBox(0.07, 0.46, 0.07, metal, chairX - 0.22, floorY + 0.23, chairZ - 0.12, false));
+    group.add(makeBox(0.07, 0.46, 0.07, metal, chairX + 0.22, floorY + 0.23, chairZ - 0.12, false));
+  }
+}
+
+function addPlanter(
+  group: THREE.Group,
+  x: number,
+  floorY: number,
+  z: number,
+  size: number,
+  planterMaterial: THREE.Material,
+  soilMaterial: THREE.Material,
+  trunkMaterial: THREE.Material,
+  foliageMaterial: THREE.Material
+) {
+  const planterHeight = 0.42;
+  group.add(makeBox(size, planterHeight, size * 0.82, planterMaterial, x, floorY + planterHeight / 2, z));
+  group.add(makeBox(size * 0.84, 0.05, size * 0.68, soilMaterial, x, floorY + planterHeight + 0.02, z));
+
+  const trunkHeight = size * 1.65;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.055, size * 0.09, trunkHeight, 7), trunkMaterial);
+  trunk.position.set(x, floorY + planterHeight + trunkHeight / 2, z);
+  trunk.castShadow = true;
+  trunk.receiveShadow = true;
+  group.add(trunk);
+
+  const crownY = floorY + planterHeight + trunkHeight * 0.9;
+  for (const [dx, dy, dz, scale] of [
+    [0, 0, 0, 1],
+    [-size * 0.28, size * 0.18, 0, 0.7],
+    [size * 0.28, size * 0.14, size * 0.08, 0.68],
+    [0, size * 0.2, -size * 0.26, 0.72],
+  ] as const) {
+    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(size * 0.42 * scale, 1), foliageMaterial);
+    crown.position.set(x + dx, crownY + dy, z + dz);
+    crown.castShadow = true;
+    crown.receiveShadow = true;
+    group.add(crown);
+  }
+}
+
+function addLibraryWall(
+  group: THREE.Group,
+  wood: THREE.Material,
+  bookMaterials: readonly THREE.Material[],
+  led: THREE.Material
+) {
+  const bookInstances: BoxInstance[][] = bookMaterials.map(() => []);
+  for (const obstacle of NESTED_CITY.obstacles) {
+    group.add(makeBox(
+      obstacle.width,
+      obstacle.top - obstacle.bottom,
+      obstacle.depth,
+      wood,
+      obstacle.x,
+      (obstacle.top + obstacle.bottom) / 2,
+      obstacle.z,
+      false
+    ));
+
+    const left = obstacle.x - obstacle.width / 2 + 0.16;
+    const right = obstacle.x + obstacle.width / 2 - 0.16;
+    const shelfRows = 8;
+    for (let row = 0; row < shelfRows; row++) {
+      const shelfY = 0.72 + row * 0.92;
+      group.add(makeBox(obstacle.width - 0.16, 0.075, 0.5, wood, obstacle.x, shelfY, obstacle.z - 0.24, false));
+      group.add(makeBox(obstacle.width - 0.28, 0.018, 0.025, led, obstacle.x, shelfY - 0.055, obstacle.z - 0.48, false));
+
+      let cursor = left;
+      let bookIndex = row * 13;
+      while (cursor < right - 0.2) {
+        const width = 0.13 + (bookIndex % 4) * 0.025;
+        const height = 0.48 + ((bookIndex * 7 + row * 3) % 5) * 0.065;
+        const materialIndex = bookIndex % bookInstances.length;
+        bookInstances[materialIndex].push({
+          width,
+          height,
+          depth: 0.15,
+          x: cursor + width / 2,
+          y: shelfY + 0.04 + height / 2,
+          z: obstacle.z - obstacle.depth / 2 - 0.07,
+        });
+        cursor += width + 0.055;
+        bookIndex++;
+      }
+    }
+  }
+  bookInstances.forEach((instances, index) => {
+    addBoxInstances(group, bookMaterials[index], instances, `nested-city-library-books:${index}`, false);
+  });
+}
+
+/** Reference floor program: 1F entrance/exhibition, 2F public stacks, 3F quiet study, 4F sky terrace. */
 export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boolean }> = ({ api, whiteModel = false }) => {
   useEffect(() => {
     const group = new THREE.Group();
     group.name = "nested-city-architecture";
     api.scene.add(group);
+    const textureDisposers: Array<() => void> = [];
 
     const materialColor = (base: string) => whiteModel ? "#d8d5cf" : base;
-    const timber = new THREE.MeshStandardMaterial({ color: materialColor("#8b6545"), roughness: 0.78, metalness: 0.02 });
+    const timber = new THREE.MeshStandardMaterial({ color: materialColor("#8b6545"), roughness: 0.78, metalness: 0.02, envMapIntensity: 0.08 });
     const timberLight = new THREE.MeshStandardMaterial({ color: materialColor("#ae8a63"), roughness: 0.72, metalness: 0.02 });
-    const stone = new THREE.MeshStandardMaterial({ color: materialColor("#99958c"), roughness: 0.91, metalness: 0.015 });
+    const stone = new THREE.MeshStandardMaterial({ color: materialColor("#99958c"), roughness: 0.91, metalness: 0.015, envMapIntensity: 0.05 });
     const stoneLight = new THREE.MeshStandardMaterial({ color: materialColor("#b9b2a7"), roughness: 0.86, metalness: 0.01 });
-    const core = new THREE.MeshStandardMaterial({ color: materialColor("#665e60"), roughness: 0.84, metalness: 0.025 });
+    const core = new THREE.MeshStandardMaterial({ color: materialColor("#665e60"), roughness: 0.84, metalness: 0.025, envMapIntensity: 0.08 });
     const coreLight = new THREE.MeshStandardMaterial({ color: materialColor("#87787b"), roughness: 0.78, metalness: 0.025 });
     const deckTimber = new THREE.MeshStandardMaterial({ color: materialColor("#59483a"), roughness: 0.88 });
     const deckStone = new THREE.MeshStandardMaterial({ color: materialColor("#88847c"), roughness: 0.92 });
     const deckCore = new THREE.MeshStandardMaterial({ color: materialColor("#514a4d"), roughness: 0.87 });
-    const underside = new THREE.MeshStandardMaterial({ color: materialColor("#4d4743"), roughness: 0.92 });
     const rail = new THREE.MeshStandardMaterial({ color: materialColor("#4a3a30"), roughness: 0.7 });
-    const railStone = new THREE.MeshStandardMaterial({ color: materialColor("#69655f"), roughness: 0.82 });
+    const railStone = new THREE.MeshStandardMaterial({ color: materialColor("#69655f"), roughness: 0.82, metalness: 0.12 });
+    const metal = new THREE.MeshStandardMaterial({ color: materialColor("#79736a"), roughness: 0.42, metalness: 0.68 });
+    const glass = new THREE.MeshPhysicalMaterial({
+      color: whiteModel ? "#f1efeb" : "#9dbec1",
+      roughness: 0.08,
+      metalness: 0.04,
+      transparent: true,
+      opacity: whiteModel ? 0.12 : 0.24,
+      transmission: whiteModel ? 0 : 0.28,
+      thickness: 0.08,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      envMapIntensity: 0.45,
+    });
+    const entranceGlass = new THREE.MeshPhysicalMaterial({
+      color: whiteModel ? "#f1efeb" : "#a9c7c8",
+      roughness: 0.06,
+      metalness: 0.03,
+      transparent: true,
+      opacity: whiteModel ? 0.14 : 0.2,
+      transmission: whiteModel ? 0 : 0.38,
+      thickness: 0.08,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      envMapIntensity: 0.5,
+    });
     const tread = new THREE.MeshStandardMaterial({ color: materialColor("#c2a17b"), roughness: 0.85 });
+    const planterMat = new THREE.MeshStandardMaterial({ color: materialColor("#79766e"), roughness: 0.94 });
+    const soilMat = new THREE.MeshStandardMaterial({ color: materialColor("#473c30"), roughness: 1 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: materialColor("#72583c"), roughness: 0.95 });
+    const foliageMat = new THREE.MeshStandardMaterial({ color: materialColor("#58764f"), roughness: 0.92 });
     const led = new THREE.MeshBasicMaterial({ color: whiteModel ? "#f4f2ed" : "#ffc887", toneMapped: false });
     const materials: Record<CityMaterial, THREE.Material> = { timber, stone, core };
     const platformMaterials: Record<CityMaterial, THREE.Material> = { timber: deckTimber, stone: deckStone, core: deckCore };
     const allMaterials: THREE.Material[] = [
-      timber, timberLight, stone, stoneLight, core, coreLight, deckTimber, deckStone, deckCore, underside, rail, railStone, tread, led,
+      timber, timberLight, stone, stoneLight, core, coreLight, deckTimber, deckStone, deckCore,
+      rail, railStone, metal, glass, entranceGlass, tread, planterMat, soilMat, trunkMat, foliageMat, led,
     ];
 
-    // 三重主體以共用構件資料生成：連續外框、橫向穿插體、較小且偏轉的內核。
-    for (const frame of NESTED_CITY.frames) {
+    if (!whiteModel) {
+      const anisotropy = Math.min(8, api.renderer.capabilities.getMaxAnisotropy());
+      textureDisposers.push(attachPhotoMap(timber, "walnut", { repeat: [5, 1], tint: "#d0ad86", anisotropy }));
+      textureDisposers.push(attachPhotoMap(stone, "microcement", { repeat: [4, 3], tint: "#c5c0b7", anisotropy }));
+      textureDisposers.push(attachPhotoMap(core, "microcement", { repeat: [3, 2], tint: "#958d87", anisotropy }));
+    }
+
+    // Three primary nested frames plus the platform, bridge and library volumes from the dimension table.
+    for (const frame of [...NESTED_CITY.frames, ...NESTED_CITY.featureFrames]) {
       const material = frame.material === "timber" ? timber : frame.material === "stone" ? stone : core;
       addFrame(group, frame, material);
     }
 
-    // 外殼僅留低矮石基座與高窗，不再用整圈實牆／平頂封住中央挑空。
-    group.add(makeBox(ROOM.width - 0.65, 1.15, 0.38, stone, 0, 0.575, ROOM.depth / 2 - 0.25));
+    // Open stone plinths leave a 7 m front lobby opening for the entrance doors.
+    const entranceWidth = 7;
+    const halfOpening = entranceWidth / 2;
+    const sideWidth = ROOM.width / 2 - halfOpening;
+    const sideCenter = (ROOM.width / 2 + halfOpening) / 2;
+    const southZ = ROOM.depth / 2 - 0.25;
+    group.add(makeBox(sideWidth, 1.15, 0.38, stone, -sideCenter, 0.575, southZ));
+    group.add(makeBox(sideWidth, 1.15, 0.38, stone, sideCenter, 0.575, southZ));
     group.add(makeBox(0.38, 1.15, ROOM.depth - 0.7, stone, ROOM.width / 2 - 0.25, 0.575, 0));
     group.add(makeBox(0.38, 1.15, ROOM.depth - 0.7, stone, -ROOM.width / 2 + 0.25, 0.575, 0));
+
+    // Full-height glass entry doors and slim bronze framing at the south lobby.
+    const doorY = 1.52;
+    const doorZ = ROOM.depth / 2 - 0.48;
+    const doorWidth = 3.28;
+    for (const x of [-1.68, 1.68]) {
+      group.add(makeBox(doorWidth, 2.76, 0.075, entranceGlass, x, doorY, doorZ, false));
+      group.add(makeBox(0.045, 2.82, 0.1, metal, x - doorWidth / 2, doorY, doorZ, false));
+      group.add(makeBox(0.045, 2.82, 0.1, metal, x + doorWidth / 2, doorY, doorZ, false));
+    }
+    group.add(makeBox(entranceWidth, 0.11, 0.12, timber, 0, 2.96, doorZ, false));
+    group.add(makeBox(0.055, 0.62, 0.06, metal, -0.14, 1.5, doorZ - 0.07, false));
+    group.add(makeBox(0.055, 0.62, 0.06, metal, 0.14, 1.5, doorZ - 0.07, false));
 
     for (const column of NESTED_CITY.columns) {
       group.add(makeBox(column.width, column.top - column.bottom, column.depth, stone, column.x, (column.top + column.bottom) / 2, column.z));
@@ -320,38 +532,60 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       addStair(group, stair, materials, rail, tread);
     }
     for (const bridgeRail of NESTED_CITY.bridgeRails) {
-      addBridgeRail(group, bridgeRail, railStone, rail);
+      addBridgeRail(group, bridgeRail, railStone, metal, glass);
     }
     for (const platformRail of nestedCityPlatformRails()) {
-      addPlatformGuardrail(group, platformRail, railStone, rail);
+      addPlatformGuardrail(group, platformRail, railStone, metal, glass);
     }
 
-    // 局部木作書格與閱讀平台：只提供空間層次，真實卡片書本仍由既有書架系統管理。
-    for (const [y, x, z, width] of [
-      [4.35, -9.55, -2.1, 3.6],
-      [8.35, 8.15, 1.6, 2.1],
-      [12.35, -9.3, 0.3, 3],
-    ] as const) {
-      for (let row = 0; row < 3; row++) {
-        const shelfY = y + row * 0.48;
-        group.add(makeBox(width, 0.075, 0.34, timber, x, shelfY, z, true));
-        group.add(makeBox(width - 0.12, 0.018, 0.018, led, x, shelfY - 0.05, z + 0.16, false));
-        // 僅以低矮色塊表現書格厚度，不偽造或取代資料書本。
-        for (let book = 0; book < 7; book++) {
-          const h = 0.25 + ((book * 13 + row * 7) % 5) * 0.035;
-          const w = 0.12 + (book % 3) * 0.025;
-          const xBook = x - width / 2 + 0.18 + book * (width - 0.36) / 7;
-          const bookMat = book % 3 === 0 ? coreLight : book % 3 === 1 ? stoneLight : timberLight;
-          group.add(makeBox(w, h, 0.16, bookMat, xBook, shelfY + h / 2 + 0.045, z - 0.06, false));
-        }
+    // 1F: welcome counter, exhibition plinths, and planted lobby edges.
+    group.add(makeBox(4.4, 0.16, 1.15, timber, -8.5, 1.06, 6.5));
+    group.add(makeBox(3.9, 0.72, 0.82, core, -8.5, 0.43, 6.5));
+    for (const [x, z, height] of [[-2.5, 1.8, 0.8], [4.2, -0.8, 0.62], [0.5, -4.2, 0.7]] as const) {
+      group.add(makeBox(1.35, 0.12, 1.35, stoneLight, x, height, z));
+      group.add(makeBox(0.46, height * 1.35, 0.46, timberLight, x, height + height * 0.68, z));
+    }
+
+    // 2F public library: communal reading tables; 3F: small quiet-study / note desks.
+    addReadingTable(group, 8.5, NESTED_CITY.levels[1], -7.35, 3.5, 1.1, timber, metal);
+    addReadingTable(group, 15.5, NESTED_CITY.levels[1], -7.35, 3.5, 1.1, timber, metal);
+    for (const x of [8.4, 12, 15.6]) {
+      addReadingTable(group, x, NESTED_CITY.levels[2], -5.65, 1.45, 0.72, timberLight, metal, false);
+      group.add(makeBox(1.25, 1.35, 0.065, core, x, NESTED_CITY.levels[2] + 0.68, -6.13, false));
+      group.add(makeBox(0.065, 1.05, 0.92, stoneLight, x - 0.82, NESTED_CITY.levels[2] + 0.53, -5.65, false));
+    }
+    // 4F observation terrace: low benches and planting beds preserve the open sky edge.
+    for (const x of [9, 15]) {
+      group.add(makeBox(2.25, 0.12, 0.52, timber, x, 12.48, 9.95));
+      group.add(makeBox(2.25, 0.54, 0.08, timber, x, 12.75, 10.2));
+      for (const dx of [-0.8, 0.8]) {
+        group.add(makeBox(0.07, 0.42, 0.07, metal, x + dx, 12.21, 9.95, false));
       }
     }
 
-    // 兩層暖色閱讀燈與橋底洗牆燈；自然窗光由 WindowLight 管理。
-    for (const [x, y, z] of [
-      [-8.1, 5.2, 0], [8.6, 9.2, -1], [2.8, 13.1, -1.7],
+    // The double-height reference library wall retains an open, glazed entrance at its centre.
+    addLibraryWall(group, timber, [timberLight, stoneLight, coreLight], led);
+
+    // Lush but restrained planting: entry planters, atrium landings and the 4F sky terrace.
+    for (const [x, y, z, size] of [
+      [-19, 0, 7.2, 1.3], [19, 0, 7.2, 1.3], [-19, 0, -6.8, 1.1],
+      [7.2, 4, 1.2, 0.9], [17.1, 4, 1.2, 0.9],
+      [7.2, 12, 10, 0.8], [17.1, 12, 10, 0.8],
     ] as const) {
-      const point = new THREE.PointLight(whiteModel ? "#ffffff" : "#ffd5a0", whiteModel ? 0.22 : 0.34, 7.5, 2);
+      addPlanter(group, x, y, z, size, planterMat, soilMat, trunkMat, foliageMat);
+    }
+
+    // Warm LED lines under the outer timber bands and soft luminaires at each occupied floor.
+    for (const y of [4, 8, 12]) {
+      for (const z of [-ROOM.depth / 2 + 0.72, ROOM.depth / 2 - 0.72]) {
+        group.add(makeBox(ROOM.width - 2.2, 0.025, 0.035, led, 0, y - 0.66, z, false));
+      }
+    }
+    for (const [x, y, z] of [
+      [-8, 3.5, -2], [8, 3.5, -3], [14, 7.5, 1], [8, 7.5, -7],
+      [12, 11.5, 5], [10, 15.1, 2],
+    ] as const) {
+      const point = new THREE.PointLight(whiteModel ? "#ffffff" : "#ffd5a0", whiteModel ? 0.2 : 0.38, 9, 2);
       point.position.set(x, y, z);
       point.castShadow = false;
       group.add(point);
@@ -359,6 +593,7 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
 
     return () => {
       api.scene.remove(group);
+      textureDisposers.forEach((dispose) => dispose());
       group.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (mesh.geometry && mesh.geometry !== UNIT_BOX_GEOMETRY) mesh.geometry.dispose();
