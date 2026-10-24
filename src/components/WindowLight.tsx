@@ -42,7 +42,7 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     sun.shadow.camera.top = SUN_SHADOW_CAMERA.top;
     sun.shadow.camera.bottom = SUN_SHADOW_CAMERA.bottom;
     sun.shadow.camera.near = 0.1;
-    sun.shadow.camera.far = 18;
+    sun.shadow.camera.far = Math.hypot(ROOM.width, ROOM.depth, ROOM.height) + 16;
     sun.shadow.bias = -0.00022;
     sun.shadow.normalBias = 0.025;
     sun.shadow.radius = api.quality.mobile ? SUN.shadowRadius.mobile : SUN.shadowRadius.desktop;

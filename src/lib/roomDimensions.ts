@@ -1,8 +1,8 @@
 // Shared room footprint source for geometry, camera, collision, and the nested-city model.
-// Reference-board scale: the outer timber shell is 48 × 24 × 16 m. The 12 × 6 m
-// base module is enlarged by a linear factor of four (area scale 16).
+// The reference plans show a 48 × 48 m square footprint and 16 m overall height.
+// A 12 × 12 m base module scaled by four in each plan axis gives the shared 48 × 48 envelope.
 export const ROOM_AREA_SCALE = 16;
-const BASE_ROOM = { width: 12, depth: 6 };
+const BASE_ROOM = { width: 12, depth: 12 };
 const ROOM_LINEAR_SCALE = Math.sqrt(ROOM_AREA_SCALE);
 
 export const ROOM_DIMENSIONS = {

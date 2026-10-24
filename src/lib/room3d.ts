@@ -16,7 +16,7 @@ import { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } from "./roomDimensions";
 export { ROOM_AREA_SCALE } from "./roomDimensions";
 
 // ================= 建築尺寸與嵌套之城參考模型（公尺） =================
-export const ROOM = ROOM_DIMENSIONS; // 參考板外部木框：48 × 24 × 16 m
+export const ROOM = ROOM_DIMENSIONS; // 統一外框：48 × 48 × 16 m
 
 export type CityMaterial = "timber" | "stone" | "core";
 export interface CityPlatform {
@@ -96,67 +96,92 @@ export interface CityPlatformRail {
  */
 export const NESTED_CITY = {
   levels: [0, 4, 8, 12] as const,
-  // A continuous 16 × 11 m open shaft through 2F–4F; the ground floor stays fully walkable.
-  atrium: { x: 12, z: 2.5, width: 16, depth: 11 },
+  // 20 × 20 m clear shaft through 2F–4F; narrow crossings are deliberately offset by level.
+  atrium: { x: 0, z: 0, width: 20, depth: 20 },
   frames: [
-    // Primary timber shell: 48 × 24 × 16 m; its horizontal bands mark the four-floor rhythm.
-    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 24, height: 16, thickness: 1.1, beamHeight: 1.2, rotationY: 0, material: "timber", bands: [4, 8, 12] },
-    // Stone insert: 36 × 18 × 12 m, placed at the table's (6, 4) X/Z centre and fitted from 2–14 m.
-    { id: "middle-horizontal-insert", plane: "horizontal", x: 6, z: 4, bottom: 2, width: 36, depth: 18, height: 12, thickness: 0.84, beamHeight: 0.9, rotationY: THREE.MathUtils.degToRad(15), material: "stone", bands: [6] },
-    // Offset mixed core: 24 × 12 × 8 m at the table's (12, 8) X/Z centre; it spans 2F–4F (4–12 m).
-    { id: "offset-rotated-core", plane: "box", x: 12, z: 8, bottom: 4, width: 24, depth: 12, height: 8, thickness: 0.64, beamHeight: 0.72, rotationY: THREE.MathUtils.degToRad(-10), material: "core", bands: [4] },
+    // Unified envelope from the plans/elevations: 48 × 48 × 16 m.
+    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 48, height: 16, thickness: 1.2, beamHeight: 1.2, rotationY: 0, material: "timber", bands: [4, 8, 12] },
+    // Square 36 m stone insert, shifted 1.5 m and rotated; its rotated bounds stay inside the outer shell.
+    { id: "middle-horizontal-insert", plane: "box", x: 1.5, z: 1.5, bottom: 2, width: 36, depth: 36, height: 12, thickness: 0.9, beamHeight: 0.9, rotationY: THREE.MathUtils.degToRad(15), material: "stone", bands: [2, 6, 10] },
+    // Square 24 m inner core, offset again and counter-rotated; vertically fitted to 4–12 m.
+    {
+      id: "offset-rotated-core",
+      plane: "box",
+      x: 3,
+      z: 1,
+      bottom: 4,
+      width: 24,
+      depth: 24,
+      height: 8,
+      thickness: 0.65,
+      beamHeight: 0.75,
+      rotationY: THREE.MathUtils.degToRad(-10),
+      material: "core",
+      bands: [4],
+      // A local west-side lintel opening lets the 3F→4F stair clear the core's top ring beam.
+      openings: [{ edge: "west", start: 3, end: 5.6, bottom: 11.1, top: 12.2 }],
+    },
   ] satisfies readonly CityFrame[],
-  // Secondary volumes are the table's main platform, 3F bridge corridor and double-height library zone.
+  // Extra furnished-room volumes are shown only in the existing walk-through mode, not in structure inspection.
   featureFrames: [
     { id: "main-library-platform-frame", plane: "box", x: 4, z: 8, bottom: 4, width: 30, depth: 16, height: 4, thickness: 0.52, beamHeight: 0.48, rotationY: 0, material: "timber" },
     { id: "bridge-corridor-frame", plane: "box", x: 10, z: 10, bottom: 8, width: 20, depth: 4, height: 3, thickness: 0.26, beamHeight: 0.24, rotationY: 0, material: "core" },
-    { id: "library-zone-frame", plane: "box", x: 5, z: 12, bottom: 0, width: 40, depth: 3, height: 8, thickness: 0.24, beamHeight: 0.28, rotationY: 0, material: "timber" },
+    { id: "library-zone-frame", plane: "box", x: 4, z: 12, bottom: 0, width: 38, depth: 3, height: 8, thickness: 0.24, beamHeight: 0.28, rotationY: 0, material: "timber" },
   ] satisfies readonly CityFrame[],
   platforms: [
-    // 2F (50% deck coverage): library wing, east gallery and north-side connector frame a large open atrium.
-    { id: "level-1-west-library-gallery", level: 1, x: -9.75, z: 0, width: 27.5, depth: 14, material: "timber" },
-    { id: "level-1-east-gallery", level: 1, x: 21.5, z: 0, width: 3, depth: 22, material: "stone" },
-    { id: "level-1-north-library-gallery", level: 1, x: 12, z: -8, width: 16, depth: 6, material: "core" },
-    { id: "level-1-north-crossing-bridge", level: 1, x: 12, z: -4, width: 16, depth: 2, material: "core" },
-    // 3F (55%): a 1.6 m east stairwell slot and landing interrupt the gallery; short connectors preserve access around the void.
-    { id: "level-2-west-study-gallery", level: 2, x: -9.75, z: -0.25, width: 27.5, depth: 16.5, material: "stone" },
-    { id: "level-2-east-edge-gallery", level: 2, x: 22.3, z: 0, width: 1.4, depth: 22, material: "stone" },
-    { id: "level-2-stair-landing", level: 2, x: 20.8, z: -1, width: 1.6, depth: 2, material: "stone" },
-    { id: "level-2-east-south-connector", level: 2, x: 20.8, z: 10, width: 1.6, depth: 4, material: "stone" },
-    { id: "level-2-north-study-gallery", level: 2, x: 12, z: -9.25, width: 16, depth: 3.5, material: "timber" },
-    { id: "level-2-long-bridge", level: 2, x: 10, z: 10, width: 20, depth: 4, material: "core" },
-    // 4F (26%): a short west bridge, offset north connector and south sky terrace leave most of the level open.
-    { id: "level-3-west-observation-gallery", level: 3, x: -4, z: -4, width: 16, depth: 8, material: "timber" },
-    { id: "level-3-east-observation-gallery", level: 3, x: 21.5, z: 0, width: 3, depth: 22, material: "stone" },
-    { id: "level-3-north-observation-gallery", level: 3, x: 10, z: -9, width: 12, depth: 4, material: "core" },
-    { id: "level-3-north-connector", level: 3, x: 18, z: -9, width: 4, depth: 2, material: "core" },
-    { id: "level-3-north-observation-bridge", level: 3, x: 8, z: -5, width: 8, depth: 2, material: "core" },
-    { id: "level-3-sky-observation-terrace", level: 3, x: 12, z: 10, width: 16, depth: 2, material: "timber" },
+    // 2F: offset side galleries plus a narrow crossing and two 27 m connectors (about 44% coverage).
+    { id: "level-1-west-library-gallery", level: 1, x: -17, z: 0, width: 13, depth: 31, material: "timber" },
+    { id: "level-1-east-gallery", level: 1, x: 17, z: 0, width: 13, depth: 31, material: "stone" },
+    { id: "level-1-offset-crossing-bridge", level: 1, x: 0, z: -2, width: 21, depth: 2.4, material: "core" },
+    { id: "level-1-north-connector-bridge", level: 1, x: 0, z: -17, width: 27, depth: 3, material: "stone" },
+    { id: "level-1-south-connector-bridge", level: 1, x: 0, z: 17, width: 27, depth: 3, material: "timber" },
+    // 3F: offset side galleries, a small crossing and north connector leave an open central approach.
+    { id: "level-2-west-study-gallery", level: 2, x: -17, z: -2, width: 13, depth: 26, material: "stone" },
+    { id: "level-2-east-study-gallery", level: 2, x: 17, z: -9, width: 13, depth: 12, material: "timber" },
+    { id: "level-2-offset-crossing-bridge", level: 2, x: 0, z: 3.2, width: 21, depth: 2, material: "core" },
+    { id: "level-2-north-connector-bridge", level: 2, x: 0, z: -15, width: 21, depth: 2.4, material: "stone" },
+    // 4F: short observation wings, a thin counter-shifted bridge and a small south terrace (about 24% coverage).
+    { id: "level-3-west-observation-gallery", level: 3, x: -18, z: -2, width: 12, depth: 20, material: "timber" },
+    { id: "level-3-east-observation-gallery", level: 3, x: 18, z: 4, width: 12, depth: 18, material: "stone" },
+    { id: "level-3-offset-observation-bridge", level: 3, x: 0, z: -5, width: 24, depth: 2, material: "core" },
+    { id: "level-3-south-observation-terrace", level: 3, x: 18, z: 15, width: 12, depth: 4, material: "timber" },
   ] satisfies readonly CityPlatform[],
   stairs: [
-    // Switchback stair: cross west-to-east, rise through the east stairwell slot, then return west across the open atrium.
-    { id: "stair-ground-to-level-1", start: { x: 4, z: 6.5, y: 0 }, end: { x: 20, z: 6.5, y: 4 }, width: 1.6, steps: 32, material: "stone" },
-    { id: "stair-level-1-to-level-2", start: { x: 20.8, z: 6.5, y: 4 }, end: { x: 20.8, z: 0, y: 8 }, width: 1.6, steps: 23, material: "timber" },
-    { id: "stair-level-2-to-level-3", start: { x: 20.8, z: 0, y: 8 }, end: { x: 4, z: 0, y: 12 }, width: 1.6, steps: 32, material: "stone" },
+    // 1F–2F rises through the open south atrium to the connector; 2F–3F follows the east wing to the offset bridge;
+    // 3F–4F crosses the void to a side-gallery landing without passing beneath an upper slab.
+    { id: "stair-ground-to-level-1", start: { x: 0, z: 5.5, y: 0 }, end: { x: 0, z: 15.5, y: 4 }, width: 1.8, steps: 24, material: "stone" },
+    { id: "stair-level-1-to-level-2", start: { x: 7.5, z: 15.5, y: 4 }, end: { x: 7.5, z: 4.2, y: 8 }, width: 1.8, steps: 24, material: "timber" },
+    { id: "stair-level-2-to-level-3", start: { x: 6, z: 3.2, y: 8 }, end: { x: -12, z: 3.2, y: 12 }, width: 1.8, steps: 25, material: "stone" },
   ] satisfies readonly CityStair[],
   bridgeRails: [
-    { id: "level-1-bridge-rail-near", level: 1, x: 12, z: -4.95, width: 16, depth: 0.1 },
-    { id: "level-1-bridge-rail-far", level: 1, x: 12, z: -3.05, width: 16, depth: 0.1 },
-    { id: "level-2-bridge-rail-near", level: 2, x: 10, z: 8.05, width: 20, depth: 0.1 },
-    { id: "level-2-bridge-rail-far", level: 2, x: 10, z: 11.95, width: 20, depth: 0.1 },
-    { id: "level-3-bridge-rail-near", level: 3, x: 8, z: -5.95, width: 8, depth: 0.1 },
-    { id: "level-3-bridge-rail-far", level: 3, x: 8, z: -4.05, width: 8, depth: 0.1 },
+    { id: "level-1-crossing-rail-near", level: 1, x: 0, z: -3.15, width: 21, depth: 0.1 },
+    { id: "level-1-crossing-rail-far", level: 1, x: 0, z: -0.85, width: 21, depth: 0.1 },
+    { id: "level-1-north-connector-rail-near", level: 1, x: 0, z: -18.45, width: 27, depth: 0.1 },
+    { id: "level-1-north-connector-rail-far", level: 1, x: 0, z: -15.55, width: 27, depth: 0.1 },
+    // Two 2.4 m stair mouths: ground-to-2F at x=0 and 2F-to-3F at x=7.5.
+    { id: "level-1-south-connector-rail-near-west", level: 1, x: -7.35, z: 15.55, width: 12.3, depth: 0.1 },
+    { id: "level-1-south-connector-rail-near-middle", level: 1, x: 3.75, z: 15.55, width: 5.1, depth: 0.1 },
+    { id: "level-1-south-connector-rail-near-east", level: 1, x: 11.1, z: 15.55, width: 4.8, depth: 0.1 },
+    { id: "level-1-south-connector-rail-far", level: 1, x: 0, z: 18.45, width: 27, depth: 0.1 },
+    // Leave a 4 m landing mouth in the far-side rail; the opposite edge remains guarded.
+    { id: "level-2-crossing-rail-near", level: 2, x: 0, z: 2.25, width: 21, depth: 0.1 },
+    { id: "level-2-crossing-rail-far-west", level: 2, x: -2, z: 4.15, width: 17, depth: 0.1 },
+    { id: "level-2-north-connector-rail-near", level: 2, x: 0, z: -16.15, width: 21, depth: 0.1 },
+    { id: "level-2-north-connector-rail-far", level: 2, x: 0, z: -13.85, width: 21, depth: 0.1 },
+    { id: "level-3-crossing-rail-near", level: 3, x: 0, z: -5.95, width: 24, depth: 0.1 },
+    { id: "level-3-crossing-rail-far", level: 3, x: 0, z: -4.05, width: 24, depth: 0.1 },
   ] as const,
   columns: [
-    { id: "stone-support-west", x: -20, z: 0, width: 0.82, depth: 0.82, bottom: 0, top: 11.7, material: "stone" },
-    { id: "stone-support-east", x: 22, z: 9.5, width: 0.82, depth: 0.82, bottom: 0, top: 15.2, material: "stone" },
-    { id: "stone-support-north", x: 12, z: -9.5, width: 0.78, depth: 0.78, bottom: 0, top: 14.2, material: "stone" },
-    { id: "stone-support-terrace", x: 12, z: 10, width: 0.78, depth: 0.78, bottom: 8, top: 14.2, material: "stone" },
+    { id: "platform-support-west", x: -18, z: 0, width: 0.78, depth: 0.78, bottom: 0, top: 12.2, material: "stone" },
+    { id: "platform-support-east-lower", x: 18, z: -8, width: 0.78, depth: 0.78, bottom: 0, top: 8.2, material: "stone" },
+    { id: "platform-support-east-upper", x: 18, z: -4, width: 0.72, depth: 0.72, bottom: 8, top: 12.2, material: "stone" },
+    { id: "platform-support-north-2f", x: 0, z: -17.2, width: 0.72, depth: 0.72, bottom: 0, top: 4.2, material: "stone" },
+    { id: "platform-support-north-3f", x: 0, z: -15, width: 0.72, depth: 0.72, bottom: 4, top: 8.2, material: "stone" },
   ] as const,
-  // South entrance interrupts the 40 × 3 × 8 m library wall; shelving leaves a 7 m lobby opening.
+  // Furnished library wall at the south lobby: paired shelves leave an 8 m clear entrance.
   obstacles: [
-    { id: "south-library-shelf-west", x: -9.5, z: 10.55, width: 11, depth: 0.52, bottom: 0, top: 7.7 },
-    { id: "south-library-shelf-east", x: 14.5, z: 10.55, width: 21, depth: 0.52, bottom: 0, top: 7.7 },
+    { id: "south-library-shelf-west", x: -13, z: 22.95, width: 18, depth: 0.52, bottom: 0, top: 7.7 },
+    { id: "south-library-shelf-east", x: 13, z: 22.95, width: 18, depth: 0.52, bottom: 0, top: 7.7 },
   ] satisfies readonly CityObstacle[],
   /** Stair rails stop before each landing so their end posts do not block the threshold. */
   stairRailInset: 0.45,
@@ -165,6 +190,33 @@ export const NESTED_CITY = {
   platformRailPostWidth: 0.07,
   glassRailThickness: 0.055,
 } as const;
+
+export type NestedCityView = "main" | "top" | "side";
+export const NESTED_CITY_CAMERA_VIEWS = {
+  main: { position: { x: 60, y: 46, z: 60 }, target: { x: 0, y: 8, z: 0 }, up: { x: 0, y: 1, z: 0 }, fov: 45 },
+  top: { position: { x: 0, y: 78, z: 0 }, target: { x: 0, y: 8, z: 0 }, up: { x: 0, y: 0, z: -1 }, fov: 46 },
+  side: { position: { x: 62, y: 22, z: 0 }, target: { x: 0, y: 8, z: 0 }, up: { x: 0, y: 1, z: 0 }, fov: 42 },
+} as const satisfies Record<NestedCityView, {
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+  up: { x: number; y: number; z: number };
+  fov: number;
+}>;
+
+/** Fit a fixed inspection camera to the complete 48 × 48 × 16 m envelope at any viewport aspect. */
+export function nestedCityInspectionDistance(view: NestedCityView, aspect: number): number {
+  const preset = NESTED_CITY_CAMERA_VIEWS[view];
+  const dx = preset.position.x - preset.target.x;
+  const dy = preset.position.y - preset.target.y;
+  const dz = preset.position.z - preset.target.z;
+  const baseDistance = Math.hypot(dx, dy, dz);
+  const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  const verticalHalfFov = THREE.MathUtils.degToRad(preset.fov / 2);
+  const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * safeAspect);
+  const limitingHalfFov = Math.min(verticalHalfFov, horizontalHalfFov);
+  const envelopeRadius = Math.hypot(ROOM.width / 2, ROOM.height / 2, ROOM.depth / 2);
+  return Math.max(baseDistance, envelopeRadius / Math.sin(limitingHalfFov) * 1.08);
+}
 
 /** Shared member layout for rendering and collision, so the white model and movement use identical frames. */
 export function cityFrameMembers(frame: CityFrame): CityFrameMember[] {
@@ -260,15 +312,49 @@ export function cityFrameMembers(frame: CityFrame): CityFrameMember[] {
 
   const halfX = frame.width / 2 - frame.thickness / 2;
   const halfZ = depth / 2 - frame.thickness / 2;
+  // Keep the four perimeter portals open at their midpoints so the north window, west book wall,
+  // and south entrance remain unobstructed in the existing walk-through room.
   for (const xSide of [-1, 1]) {
     for (const zSide of [-1, 1]) {
       add(xSide * halfX, zSide * halfZ, frame.thickness, frame.thickness, frame.bottom, frame.bottom + frame.height);
     }
   }
-  add(0, -halfZ, frame.width, frame.thickness, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
-  add(0, halfZ, frame.width, frame.thickness, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
-  add(-halfX, 0, frame.thickness, depth, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
-  add(halfX, 0, frame.thickness, depth, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+  const roofBottom = frame.bottom + frame.height - frame.beamHeight;
+  const roofTop = frame.bottom + frame.height;
+  const addBoxEdge = (
+    edge: CityFrameOpening["edge"],
+    axis: "x" | "z",
+    fixed: number,
+    start: number,
+    end: number
+  ) => {
+    let intervals = [{ start, end }];
+    for (const opening of frame.openings ?? []) {
+      if (opening.edge !== edge || opening.bottom >= roofTop || opening.top <= roofBottom) continue;
+      const next: Array<{ start: number; end: number }> = [];
+      for (const interval of intervals) {
+        if (opening.end <= interval.start || opening.start >= interval.end) {
+          next.push(interval);
+          continue;
+        }
+        if (opening.start > interval.start) next.push({ start: interval.start, end: Math.min(opening.start, interval.end) });
+        if (opening.end < interval.end) next.push({ start: Math.max(opening.end, interval.start), end: interval.end });
+      }
+      intervals = next;
+    }
+    for (const interval of intervals) {
+      if (interval.end - interval.start <= 1e-4) continue;
+      if (axis === "x") {
+        add((interval.start + interval.end) / 2, fixed, interval.end - interval.start, frame.thickness, roofBottom, roofTop);
+      } else {
+        add(fixed, (interval.start + interval.end) / 2, frame.thickness, interval.end - interval.start, roofBottom, roofTop);
+      }
+    }
+  };
+  addBoxEdge("north", "x", -halfZ, -frame.width / 2, frame.width / 2);
+  addBoxEdge("south", "x", halfZ, -frame.width / 2, frame.width / 2);
+  addBoxEdge("west", "z", -halfX, -depth / 2, depth / 2);
+  addBoxEdge("east", "z", halfX, -depth / 2, depth / 2);
   for (const band of frame.bands ?? []) {
     const height = frame.beamHeight * 0.58;
     const bottom = frame.bottom + band - height / 2;
@@ -509,18 +595,19 @@ export const LOOK = {
 // 懸浮薄層板書牆（v8.3：西牆 wallSign=-1；-1＝西牆、+1＝東牆，保留可切換）
 // xBack 為背牆面 X；板材自背牆往室內長 depth；層板沿 Z 長 width。
 const SHELF_CENTER_Z = 0;
-const SHELF_WIDTH = ROOM.depth - 0.5;
+// Leave a 1.25 m end reveal for the outer-shell corner portals after the room grows to 48 × 48 m.
+const SHELF_WIDTH = ROOM.depth - 2.5;
 export const SHELF = {
   wallSign: FIDELITY.shelfWallSign,
-  // 書牆沿西牆延伸；兩端各留約 0.25 m，不會撞到南北牆。
+  // 書牆沿西牆延伸；兩端各留約 1.25 m，避開外框角柱並保留立面收邊。
   z: SHELF_CENTER_Z,
-  width: SHELF_WIDTH, // 沿 Z 軸寬度（房間深 7.07 → 書架長 6.57 m）
+  width: SHELF_WIDTH, // 方形外框下沿 Z 軸 45.5 m
   height: 2.46, // 最上層板「頂面」Y（附圖量測）
   depth: 0.28, // 層板深
   plank: 0.035, // 板厚
   pitch: 0.335, // 層板間距（v8.5：附圖 5 排，原 4 排 0.40）
   minRows: 5, // 至少 5 排懸浮層板（資料列不足時以空板＋裝飾書補滿）
-  xBack: (ROOM.width / 2 - 0.16) * FIDELITY.shelfWallSign, // 西側書牆背板 X（−11.84 m）
+  xBack: (ROOM.width / 2 - 0.16) * FIDELITY.shelfWallSign, // 西側書牆背板 X（−23.84 m）
   baseY: 0,
   bookDepth: 0.19, // 書本深度（X 向）
   bookGap: 0.006,
