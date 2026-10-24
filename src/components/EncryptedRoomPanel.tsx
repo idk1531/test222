@@ -16,13 +16,13 @@ interface EncryptedRoomPanelProps {
 
 function statusLabel(status: RoomTransportStatus): string {
   switch (status.state) {
-    case "deriving-key": return "正在導出加密金鑰";
-    case "connecting": return "正在連接中繼";
-    case "connected": return "房間已連線";
-    case "partial": return `部分中繼連線（${status.connectedBrokerCount}/${status.brokerCount}）`;
-    case "offline": return "房間已建立，但中繼目前離線";
+    case "deriving-key": return "正在準備加密房間";
+    case "connecting": return "正在連接 WSS relay";
+    case "connected": return "relay 連線成功";
+    case "partial": return `relay 已連線（${status.connectedBrokerCount}/${status.brokerCount} 個 broker）`;
+    case "offline": return status.roomReady ? "relay 已中斷" : "relay 目前離線";
     case "leaving": return "正在離開房間";
-    case "failed": return "建立連線失敗";
+    case "failed": return "relay 連線失敗";
     default: return "尚未加入房間";
   }
 }
@@ -361,6 +361,20 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
 
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <h3 className="text-xs font-bold text-slate-800">房間裝置 · {peers.length}</h3>
+          {roomActive && (
+            <p
+              className={`mt-2 flex items-center gap-1.5 text-[11px] font-semibold ${connectedBrokers > 0 ? "text-emerald-700" : "text-amber-700"}`}
+              role="status"
+              aria-live="polite"
+            >
+              {connectedBrokers > 0 ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Radio className="h-3.5 w-3.5 shrink-0" />}
+              {connectedBrokers > 0
+                ? peers.length > 0
+                  ? `relay 連線成功，已透過 relay 發現 ${peers.length} 個其他裝置。`
+                  : "relay 連線成功，等待其他裝置加入。"
+                : "房間仍已加入，但所有 relay broker 目前離線。"}
+            </p>
+          )}
           {peers.length ? (
             <ul className="mt-2 space-y-1.5">
               {peers.map((peer) => (
@@ -370,7 +384,7 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
                 </li>
               ))}
             </ul>
-          ) : <p className="mt-2 text-xs text-slate-500">加入同一房間的其他裝置會出現在這裡。</p>}
+          ) : <p className="mt-2 text-xs text-slate-500">{roomActive ? "目前沒有其他裝置在線。" : "加入同一房間的其他裝置會出現在這裡。"}</p>}
           {roomActive && (
             <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); void sendTestMessage(); }}>
               <input
