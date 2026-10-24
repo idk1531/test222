@@ -77,7 +77,7 @@ export const StudyScene: React.FC<StudySceneProps> = ({
     renderer.setPixelRatio(quality.pixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.96; // v8.6：中性曝光，保留木作暗部與窗光的層次
 

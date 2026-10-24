@@ -8,7 +8,7 @@ import {
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
-  resolveCollision, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
+  resolveCollision, nestedCityFloorLabel, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
   yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
 } from "../src/lib/room3d";
 import { DEFAULT_CAMERA } from "../src/lib/study";
@@ -28,6 +28,12 @@ assert.equal(ROOM.width * ROOM.depth, 480);
 assert.equal(ROOM.height, 16);
 assert.equal(ROOM.wall, 0.32);
 assert.deepEqual(NESTED_CITY.levels, [0, 4, 8, 12]);
+assert.deepEqual(nestedCityFloorLabel(0), { full: "地面層 · 0 m", compact: "0m" });
+assert.deepEqual(nestedCityFloorLabel(4), { full: "第 1 層 · 4 m", compact: "4m" });
+assert.deepEqual(nestedCityFloorLabel(8), { full: "第 2 層 · 8 m", compact: "8m" });
+assert.deepEqual(nestedCityFloorLabel(12), { full: "第 3 層 · 12 m", compact: "12m" });
+assert.deepEqual(nestedCityFloorLabel(2), { full: "斜坡", compact: "坡道" });
+assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compact: "未知" });
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 1).length, 5);
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 2).length, 5);
 assert.ok(NESTED_CITY.platforms.some((platform) => platform.level === 3));

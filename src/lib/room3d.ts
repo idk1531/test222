@@ -110,6 +110,24 @@ export const NESTED_CITY = {
   railHeight: 1.05,
 } as const;
 
+export interface NestedCityFloorLabel {
+  full: string;
+  compact: string;
+}
+
+/** Convert a walking-surface height to a compact HUD label without updating on every ramp frame. */
+export function nestedCityFloorLabel(floorY: number): NestedCityFloorLabel {
+  if (!Number.isFinite(floorY)) return { full: "位置未知", compact: "未知" };
+
+  const levelIndex = NESTED_CITY.levels.findIndex((level) => Math.abs(level - floorY) <= 0.32);
+  if (levelIndex === 0) return { full: "地面層 · 0 m", compact: "0m" };
+  if (levelIndex > 0) {
+    const level = NESTED_CITY.levels[levelIndex];
+    return { full: `第 ${levelIndex} 層 · ${level} m`, compact: `${level}m` };
+  }
+  return { full: "斜坡", compact: "坡道" };
+}
+
 // 大面積玻璃窗（北牆 z = −depth/2），以落地採光取代單層小房間窗洞。
 // 墩寬、窗高與窗寬是概念模型假設；保留既有桌面、書本與工作視角的公尺尺度。
 const WINDOW_WEST_PIER = 0.35;
