@@ -43,7 +43,7 @@ npx serve out                                  # 本機驗證
 
 `/connect/` 的「加密房間」是獨立的傳輸層介接階段：可建立／加入房間、複製含 `#` 片段的連結、顯示 QR、掃描 QR，並檢視三個 WSS broker 與房間 peers。它目前尚未接入既有書房／卡片協作資料；目前應用資料仍走下方的 WebRTC 手動配對流程，業務資料模組不會由這個新面板改寫。
 
-配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 是配對碼的 SHA-256 雜湊；MQTT payload 的訊息類型、ID、peer 資訊與測試內容都放在加密內容內。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
+配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 是配對碼的 SHA-256 雜湊；MQTT payload 的訊息類型、ID、peer 資訊與測試內容都放在加密內容內。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。加入房間後每 3 秒送出加密 hello，10 秒未收到對方活動則標記離線；收到 relay 應用訊息亦會更新 peer 活動與名單。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
 
 固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。此階段的 `send()` 會等 broker 的 QoS 1 PUBACK，**不等於接收端應用層 ACK**；接收端 ACK／重送與直連傳輸尚未接入。
 

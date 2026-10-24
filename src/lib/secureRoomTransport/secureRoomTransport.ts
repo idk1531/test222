@@ -1,5 +1,6 @@
 import mqtt, { type MqttClient } from "mqtt";
 import { TRANSPORT_CONFIG, type BrokerId } from "./config";
+import { isRoomWireMessage, type PayloadEncoding, type RoomWireMessage } from "./protocol";
 import {
   createRoomCode,
   createSecureId,
@@ -31,17 +32,6 @@ interface BrokerDefinition {
   label: string;
   url: string;
 }
-
-type PayloadEncoding =
-  | { kind: "string"; data: string }
-  | { kind: "json"; data: unknown }
-  | { kind: "array-buffer"; data: string }
-  | { kind: "blob"; data: string; mimeType: string };
-
-type RoomWireMessage =
-  | { v: 1; id: string; type: "hello" | "heartbeat"; from: string; sentAt: number; nickname: string; joinedAt: number; expiresAt: number | null }
-  | { v: 1; id: string; type: "leave"; from: string; sentAt: number }
-  | { v: 1; id: string; type: "app"; from: string; sentAt: number; to?: string; payload: PayloadEncoding };
 
 const textEncoder = new TextEncoder();
 
@@ -121,25 +111,6 @@ function decodePayload(value: unknown): unknown {
   return null;
 }
 
-function isRoomWireMessage(value: unknown): value is RoomWireMessage {
-  if (!isRecord(value) || value.v !== 1 || typeof value.id !== "string" || value.id.length > 96) return false;
-  if (typeof value.from !== "string" || value.from.length > 96 || typeof value.sentAt !== "number" || !Number.isFinite(value.sentAt)) return false;
-  if (value.type === "hello" || value.type === "heartbeat") {
-    return typeof value.nickname === "string"
-      && value.nickname.length <= 24
-      && typeof value.joinedAt === "number"
-      && Number.isFinite(value.joinedAt)
-      && (value.expiresAt === null || (typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)));
-  }
-  if (value.type === "leave") return true;
-  if (value.type === "app") {
-    return (value.to === undefined || (typeof value.to === "string" && value.to.length <= 96))
-      && isRecord(value.payload)
-      && typeof value.payload.kind === "string";
-  }
-  return false;
-}
-
 function makePairingLink(code: string): string {
   if (typeof window === "undefined") return `#${code}`;
   // Use the URL fragment only; it is not included in HTTP requests or referrer headers.
@@ -165,7 +136,7 @@ export class SecureRoomTransport {
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
   private state: RoomTransportState = "idle";
   private roomReady = false;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private helloTimer: ReturnType<typeof setInterval> | null = null;
   private peerSweepTimer: ReturnType<typeof setInterval> | null = null;
   private generation = 0;
 
@@ -263,6 +234,7 @@ export class SecureRoomTransport {
       type: "app",
       from: this.deviceId,
       sentAt: Date.now(),
+      nickname: this.nickname,
       ...(options.to ? { to: options.to } : {}),
       payload: encodedPayload,
     } as RoomWireMessage;
@@ -344,20 +316,12 @@ export class SecureRoomTransport {
       this.roomReady = true;
       this.state = this.getConnectedClients().length === TRANSPORT_CONFIG.brokers.length ? "connected" : "partial";
       this.scheduleRoomExpiry();
-      await this.publishSystemMessage(this.createHelloMessage());
-      this.heartbeatTimer = setInterval(() => {
-        void this.publishSystemMessage({
-          v: 1,
-          id: createSecureId(),
-          type: "heartbeat",
-          from: this.deviceId,
-          sentAt: Date.now(),
-          nickname: this.nickname,
-          joinedAt: this.joinedAt,
-          expiresAt: this.expiresAt,
-        });
+      this.helloTimer = setInterval(() => {
+        void this.publishSystemMessage(this.createHelloMessage());
       }, TRANSPORT_CONFIG.helloIntervalMs);
       this.peerSweepTimer = setInterval(() => this.expirePeers(), TRANSPORT_CONFIG.peerSweepIntervalMs);
+      this.emitStatus();
+      await this.publishSystemMessage(this.createHelloMessage());
       this.emitProgress({ stage: "hello", completed: 1, total: 1, message: "加密 hello 已送出，正在探索房間裝置…" });
       this.emitProgress({ stage: "ready", completed: 1, total: 1, message: "加密房間已就緒。" });
       this.emitStatus();
@@ -484,7 +448,7 @@ export class SecureRoomTransport {
       });
       this.emitPeers();
       this.emitStatus();
-      if (isNewPeer && decrypted.type === "hello") void this.publishSystemMessage(this.createHelloMessage());
+      if (isNewPeer) void this.publishSystemMessage(this.createHelloMessage());
       return;
     }
     if (decrypted.type === "leave") {
@@ -496,6 +460,17 @@ export class SecureRoomTransport {
     }
     if (decrypted.type === "app") {
       if (decrypted.to && decrypted.to !== this.deviceId) return;
+      const knownPeer = this.peers.get(decrypted.from);
+      this.peers.set(decrypted.from, {
+        deviceId: decrypted.from,
+        nickname: typeof decrypted.nickname === "string"
+          ? normalizeNickname(decrypted.nickname)
+          : knownPeer?.nickname ?? "書房夥伴",
+        joinedAt: knownPeer?.joinedAt ?? decrypted.sentAt,
+        lastSeenAt: Date.now(),
+      });
+      this.emitPeers();
+      this.emitStatus();
       const event: ReceivedTransportMessage = {
         payload: decodePayload(decrypted.payload),
         metadata: {
@@ -619,10 +594,10 @@ export class SecureRoomTransport {
   }
 
   private clearTimers(): void {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.helloTimer) clearInterval(this.helloTimer);
     if (this.peerSweepTimer) clearInterval(this.peerSweepTimer);
     if (this.expiryTimer) clearTimeout(this.expiryTimer);
-    this.heartbeatTimer = null;
+    this.helloTimer = null;
     this.peerSweepTimer = null;
     this.expiryTimer = null;
   }
