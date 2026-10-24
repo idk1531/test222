@@ -11,16 +11,21 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:connection": "node --test tests/connection.test.mjs",
+    "test:secure-room-crypto": "node --test tests/secure-room-crypto.test.mjs",
     "test:collaboration": "node --test tests/collaboration-protocol.test.mjs",
     "test:collaboration-editing": "node --test tests/collaboration-editing.test.mjs",
     "test:shared-content": "node --test tests/shared-content.test.mjs"
   },
   "dependencies": {
     "@types/katex": "^0.16.8",
+    "@zxing/browser": "0.1.5",
+    "@zxing/library": "0.21.3",
     "katex": "^0.18.4",
     "lucide-react": "^1.35.0",
+    "mqtt": "5.16.1",
     "next": "16.2.6",
     "next-themes": "^0.4.6",
+    "qrcode": "1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "three": "^0.186.1"
@@ -28,6 +33,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.17",
     "@types/node": "22.19.15",
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@types/three": "^0.186.0",

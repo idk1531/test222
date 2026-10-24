@@ -39,9 +39,17 @@ npx serve out                                  # 本機驗證
 
 ---
 
-## 瀏覽器點對點連線（WebRTC）
+## 加密房間（WSS MQTT relay）
 
-`/connect/` 使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`；不新增訊號伺服器、資料庫或 TURN 服務。Offer／Answer 是等待 ICE gathering 完成後產生的完整 JSON，必須由兩端人工複製／貼上。連線由 root-level `CollaborationProvider` 持有，切換 SciNotes 頁面不會關閉 DataChannel。
+`/connect/` 的「加密房間」是獨立的傳輸層介接階段：可建立／加入房間、複製含 `#` 片段的連結、顯示 QR、掃描 QR，並檢視三個 WSS broker 與房間 peers。它目前尚未接入既有書房／卡片協作資料；目前應用資料仍走下方的 WebRTC 手動配對流程，業務資料模組不會由這個新面板改寫。
+
+配對碼為 16 字元；瀏覽器使用 PBKDF2-SHA256（100,000 次）導出 AES-GCM-256 金鑰，每則封包使用隨機 IV。MQTT topic 是配對碼的 SHA-256 雜湊；MQTT payload 的訊息類型、ID、peer 資訊與測試內容都放在加密內容內。每個 broker 使用 MQTT clean session、QoS 1 訂閱／發布，發布設定 `retain: false`；目前採用可用 broker 並行收送，並以加密訊息 ID 去重。配對碼不放入 MQTT topic 或 query string；分享連結只在 URL fragment（`#`）攜帶配對碼。金鑰只留在頁面記憶體，離開房間或到期時清除。房間建立者可選擇存活時間；留空表示不設定到期時間。
+
+固定依賴版本由 npm lockfile 管理並隨前端 bundle 載入，不使用 CDN：`mqtt@5.16.1`、`qrcode@1.5.4`、`@zxing/browser@0.1.5`、`@zxing/library@0.21.3`。公開 broker 仍可看見連線來源、topic 雜湊、時間與封包大小；加密不代表匿名。此階段的 `send()` 會等 broker 的 QoS 1 PUBACK，**不等於接收端應用層 ACK**；接收端 ACK／重送與直連傳輸尚未接入。
+
+### 瀏覽器點對點連線（WebRTC）
+
+`/connect/` 同頁保留既有手動 WebRTC 流程：使用瀏覽器原生 `RTCPeerConnection` 與 `RTCDataChannel`，Offer／Answer 等待 ICE gathering 完成後產生完整 JSON，必須由兩端人工複製／貼上。這條既有應用資料流程仍由 root-level `CollaborationProvider` 持有，切換 SciNotes 頁面不會關閉 DataChannel。
 
 目前的應用訊息範圍包括**顯示名稱、房主指定的可編輯／唯讀角色、虛擬書房角色位置與動作，以及書本／筆記卡協作**。連線時發起端傳送書房快照；加入端的可編輯者會將本機書本／卡片按 ID 合併回房主，之後同步卡片內容、卡片畫布位置、書架分類／落點／排序及新增／刪除。筆記卡文字欄位逐字即時合併；卡片編輯器會顯示對方正在輸入的欄位與游標位置。一般畫布物件（含公式／圖表）、關係邊、書房視角、一般畫布游標，以及角色個人化外觀不在同步範圍。唯讀端不會回傳本機資料。
 
@@ -62,6 +70,7 @@ npx serve out                                  # 本機驗證
 
 ```bash
 npm run test:connection             # WebRTC 生命週期與 DataChannel API 的 mock 測試
+npm run test:secure-room-crypto     # 房間碼、topic 雜湊與 AES-GCM 加解密測試
 npm run test:collaboration          # 姓名／角色／姿態訊息協定與輸入驗證測試
 npm run test:collaboration-editing  # 文字 CRDT 合併、游標、Unicode 與訊息分塊測試（非實機 WebRTC）
 npm run test:shared-content         # 書本／卡片同步、唯讀與分塊協定測試（非實機 WebRTC）
@@ -71,11 +80,14 @@ npm run test:shared-content         # 書本／卡片同步、唯讀與分塊協
 
 | 檔案 | 職責 |
 |---|---|
+| `src/lib/secureRoomTransport/` | 獨立的加密房間傳輸 API：配對碼、PBKDF2／AES-GCM、SHA-256 topic、多 broker、peer/status/progress 事件與 QoS 1 relay |
+| `src/components/EncryptedRoomPanel.tsx` | 加密房間建立／加入、fragment 分享連結、QR 產生／掃描、broker 與 peer 狀態；尚未接入應用資料層 |
 | `src/lib/connection.ts` | WebRTC 連線生命週期、STUN／訊號驗證、狀態／逾時／清理，以及不記錄內容的 DataChannel 訊息 API |
 | `src/components/CollaborationProvider.tsx` | root-level 連線生命週期、姓名／角色握手、角色姿態 presence、書本／卡片同步與跨頁狀態 |
 | `src/lib/sharedContent.ts` | 限定書本／卡片欄位的初始合併、版本化 CRUD 操作、輸入驗證與 DataChannel 分塊傳輸 |
 | `src/lib/collaborationEditing.ts` | 卡片文字欄位的字符序列 CRDT、穩定欄位路徑、即時游標／輸入狀態訊息與分塊傳輸 |
-| `src/app/connect/page.tsx` | A／B 操作介面、名稱／加入權限、Offer／Answer 複製貼上、同步狀態與分享限制提示 |
+| `src/app/connect/page.tsx` | 加密房間與既有 A／B 手動 WebRTC 操作介面、名稱／加入權限、同步狀態及診斷 |
+| `tests/secure-room-crypto.test.mjs` | 配對碼格式、topic 雜湊、AES-GCM 加解密與錯誤金鑰驗證 |
 | `src/components/CameraRig.tsx`、`src/components/StudyRoomView.tsx` | 姿態傳送、遠端 voxel 角色呈現、遠端玩家碰撞及唯讀移動限制 |
 | `tests/connection.test.mjs` | 使用假 PeerConnection／DataChannel 驗證訊號交換、訊息 API 及資源管理；不代表實機 WebRTC 驗證 |
 
@@ -237,7 +249,7 @@ WHY 只有結論 · 推理跳步 · 循環解釋 · **偷渡前提**（與假設
 src/
 ├── app/
 │   ├── api/health/route.ts        靜態健康檢查端點
-│   ├── connect/page.tsx           WebRTC A／B 點對點連線操作頁
+│   ├── connect/page.tsx           加密房間與 WebRTC A／B 點對點連線操作頁
 │   ├── globals.css                字體、響應式、安全區、背景圖樣
 │   ├── layout.tsx                 Root layout + viewport
 │   └── page.tsx                   主頁面（視圖切換、匯入匯出、各彈窗組裝）
@@ -258,6 +270,7 @@ src/
 │   ├── CameraRig.tsx              v8.1：WASD/搖桿、360° 環顧與桌面飛行
 │   ├── DeskCanvas.tsx             v8.0 HTML 書桌（舊版元件，保留相容）
 │   ├── DeskWorkView.tsx           v8.1：工作視角 HTML InfiniteCanvas 浮層
+│   ├── EncryptedRoomPanel.tsx     加密房間建立／加入、QR、broker 與 peer 狀態
 │   ├── ExpansionTestModal.tsx     展開測試（追問測試）
 │   ├── FieldCustomizer.tsx        自訂欄位
 │   ├── FontSelector.tsx           字體選擇
@@ -286,6 +299,7 @@ src/
 └── lib/
     ├── appTheme.ts                工具列配色主題 + localStorage（v7.2）
     ├── connection.ts              WebRTC／DataChannel 生命週期、訊號驗證與安全訊息 API
+    ├── secureRoomTransport/       PBKDF2／AES-GCM、MQTT WSS 多 broker 房間傳輸 API
     ├── fonts.ts                   字體清單
     ├── inspect.ts                 審查引擎 ＋ 四點自我檢查
     ├── seedData.ts                預設種子資料

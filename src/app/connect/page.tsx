@@ -20,6 +20,7 @@ import {
   type ConnectionPhase,
 } from "@/lib/connection";
 import { useCollaboration } from "@/components/CollaborationProvider";
+import EncryptedRoomPanel from "@/components/EncryptedRoomPanel";
 
 function isBusy(phase: ConnectionPhase): boolean {
   return phase === "creating-offer" || phase === "creating-answer" || phase === "applying-answer";
@@ -297,6 +298,8 @@ export default function ConnectionPage() {
             邀請是私下交換的 Offer／Answer bearer 憑證：持有並完成配對者可加入，轉傳後任何持有者都可能使用；目前沒有帳號、伺服器端撤銷或到期驗證。連線後，房主的書本／筆記卡會傳給加入者；可編輯者的本機書本／筆記卡也會按 ID 合併並傳給房主。只與可信任對象配對，勿放入不想分享的筆記。唯讀限制是客戶端約束，不能防止修改客戶端、複製內容或截圖。
           </p>
         </section>
+
+        <EncryptedRoomPanel nickname={displayName} />
 
         <section className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(260px,0.6fr)] sm:items-end">
           <div>
