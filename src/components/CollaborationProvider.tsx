@@ -10,10 +10,12 @@ import {
   type DataChannelMessageListener,
 } from "@/lib/connection";
 import { getSecureRoomTransport, type RoomTransportStatus } from "@/lib/secureRoomTransport";
+import { LatestValueSendQueue } from "@/lib/latestValueSendQueue";
 import type { PlayerPose } from "@/lib/room3d";
 import {
   createParticipantId,
   getRemotePoseForParticipant,
+  isPoseSequenceNewer,
   normalizeDisplayName,
   sanitizeDisplayNameInput,
   parseCollaborationMessage,
@@ -109,6 +111,8 @@ interface CollaborationContextValue {
 const CollaborationContext = createContext<CollaborationContextValue | null>(null);
 const PROFILE_STORAGE_KEY = "scinotes-collaboration-profile-v1";
 const POSE_SEND_INTERVAL_MS = 50;
+const RELAY_POSE_SEND_INTERVAL_MS = 50;
+const MAX_RELAY_POSE_SENDS_IN_FLIGHT = 8;
 const REMOTE_POSE_STALE_MS = 6_000;
 const REMOTE_EDITING_STALE_MS = 8_000;
 const EDITING_PRESENCE_SEND_INTERVAL_MS = 75;
@@ -251,8 +255,10 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const editingPresenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRef = useRef(snapshot);
   const relaySendQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const relayPoseSendInFlightRef = useRef(false);
-  const pendingRelayPoseRef = useRef<string | null>(null);
+  const [relayPoseSendQueue] = useState(() => new LatestValueSendQueue<string>(
+    (pose) => relayTransport.send(pose, { route: "relay", acknowledgementPolicy: "first" }),
+    MAX_RELAY_POSE_SENDS_IN_FLIGHT
+  ));
   const relaySessionGenerationRef = useRef(0);
   const relaySessionActiveRef = useRef(false);
   const sessionParticipantIdRef = useRef<string | null>(null);
@@ -262,6 +268,8 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const previousHelloProfileRef = useRef({ displayName, guestRole });
   const [signalingDrafts, setSignalingDrafts] = useState<SignalingDrafts>({ ...EMPTY_SIGNALING_DRAFTS });
   const lastPoseSentAtRef = useRef(0);
+  const poseSequenceRef = useRef(0);
+  const lastRemotePoseSequenceRef = useRef<number | null>(null);
   const lastRemotePoseAtRef = useRef(0);
 
   useEffect(() => {
@@ -287,40 +295,8 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       if (status.connectedBrokerCount === 0 || status.state === "leaving") return false;
       const collaborationMessage = parseCollaborationMessage(data);
       if (collaborationMessage?.type === "pose") {
-        if (!remoteParticipantRef.current) return false;
-        pendingRelayPoseRef.current = data;
-        if (relayPoseSendInFlightRef.current) return true;
-
-        const generation = relaySessionGenerationRef.current;
-        relayPoseSendInFlightRef.current = true;
-        const drainLatestPoses = async () => {
-          let failed = false;
-          while (generation === relaySessionGenerationRef.current) {
-            const nextPose = pendingRelayPoseRef.current;
-            if (!nextPose) break;
-            pendingRelayPoseRef.current = null;
-            const nextMessage = parseCollaborationMessage(nextPose);
-            if (nextMessage?.type !== "pose" || nextMessage.participantId !== sessionParticipantIdRef.current) continue;
-            if (!remoteParticipantRef.current) break;
-
-            const latestStatus = relayTransport.getStatus();
-            if (!latestStatus.roomReady
-              || !latestStatus.localRole
-              || latestStatus.connectedBrokerCount === 0
-              || latestStatus.state === "leaving") break;
-            try {
-              await relayTransport.send(nextPose, { route: "relay", acknowledgementPolicy: "first" });
-            } catch {
-              failed = true;
-              break;
-            }
-          }
-          if (generation === relaySessionGenerationRef.current) {
-            relayPoseSendInFlightRef.current = false;
-            if (failed || !remoteParticipantRef.current) pendingRelayPoseRef.current = null;
-          }
-        };
-        void drainLatestPoses();
+        if (!remoteParticipantRef.current || collaborationMessage.participantId !== sessionParticipantIdRef.current) return false;
+        relayPoseSendQueue.enqueue(data);
         return true;
       }
 
@@ -344,7 +320,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       return true;
     }
     return manager.sendDataMessage(data);
-  }, [manager, relayTransport]);
+  }, [manager, relayPoseSendQueue, relayTransport]);
 
   const subscribeDataMessages = useCallback((listener: DataChannelMessageListener) => {
     const unsubscribeWebRTC = manager.subscribeDataMessages(listener);
@@ -482,12 +458,14 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   }, [notifyRemoteEditingListeners]);
 
   const preparePairing = useCallback(() => {
+    relaySessionGenerationRef.current += 1;
+    relaySendQueueRef.current = Promise.resolve();
+    relayPoseSendQueue.clear();
     sharedContentSyncRef.current?.stop();
     sharedContentSyncRef.current = null;
     resetCollaborativeEditing();
     contentChunkAssemblerRef.current.clear();
     pendingSharedMessagesRef.current = [];
-    pendingRelayPoseRef.current = null;
     localRoleRef.current = null;
     remoteParticipantRef.current = null;
     setContentSyncStatus("idle");
@@ -498,16 +476,20 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     setRemoteParticipantState(null);
     remotePoseRef.current = { ...HIDDEN_POSE };
     lastPoseSentAtRef.current = 0;
+    poseSequenceRef.current = 0;
+    lastRemotePoseSequenceRef.current = null;
     lastRemotePoseAtRef.current = 0;
-  }, [remotePoseRef, resetCollaborativeEditing]);
+  }, [remotePoseRef, relayPoseSendQueue, resetCollaborativeEditing]);
 
   const disconnect = useCallback(() => {
+    relaySessionGenerationRef.current += 1;
+    relaySendQueueRef.current = Promise.resolve();
+    relayPoseSendQueue.clear();
     sharedContentSyncRef.current?.stop();
     sharedContentSyncRef.current = null;
     resetCollaborativeEditing();
     contentChunkAssemblerRef.current.clear();
     pendingSharedMessagesRef.current = [];
-    pendingRelayPoseRef.current = null;
     localRoleRef.current = null;
     remoteParticipantRef.current = null;
     sessionParticipantIdRef.current = null;
@@ -520,25 +502,19 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
     setSignalingDrafts({ ...EMPTY_SIGNALING_DRAFTS });
     remotePoseRef.current = { ...HIDDEN_POSE };
     lastPoseSentAtRef.current = 0;
+    poseSequenceRef.current = 0;
+    lastRemotePoseSequenceRef.current = null;
     lastRemotePoseAtRef.current = 0;
-  }, [manager, relayTransport, remotePoseRef, resetCollaborativeEditing]);
+  }, [manager, relayPoseSendQueue, relayTransport, remotePoseRef, resetCollaborativeEditing]);
 
   useEffect(() => {
     const wasActive = relaySessionActiveRef.current;
     if (relayRoomActive && !wasActive) {
       relaySessionActiveRef.current = true;
-      relaySessionGenerationRef.current += 1;
-      relaySendQueueRef.current = Promise.resolve();
-      pendingRelayPoseRef.current = null;
-      relayPoseSendInFlightRef.current = false;
       manager.disconnect();
       preparePairing();
     } else if (!relayRoomActive && wasActive) {
       relaySessionActiveRef.current = false;
-      relaySessionGenerationRef.current += 1;
-      relaySendQueueRef.current = Promise.resolve();
-      pendingRelayPoseRef.current = null;
-      relayPoseSendInFlightRef.current = false;
       disconnect();
     }
   }, [relayRoomActive, manager, preparePairing, disconnect]);
@@ -731,6 +707,11 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       const hello = resolveRemoteHello(currentSnapshot.role, currentGuestRole, previousParticipant, message);
       if (!hello) return;
       if (hello.didChange) {
+        if (hello.isNewParticipant) {
+          lastRemotePoseSequenceRef.current = null;
+          lastRemotePoseAtRef.current = 0;
+          remotePoseRef.current = { ...HIDDEN_POSE };
+        }
         remoteParticipantRef.current = hello.participant;
         setRemoteParticipantState(hello.participant);
       }
@@ -770,6 +751,10 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
 
       const remotePose = getRemotePoseForParticipant(message, remoteParticipantRef.current?.id ?? null);
       if (remotePose) {
+        if (message.type === "pose" && message.sequence !== undefined) {
+          if (!isPoseSequenceNewer(message.sequence, lastRemotePoseSequenceRef.current)) return;
+          lastRemotePoseSequenceRef.current = message.sequence;
+        }
         remotePoseRef.current = remotePose;
         lastRemotePoseAtRef.current = Date.now();
       }
@@ -799,13 +784,15 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const publishPose = useCallback((pose: PlayerPose) => {
     if (snapshot.phase !== "open" || !sessionParticipantId || !remoteParticipantRef.current) return;
     const now = performance.now();
-    const sendInterval = transportMode === "relay" ? 250 : POSE_SEND_INTERVAL_MS;
+    const sendInterval = transportMode === "relay" ? RELAY_POSE_SEND_INTERVAL_MS : POSE_SEND_INTERVAL_MS;
     if (now - lastPoseSentAtRef.current < sendInterval) return;
     lastPoseSentAtRef.current = now;
+    poseSequenceRef.current += 1;
     sendDataMessage(serializeCollaborationMessage({
       v: 1,
       type: "pose",
       participantId: sessionParticipantId,
+      sequence: poseSequenceRef.current,
       pose: {
         x: pose.x,
         z: pose.z,

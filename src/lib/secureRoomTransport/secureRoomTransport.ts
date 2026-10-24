@@ -1,6 +1,7 @@
 import mqtt, { type MqttClient } from "mqtt";
 import { TRANSPORT_CONFIG, type BrokerId } from "./config";
 import { waitForPublishAcknowledgements } from "./publishAcknowledgements";
+import { hasPeerSummaryChanged } from "./peerUpdates";
 import { isRoomWireMessage, type PayloadEncoding, type RoomWireMessage } from "./protocol";
 import {
   createRoomCode,
@@ -451,6 +452,7 @@ export class SecureRoomTransport {
     this.markSeen(decrypted.id);
 
     if (decrypted.type === "hello" || decrypted.type === "heartbeat") {
+      const previousExpiresAt = this.expiresAt;
       if (decrypted.expiresAt !== null) {
         if (decrypted.expiresAt <= Date.now()) {
           this.expireRoom();
@@ -459,15 +461,23 @@ export class SecureRoomTransport {
         this.expiresAt = this.expiresAt === null ? decrypted.expiresAt : Math.min(this.expiresAt, decrypted.expiresAt);
         this.scheduleRoomExpiry();
       }
-      const isNewPeer = !this.peers.has(decrypted.from);
+      const previousPeer = this.peers.get(decrypted.from);
+      const nickname = normalizeNickname(decrypted.nickname);
+      const joinedAt = Number.isFinite(decrypted.joinedAt) ? decrypted.joinedAt : decrypted.sentAt;
+      const isNewPeer = !previousPeer;
+      const peerChanged = hasPeerSummaryChanged(previousPeer, {
+        deviceId: decrypted.from,
+        nickname,
+        joinedAt,
+      });
       this.peers.set(decrypted.from, {
         deviceId: decrypted.from,
-        nickname: normalizeNickname(decrypted.nickname),
-        joinedAt: Number.isFinite(decrypted.joinedAt) ? decrypted.joinedAt : decrypted.sentAt,
+        nickname,
+        joinedAt,
         lastSeenAt: Date.now(),
       });
-      this.emitPeers();
-      this.emitStatus();
+      if (peerChanged) this.emitPeers();
+      if (peerChanged || previousExpiresAt !== this.expiresAt) this.emitStatus();
       if (isNewPeer) void this.publishSystemMessage(this.createHelloMessage());
       return;
     }
@@ -481,16 +491,25 @@ export class SecureRoomTransport {
     if (decrypted.type === "app") {
       if (decrypted.to && decrypted.to !== this.deviceId) return;
       const knownPeer = this.peers.get(decrypted.from);
+      const nickname = typeof decrypted.nickname === "string"
+        ? normalizeNickname(decrypted.nickname)
+        : knownPeer?.nickname ?? "書房夥伴";
+      const joinedAt = knownPeer?.joinedAt ?? decrypted.sentAt;
+      const peerChanged = hasPeerSummaryChanged(knownPeer, {
+        deviceId: decrypted.from,
+        nickname,
+        joinedAt,
+      });
       this.peers.set(decrypted.from, {
         deviceId: decrypted.from,
-        nickname: typeof decrypted.nickname === "string"
-          ? normalizeNickname(decrypted.nickname)
-          : knownPeer?.nickname ?? "書房夥伴",
-        joinedAt: knownPeer?.joinedAt ?? decrypted.sentAt,
+        nickname,
+        joinedAt,
         lastSeenAt: Date.now(),
       });
-      this.emitPeers();
-      this.emitStatus();
+      if (peerChanged) {
+        this.emitPeers();
+        this.emitStatus();
+      }
       const event: ReceivedTransportMessage = {
         payload: decodePayload(decrypted.payload),
         metadata: {

@@ -15,6 +15,7 @@ import { RoomFurniture, type RoomFurnitureRig } from "./RoomFurniture";
 import { CameraRig, type CameraRigHandle, type CameraRigInteractionState, type RoomActionMeta } from "./CameraRig";
 import { VoxelCharacter } from "./VoxelCharacter";
 import { RemotePlayerLabel } from "./RemotePlayerLabel";
+import { RemotePoseSmoother } from "./RemotePoseSmoother";
 import { Joystick, type JoystickVector } from "./Joystick";
 import { StudyCategoryPanel } from "./StudyCategoryPanel";
 import type { InfiniteCanvasProps } from "./InfiniteCanvas";
@@ -45,6 +46,21 @@ interface BookPreview {
   y: number;
   from: "shelf" | "desk";
 }
+
+const HIDDEN_REMOTE_POSE: PlayerPose = {
+  x: 0,
+  z: 0,
+  eyeY: 1.5,
+  floorY: 0,
+  jumpOffset: 0,
+  yaw: 0,
+  pitch: 0,
+  moving: false,
+  onGround: true,
+  seated: false,
+  visible: false,
+  holding: false,
+};
 
 /**
  * 嵌套之城書房：three.js 多層挑空建築 + 真實 HTML 浮層。
@@ -96,6 +112,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     seated: false,
     visible: false,
   });
+  const remoteRenderPoseRef = useRef<PlayerPose>({ ...HIDDEN_REMOTE_POSE });
   const [roomHint, setRoomHint] = useState("");
   const hintTimeoutRef = useRef<number | null>(null);
   const cardModalOpen = !!props.cardModalOpen;
@@ -368,8 +385,14 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
             <VoxelCharacter api={api} playerRef={playerRef} viewMode={viewMode} />
             {collaborationSnapshot.phase === "open" && remoteParticipant && (
               <>
-                <VoxelCharacter api={api} playerRef={remotePoseRef} viewMode="third" />
-                <RemotePlayerLabel api={api} poseRef={remotePoseRef} name={remoteParticipant.name} />
+                <RemotePoseSmoother
+                  key={remoteParticipant.id}
+                  api={api}
+                  sourcePoseRef={remotePoseRef}
+                  renderedPoseRef={remoteRenderPoseRef}
+                />
+                <VoxelCharacter api={api} playerRef={remoteRenderPoseRef} viewMode="third" />
+                <RemotePlayerLabel api={api} poseRef={remoteRenderPoseRef} name={remoteParticipant.name} />
               </>
             )}
             <CameraRig

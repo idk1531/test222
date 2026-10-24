@@ -44,6 +44,88 @@ function formatCode(code: string): string {
   return code.match(/.{1,4}/g)?.join(" ") ?? code;
 }
 
+interface ReceivedMessageSummary {
+  id: string;
+  text: string;
+}
+
+interface ChunkSummary {
+  transferId: string;
+  index: number;
+  total: number;
+}
+
+interface ParsedDebugSummary {
+  text: string;
+  type?: string;
+  chunk?: ChunkSummary;
+  pose?: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function summarizeReceivedPayload(payload: unknown): ParsedDebugSummary {
+  const printable = typeof payload === "string" ? payload : JSON.stringify(payload) ?? "(non-JSON payload)";
+  let value: unknown;
+  try {
+    value = typeof payload === "string" ? JSON.parse(payload) : payload;
+  } catch {
+    return { text: printable.slice(0, 160) };
+  }
+  if (!isRecord(value) || typeof value.type !== "string") return { text: printable.slice(0, 160) };
+
+  const actor = typeof value.actorId === "string" ? ` · actor ${value.actorId.slice(0, 8)}` : "";
+  if (value.type === "shared-chunk"
+    && typeof value.transferId === "string"
+    && Number.isSafeInteger(value.index)
+    && Number.isSafeInteger(value.total)
+    && (value.index as number) >= 0
+    && (value.total as number) > 0) {
+    return {
+      text: `shared-chunk · ${(value.index as number) + 1}/${value.total as number}`,
+      type: value.type,
+      chunk: {
+        transferId: value.transferId,
+        index: value.index as number,
+        total: value.total as number,
+      },
+    };
+  }
+  if (value.type === "pose" && isRecord(value.pose)) {
+    const pose = value.pose;
+    const sequence = Number.isSafeInteger(value.sequence) ? ` #${value.sequence as number}` : "";
+    const x = typeof pose.x === "number" && Number.isFinite(pose.x) ? pose.x.toFixed(2) : "?";
+    const z = typeof pose.z === "number" && Number.isFinite(pose.z) ? pose.z.toFixed(2) : "?";
+    const jump = typeof pose.jumpOffset === "number" && pose.jumpOffset > 0.02
+      ? ` · jump ${pose.jumpOffset.toFixed(2)}m`
+      : "";
+    return {
+      text: `pose${sequence} · ${pose.moving === true ? "walking" : "idle"} · x ${x}, z ${z}${jump}`,
+      type: value.type,
+      pose: true,
+    };
+  }
+  if (value.type === "shared-ready") {
+    return { text: `shared-ready · ${value.acknowledgement === true ? "ACK" : "ready"}${actor}`, type: value.type };
+  }
+  if (value.type === "shared-snapshot") {
+    const count = Array.isArray(value.records) ? value.records.length : 0;
+    return { text: `shared-snapshot · ${count} records${actor}`, type: value.type };
+  }
+  if (value.type === "shared-operations") {
+    const count = Array.isArray(value.operations) ? value.operations.length : 0;
+    return { text: `shared-operations · ${count} changes${actor}`, type: value.type };
+  }
+  if (value.type === "hello") {
+    const name = typeof value.name === "string" ? value.name.slice(0, 24) : "peer";
+    return { text: `hello · ${name} (${String(value.role ?? "unknown")})${actor}`, type: value.type };
+  }
+  if (value.type === "role") return { text: `role · ${String(value.role ?? "unknown")}${actor}`, type: value.type };
+  return { text: `${value.type} message${actor}`, type: value.type };
+}
+
 function BrokerIndicator({ state }: { state: "connecting" | "connected" | "offline" }) {
   const label = state === "connected" ? "已連線" : state === "connecting" ? "連線中" : "離線";
   const color = state === "connected" ? "bg-emerald-500" : state === "connecting" ? "bg-amber-500" : "bg-slate-300";
@@ -66,7 +148,9 @@ export default function EncryptedRoomPanel({ nickname, manualSessionActive = fal
   const [errorMessage, setErrorMessage] = useState("");
   const [notice, setNotice] = useState("");
   const [testMessage, setTestMessage] = useState("");
-  const [receivedMessages, setReceivedMessages] = useState<string[]>([]);
+  const [receivedMessages, setReceivedMessages] = useState<ReceivedMessageSummary[]>([]);
+  const chunkProgressRef = useRef(new Map<string, { total: number; indices: Set<number> }>());
+  const lastPoseSummaryAtRef = useRef(0);
   const joinCodeRef = useRef(joinCode);
   const nicknameRef = useRef(nickname);
   const scannerVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -81,10 +165,51 @@ export default function EncryptedRoomPanel({ nickname, manualSessionActive = fal
     const offPeers = transport.on("peers", setPeers);
     const offProgress = transport.on("progress", setProgress);
     const offMessage = transport.on("message", (event) => {
-      const printable = typeof event.payload === "string"
-        ? event.payload
-        : JSON.stringify(event.payload);
-      setReceivedMessages((previous) => [`${event.metadata.from.slice(0, 12)}: ${printable ?? "(non-JSON payload)"}`, ...previous].slice(0, 5));
+      const summary = summarizeReceivedPayload(event.payload);
+      const from = event.metadata.from.slice(0, 12);
+      const upsertSummary = (id: string, text: string) => {
+        setReceivedMessages((previous) => {
+          const index = previous.findIndex((message) => message.id === id);
+          if (index >= 0) {
+            const next = [...previous];
+            next[index] = { id, text };
+            return next;
+          }
+          return [{ id, text }, ...previous].slice(0, 5);
+        });
+      };
+
+      if (summary.chunk) {
+        const { transferId, index, total } = summary.chunk;
+        let progress = chunkProgressRef.current.get(transferId);
+        if (!progress || progress.total !== total) {
+          progress = { total, indices: new Set<number>() };
+          chunkProgressRef.current.set(transferId, progress);
+        }
+        progress.indices.add(index);
+        const received = progress.indices.size;
+        if (received === 1 || received % 4 === 0 || received === total) {
+          upsertSummary(
+            `chunk:${transferId}`,
+            `${from}: shared snapshot ${transferId.slice(0, 8)} · ${received}/${total} chunks`
+          );
+        }
+        if (chunkProgressRef.current.size > 32) {
+          const oldestTransfer = chunkProgressRef.current.keys().next().value as string | undefined;
+          if (oldestTransfer) chunkProgressRef.current.delete(oldestTransfer);
+        }
+        return;
+      }
+
+      if (summary.pose) {
+        const now = Date.now();
+        if (now - lastPoseSummaryAtRef.current < 1_000) return;
+        lastPoseSummaryAtRef.current = now;
+        upsertSummary(`pose:${event.metadata.from}`, `${from}: ${summary.text}`);
+        return;
+      }
+
+      upsertSummary(event.metadata.id, `${from}: ${summary.text}`);
     });
     const offError = transport.on("error", (event) => setErrorMessage(event.message));
     return () => {
@@ -193,6 +318,8 @@ export default function EncryptedRoomPanel({ nickname, manualSessionActive = fal
       setQrDataUrl("");
       setJoinCode("");
       setReceivedMessages([]);
+      chunkProgressRef.current.clear();
+      lastPoseSummaryAtRef.current = 0;
       setNotice("已離開加密房間並清除本頁記憶體中的金鑰。");
     } finally {
       setIsBusy(false);
@@ -412,7 +539,14 @@ export default function EncryptedRoomPanel({ nickname, manualSessionActive = fal
               <button type="submit" disabled={!testMessage.trim() || !connectedBrokers} className="touch-target min-h-9 rounded-lg bg-indigo-700 px-3 text-xs font-bold text-white hover:bg-indigo-800 disabled:opacity-50">送出</button>
             </form>
           )}
-          {receivedMessages.length > 0 && <ul className="mt-2 space-y-1">{receivedMessages.map((message, index) => <li key={`${index}-${message}`} className="break-all rounded bg-white px-2 py-1 text-[10px] text-slate-600">{message}</li>)}</ul>}
+          {receivedMessages.length > 0 && (
+            <div className="mt-2">
+              <p className="mb-1 text-[10px] text-slate-500">最近訊息摘要；姿態每秒取樣，快照內容不顯示。</p>
+              <ul className="space-y-1">
+                {receivedMessages.map((message) => <li key={message.id} className="break-all rounded bg-white px-2 py-1 text-[10px] text-slate-600">{message.text}</li>)}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
 

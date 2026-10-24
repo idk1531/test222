@@ -19,6 +19,7 @@ const compileModule = async (sourcePath, outputName, replacements = []) => {
 };
 
 const transportConfig = await compileModule("../src/lib/secureRoomTransport/config.ts", "config.mjs");
+const peerUpdates = await compileModule("../src/lib/secureRoomTransport/peerUpdates.ts", "peerUpdates.mjs");
 const protocol = await compileModule("../src/lib/secureRoomTransport/protocol.ts", "protocol.mjs");
 const crypto = await compileModule(
   "../src/lib/secureRoomTransport/crypto.ts",
@@ -88,6 +89,19 @@ test("repeats peer discovery hello every three seconds and expires peers after t
   assert.equal(transportConfig.TRANSPORT_CONFIG.helloIntervalMs, 3_000);
   assert.equal(transportConfig.TRANSPORT_CONFIG.peerExpiryMs, 10_000);
   assert.equal(transportConfig.TRANSPORT_CONFIG.peerSweepIntervalMs, 1_000);
+});
+
+test("peer list/status updates ignore packet activity timestamps", () => {
+  const previous = { deviceId: "peer-a", nickname: "Alice", joinedAt: 100, lastSeenAt: 200 };
+  assert.equal(peerUpdates.hasPeerSummaryChanged(previous, {
+    deviceId: "peer-a", nickname: "Alice", joinedAt: 100,
+  }), false);
+  assert.equal(peerUpdates.hasPeerSummaryChanged(previous, {
+    deviceId: "peer-a", nickname: "Alice 2", joinedAt: 100,
+  }), true);
+  assert.equal(peerUpdates.hasPeerSummaryChanged(undefined, {
+    deviceId: "peer-a", nickname: "Alice", joinedAt: 100,
+  }), true);
 });
 
 test("latency-sensitive relay sends can proceed after the first broker PUBACK", async () => {
