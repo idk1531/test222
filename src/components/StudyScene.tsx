@@ -84,10 +84,10 @@ export const StudyScene: React.FC<StudySceneProps> = ({
     // ---- scene / camera ----
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#cfc8bc");
-    // v8.3：大理石的柔反射——同一張窗外庭園圖做 PMREM envMap（手機跳過）。
+    // 桌機以窗外山景全景產生低強度 PMREM envMap；手機略過以降低初始化成本。
     let disposeEnv: () => void = () => {};
     if (FIDELITY.envMap && !quality.mobile) {
-      // v8.5：環境貼圖只留給大理石的反應（0.45）。v8.3 的 1.0 會讓天花與牆面染上庭園的綠色。
+      // 低環境強度避免室內牆面被窗外山景染色，同時保留石材極弱反射。
       scene.environmentIntensity = 0.12;
       disposeEnv = attachEnvironment(renderer, "garden", (env) => {
         scene.environment = env;
@@ -199,17 +199,28 @@ export const StudyScene: React.FC<StudySceneProps> = ({
       canvas.removeEventListener("webglcontextrestored", onRestored);
       apiRef.current = null;
 
-      // ---- dispose：geometry / material / texture / renderer ----
+      // ---- dispose：共享 geometry/material/texture 各只釋放一次 ----
+      const disposedGeometries = new Set<THREE.BufferGeometry>();
+      const disposedMaterials = new Set<THREE.Material>();
+      const disposedTextures = new Set<THREE.Texture>();
       scene.traverse((obj) => {
         const m = obj as THREE.Mesh;
-        if (m.geometry) m.geometry.dispose();
+        if (m.geometry && !disposedGeometries.has(m.geometry)) {
+          disposedGeometries.add(m.geometry);
+          m.geometry.dispose();
+        }
         const mats = Array.isArray(m.material) ? m.material : [m.material];
         mats.forEach((mat) => {
-          if (!mat) return;
+          if (!mat || disposedMaterials.has(mat)) return;
+          disposedMaterials.add(mat);
           const texes = Object.values(mat).filter(
             (v): v is THREE.Texture => !!v && v instanceof THREE.Texture
           );
-          texes.forEach((tex) => tex.dispose());
+          texes.forEach((tex) => {
+            if (disposedTextures.has(tex)) return;
+            disposedTextures.add(tex);
+            tex.dispose();
+          });
           mat.dispose();
         });
       });

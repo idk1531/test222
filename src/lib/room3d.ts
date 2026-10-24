@@ -28,16 +28,25 @@ export interface CityPlatform {
   depth: number;
   material: CityMaterial;
 }
-export interface CityRamp {
+export interface CityStair {
   id: string;
   start: { x: number; z: number; y: number };
   end: { x: number; z: number; y: number };
   width: number;
+  steps: number;
   material: CityMaterial;
+}
+export interface CityFrameOpening {
+  edge: "north" | "east" | "south" | "west";
+  /** Interval along the named edge in frame-local plan coordinates. */
+  start: number;
+  end: number;
+  bottom: number;
+  top: number;
 }
 export interface CityFrame {
   id: string;
-  plane: "x" | "z" | "box";
+  plane: "x" | "z" | "box" | "horizontal";
   x: number;
   z: number;
   bottom: number;
@@ -49,23 +58,42 @@ export interface CityFrame {
   rotationY: number;
   material: CityMaterial;
   bands?: readonly number[];
+  openings?: readonly CityFrameOpening[];
+}
+export interface CityFrameMember {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  bottom: number;
+  top: number;
+}
+export interface CityPlatformRail {
+  id: string;
+  platformId: string;
+  level: CityPlatform["level"];
+  axis: "x" | "z";
+  edge: "west" | "east" | "north" | "south";
+  fixed: number;
+  inward: -1 | 1;
+  start: number;
+  end: number;
 }
 
 /**
  * 嵌套之城的尺寸真相。所有值都是概念模型的「初始假設」；參考圖沒有可供精確量測的比例尺。
- * 四個可行走高度（地面 + 三層）、偏移／旋轉框架與可走斜坡在此共用，避免幾何、碰撞各自猜尺寸。
+ * 四個可行走高度（地面 + 三層）、偏移／旋轉框架與踏階路徑在此共用，避免幾何、碰撞各自猜尺寸。
  */
 export const NESTED_CITY = {
   levels: [0, 4, 8, 12] as const,
   atrium: { x: 1.2, z: -0.8, width: 9.2, depth: 7.8 },
   frames: [
-    { id: "outer-front-timber", plane: "x", x: -0.35, z: 9.25, bottom: 0, width: 22.7, height: 15.4, thickness: 0.92, beamHeight: 1.05, rotationY: 0, material: "timber" },
-    { id: "outer-west-timber", plane: "z", x: -11.35, z: 0.1, bottom: 0, width: 18.2, height: 15.2, thickness: 0.86, beamHeight: 0.98, rotationY: 0, material: "timber" },
-    { id: "outer-east-timber", plane: "z", x: 11.35, z: 0.1, bottom: 0.2, width: 18.2, height: 14.95, thickness: 0.82, beamHeight: 0.96, rotationY: 0, material: "timber", bands: [7.6] },
-    { id: "outer-back-timber", plane: "x", x: 0.8, z: -9.15, bottom: 0.45, width: 21.3, height: 14.6, thickness: 0.78, beamHeight: 0.9, rotationY: 0, material: "timber", bands: [8.4] },
-    { id: "crossing-stone-frame", plane: "x", x: -0.65, z: 2.55, bottom: 1.05, width: 17.4, height: 11.5, thickness: 0.72, beamHeight: 0.78, rotationY: 0, material: "stone", bands: [8.0] },
-    { id: "deep-stone-frame", plane: "z", x: 3.55, z: -0.2, bottom: 1.7, width: 16.3, height: 10.4, thickness: 0.68, beamHeight: 0.72, rotationY: 0, material: "stone", bands: [7.9] },
-    { id: "offset-rotated-core", plane: "box", x: 1.8, z: -0.95, bottom: 3.55, width: 11.4, depth: 8.8, height: 9.65, thickness: 0.62, beamHeight: 0.7, rotationY: Math.PI / 14, material: "core" },
+    // 外框：連續的大尺度木構盒框，保留大面開口並以樓層橫樑閉合四角。
+    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 22.7, depth: 18.2, height: 15.4, thickness: 0.92, beamHeight: 1.05, rotationY: 0, material: "timber", bands: [4, 8, 12] },
+    // 中層：橫向石構穿插體，平面伸過外框側線；下、上弦分別錨定 2F／3F。
+    { id: "middle-horizontal-insert", plane: "horizontal", x: 0, z: -1.4, bottom: 3.6, width: 21.6, depth: 12.6, height: 4.8, thickness: 0.76, beamHeight: 0.68, rotationY: Math.PI / 18, material: "stone", openings: [{ edge: "south", start: -7.32, end: -5.32, bottom: 3.6, top: 4.28 }] },
+    // 內核：落在中層開口內，尺度縮小並轉向，跨越 2F–4F 的挑空。
+    { id: "offset-rotated-core", plane: "box", x: 1.2, z: -0.8, bottom: 4.15, width: 7, depth: 4.9, height: 7.7, thickness: 0.55, beamHeight: 0.65, rotationY: Math.PI / 6, material: "core", bands: [3.85] },
   ] satisfies readonly CityFrame[],
   platforms: [
     // Level 1: 四邊環廊＋跨越中央挑空的窄橋。
@@ -74,48 +102,260 @@ export const NESTED_CITY = {
     { id: "level-1-north-gallery", level: 1, x: 0, z: -8.3, width: 15, depth: 2.8, material: "stone" },
     { id: "level-1-south-gallery", level: 1, x: 0, z: 8.3, width: 15, depth: 2.8, material: "stone" },
     { id: "level-1-crossing-bridge", level: 1, x: 0, z: 0, width: 15, depth: 1.45, material: "core" },
-    // Level 2: 相對下層平移的石廊與縱向橋，避免形成等距同心盒。
+    // Level 2: 相對下層平移；四角邊界相接，縱向橋端點與南北廊道齊平。
     { id: "level-2-west-gallery", level: 2, x: -7.6, z: -0.55, width: 2.8, depth: 14.4, material: "stone" },
     { id: "level-2-east-gallery", level: 2, x: 8.4, z: -0.55, width: 2.8, depth: 14.4, material: "stone" },
-    { id: "level-2-north-gallery", level: 2, x: 0.4, z: -6.95, width: 12, depth: 2.6, material: "core" },
-    { id: "level-2-south-gallery", level: 2, x: 0.4, z: 5.85, width: 12, depth: 2.6, material: "stone" },
-    { id: "level-2-long-bridge", level: 2, x: 1, z: -0.45, width: 1.7, depth: 11.2, material: "timber" },
-    // Level 3: 從西北高台通往偏心內核的閱讀廊橋與兩側平台。
-    { id: "level-3-ramp-landing", level: 3, x: -10.45, z: -6.7, width: 4.1, depth: 3.8, material: "stone" },
-    { id: "level-3-west-gallery", level: 3, x: -7.25, z: -1.7, width: 4.3, depth: 8.4, material: "timber" },
-    { id: "level-3-core-bridge", level: 3, x: -1.15, z: -1.7, width: 10, depth: 1.8, material: "core" },
-    { id: "level-3-east-gallery", level: 3, x: 5.1, z: -1.7, width: 3.8, depth: 8.4, material: "stone" },
-    { id: "level-3-east-reading-terrace", level: 3, x: 8.15, z: 4.3, width: 4, depth: 4.2, material: "timber" },
+    { id: "level-2-north-gallery", level: 2, x: 0.4, z: -6.95, width: 13.2, depth: 2.6, material: "core" },
+    { id: "level-2-south-gallery", level: 2, x: 0.4, z: 5.85, width: 13.2, depth: 2.6, material: "stone" },
+    { id: "level-2-long-bridge", level: 2, x: 1, z: -0.55, width: 1.7, depth: 10.2, material: "timber" },
+    // Level 3 / 4F：四邊觀景環廊繞開中央挑空；每塊樓板只在邊界相接。
+    { id: "level-3-west-gallery", level: 3, x: -9.3, z: -0.2, width: 5.4, depth: 15, material: "timber" },
+    { id: "level-3-east-gallery", level: 3, x: 9.4, z: -0.2, width: 5.2, depth: 15, material: "stone" },
+    { id: "level-3-north-gallery", level: 3, x: 0.1, z: -8.2, width: 13.4, depth: 3, material: "core" },
+    { id: "level-3-south-observation-terrace", level: 3, x: 0.1, z: 7.5, width: 13.4, depth: 2.8, material: "timber" },
   ] satisfies readonly CityPlatform[],
-  ramps: [
-    { id: "ramp-ground-to-level-1", start: { x: -10.8, z: 6.7, y: 0 }, end: { x: 1.2, z: 6.7, y: 4 }, width: 1.8, material: "stone" },
-    { id: "ramp-level-1-to-level-2", start: { x: 1.2, z: 6.7, y: 4 }, end: { x: 1.2, z: -6.7, y: 8 }, width: 1.8, material: "timber" },
-    { id: "ramp-level-2-to-level-3", start: { x: 1.2, z: -6.7, y: 8 }, end: { x: -10.8, z: -6.7, y: 12 }, width: 1.8, material: "stone" },
-  ] satisfies readonly CityRamp[],
+  stairs: [
+    // 開放式階梯沿中庭上升；每層由挑空側抵達平台邊緣，不穿越上層樓板。
+    { id: "stair-ground-to-level-1", start: { x: -5.2, z: 0, y: 0 }, end: { x: -5.2, z: 6.9, y: 4 }, width: 1.8, steps: 23, material: "stone" },
+    { id: "stair-level-1-to-level-2", start: { x: -5.2, z: 6.9, y: 4 }, end: { x: -5.2, z: -5.65, y: 8 }, width: 1.8, steps: 25, material: "timber" },
+    { id: "stair-level-2-to-level-3", start: { x: -5.2, z: 4.55, y: 8 }, end: { x: -5.2, z: -6.7, y: 12 }, width: 1.8, steps: 23, material: "stone" },
+  ] satisfies readonly CityStair[],
   bridgeRails: [
-    { id: "level-1-bridge-rail-near", level: 1, x: 0, z: -0.73, width: 15, depth: 0.1 },
-    { id: "level-1-bridge-rail-far", level: 1, x: 0, z: 0.73, width: 15, depth: 0.1 },
-    { id: "level-2-bridge-rail-west", level: 2, x: 0.06, z: -0.45, width: 0.1, depth: 11.2 },
-    { id: "level-2-bridge-rail-east", level: 2, x: 1.94, z: -0.45, width: 0.1, depth: 11.2 },
-    { id: "level-3-bridge-rail-near", level: 3, x: -1.15, z: -2.65, width: 10, depth: 0.1 },
-    { id: "level-3-bridge-rail-far", level: 3, x: -1.15, z: -0.75, width: 10, depth: 0.1 },
+    { id: "level-1-bridge-rail-near", level: 1, x: 0, z: -0.675, width: 15, depth: 0.1 },
+    { id: "level-1-bridge-rail-far", level: 1, x: 0, z: 0.675, width: 15, depth: 0.1 },
+    { id: "level-2-bridge-rail-west", level: 2, x: 0.2, z: -0.55, width: 0.1, depth: 10.2 },
+    { id: "level-2-bridge-rail-east", level: 2, x: 1.8, z: -0.55, width: 0.1, depth: 10.2 },
   ] as const,
   columns: [
     { id: "stone-support-west", x: -8.25, z: 2.55, width: 0.76, depth: 0.72, bottom: 1.05, top: 12.55, material: "stone" },
-    { id: "stone-support-east", x: 6.95, z: -0.2, width: 0.68, depth: 0.68, bottom: 1.7, top: 12.1, material: "stone" },
+    { id: "stone-support-east", x: 7.35, z: -0.2, width: 0.68, depth: 0.68, bottom: 1.7, top: 12.1, material: "stone" },
   ] as const,
-  /** Ramp rails stop before each landing so their posts do not seal the turn between floors. */
-  rampRailInset: 1.15,
-  /** Platform bridge/ramp guardrails: y is the walking-surface level index. */
+  /** Stair rails stop before each landing so their end posts do not block the threshold. */
+  stairRailInset: 0.45,
+  /** Platform / bridge / stair guardrail heights and light member section (metres). */
   railHeight: 1.05,
+  platformRailPostWidth: 0.07,
 } as const;
+
+/** Shared member layout for rendering and collision, so the white model and movement use identical frames. */
+export function cityFrameMembers(frame: CityFrame): CityFrameMember[] {
+  const members: CityFrameMember[] = [];
+  const depth = frame.depth ?? frame.width;
+  const add = (x: number, z: number, width: number, memberDepth: number, bottom: number, top: number) => {
+    if (top - bottom > 1e-4 && width > 0 && memberDepth > 0) {
+      members.push({ x, z, width, depth: memberDepth, bottom, top });
+    }
+  };
+
+  if (frame.plane === "horizontal") {
+    const halfX = frame.width / 2 - frame.thickness / 2;
+    const halfZ = depth / 2 - frame.thickness / 2;
+    const lowerTop = frame.bottom + frame.beamHeight;
+    const upperBottom = frame.bottom + frame.height - frame.beamHeight;
+    const addRingEdge = (
+      edge: CityFrameOpening["edge"],
+      axis: "x" | "z",
+      fixed: number,
+      start: number,
+      end: number,
+      bottom: number,
+      top: number
+    ) => {
+      let intervals = [{ start, end }];
+      for (const opening of frame.openings ?? []) {
+        if (opening.edge !== edge || opening.bottom >= top || opening.top <= bottom) continue;
+        const next: Array<{ start: number; end: number }> = [];
+        for (const interval of intervals) {
+          if (opening.end <= interval.start || opening.start >= interval.end) {
+            next.push(interval);
+            continue;
+          }
+          if (opening.start > interval.start) next.push({ start: interval.start, end: Math.min(opening.start, interval.end) });
+          if (opening.end < interval.end) next.push({ start: Math.max(opening.end, interval.start), end: interval.end });
+        }
+        intervals = next;
+      }
+      for (const interval of intervals) {
+        if (interval.end - interval.start <= 1e-4) continue;
+        if (axis === "x") {
+          add((interval.start + interval.end) / 2, fixed, interval.end - interval.start, frame.thickness, bottom, top);
+        } else {
+          add(fixed, (interval.start + interval.end) / 2, frame.thickness, interval.end - interval.start, bottom, top);
+        }
+      }
+    };
+    const addRing = (bottom: number, top: number) => {
+      addRingEdge("north", "x", -halfZ, -frame.width / 2, frame.width / 2, bottom, top);
+      addRingEdge("south", "x", halfZ, -frame.width / 2, frame.width / 2, bottom, top);
+      addRingEdge("west", "z", -halfX, -depth / 2, depth / 2, bottom, top);
+      addRingEdge("east", "z", halfX, -depth / 2, depth / 2, bottom, top);
+    };
+    addRing(frame.bottom, lowerTop);
+    addRing(upperBottom, frame.bottom + frame.height);
+    for (const xSide of [-1, 1]) {
+      for (const zSide of [-1, 1]) {
+        add(xSide * halfX, zSide * halfZ, frame.thickness, frame.thickness, lowerTop, upperBottom);
+      }
+    }
+    for (const band of frame.bands ?? []) {
+      const bandHeight = frame.beamHeight * 0.58;
+      const bottom = frame.bottom + band - bandHeight / 2;
+      addRing(bottom, bottom + bandHeight);
+    }
+    return members;
+  }
+
+  if (frame.plane === "x") {
+    const half = frame.width / 2 - frame.thickness / 2;
+    add(-half, 0, frame.thickness, frame.thickness, frame.bottom, frame.bottom + frame.height);
+    add(half, 0, frame.thickness, frame.thickness, frame.bottom, frame.bottom + frame.height);
+    add(0, 0, frame.width, frame.thickness, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+    for (const band of frame.bands ?? []) {
+      const height = frame.beamHeight * 0.58;
+      add(0, 0, frame.width, frame.thickness, frame.bottom + band - height / 2, frame.bottom + band + height / 2);
+    }
+    return members;
+  }
+
+  if (frame.plane === "z") {
+    const half = frame.width / 2 - frame.thickness / 2;
+    add(0, -half, frame.thickness, frame.thickness, frame.bottom, frame.bottom + frame.height);
+    add(0, half, frame.thickness, frame.thickness, frame.bottom, frame.bottom + frame.height);
+    add(0, 0, frame.thickness, frame.width, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+    for (const band of frame.bands ?? []) {
+      const height = frame.beamHeight * 0.58;
+      add(0, 0, frame.thickness, frame.width, frame.bottom + band - height / 2, frame.bottom + band + height / 2);
+    }
+    return members;
+  }
+
+  const halfX = frame.width / 2 - frame.thickness / 2;
+  const halfZ = depth / 2 - frame.thickness / 2;
+  for (const xSide of [-1, 1]) {
+    for (const zSide of [-1, 1]) {
+      add(xSide * halfX, zSide * halfZ, frame.thickness, frame.thickness, frame.bottom, frame.bottom + frame.height);
+    }
+  }
+  add(0, -halfZ, frame.width, frame.thickness, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+  add(0, halfZ, frame.width, frame.thickness, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+  add(-halfX, 0, frame.thickness, depth, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+  add(halfX, 0, frame.thickness, depth, frame.bottom + frame.height - frame.beamHeight, frame.bottom + frame.height);
+  for (const band of frame.bands ?? []) {
+    const height = frame.beamHeight * 0.58;
+    const bottom = frame.bottom + band - height / 2;
+    const top = bottom + height;
+    add(0, -halfZ, frame.width, frame.thickness, bottom, top);
+    add(0, halfZ, frame.width, frame.thickness, bottom, top);
+    add(-halfX, 0, frame.thickness, depth, bottom, top);
+    add(halfX, 0, frame.thickness, depth, bottom, top);
+  }
+  return members;
+}
+
+/** Height of the open-riser stair surface at a normalized run position. */
+export function cityStairHeightAt(stair: CityStair, progress: number): number {
+  const t = Math.max(0, Math.min(1, progress));
+  const stepIndex = t >= 1 ? stair.steps : Math.ceil(t * stair.steps - 1e-9);
+  return stair.start.y + ((stair.end.y - stair.start.y) * stepIndex) / stair.steps;
+}
+
+/**
+ * Derive guardrail segments from exposed platform edges, leaving only real floor joins and stair mouths open.
+ * Bridge edges are covered by their explicitly dimensioned bridge rails.
+ */
+export function nestedCityPlatformRails(): CityPlatformRail[] {
+  const epsilon = 1e-4;
+  const minimumRailLength = 0.4;
+  const intervalsMinus = (intervals: Array<{ start: number; end: number }>, cutStart: number, cutEnd: number) => {
+    const next: Array<{ start: number; end: number }> = [];
+    for (const interval of intervals) {
+      if (cutEnd <= interval.start + epsilon || cutStart >= interval.end - epsilon) {
+        next.push(interval);
+        continue;
+      }
+      if (cutStart - interval.start > epsilon) next.push({ start: interval.start, end: Math.min(cutStart, interval.end) });
+      if (interval.end - cutEnd > epsilon) next.push({ start: Math.max(cutEnd, interval.start), end: interval.end });
+    }
+    return next;
+  };
+  const stairEnds = NESTED_CITY.stairs.flatMap((stair) => [
+    { y: stair.start.y, point: stair.start, width: stair.width },
+    { y: stair.end.y, point: stair.end, width: stair.width },
+  ]);
+  const rails: CityPlatformRail[] = [];
+
+  for (const platform of NESTED_CITY.platforms) {
+    if (platform.id.includes("bridge")) continue;
+    const bounds = {
+      minX: platform.x - platform.width / 2,
+      maxX: platform.x + platform.width / 2,
+      minZ: platform.z - platform.depth / 2,
+      maxZ: platform.z + platform.depth / 2,
+    };
+    const edges = [
+      { axis: "z" as const, edge: "west" as const, fixed: bounds.minX, inward: 1 as const, start: bounds.minZ, end: bounds.maxZ },
+      { axis: "z" as const, edge: "east" as const, fixed: bounds.maxX, inward: -1 as const, start: bounds.minZ, end: bounds.maxZ },
+      { axis: "x" as const, edge: "north" as const, fixed: bounds.minZ, inward: 1 as const, start: bounds.minX, end: bounds.maxX },
+      { axis: "x" as const, edge: "south" as const, fixed: bounds.maxZ, inward: -1 as const, start: bounds.minX, end: bounds.maxX },
+    ];
+
+    for (const edge of edges) {
+      let intervals = [{ start: edge.start, end: edge.end }];
+      for (const neighbor of NESTED_CITY.platforms) {
+        if (neighbor.id === platform.id || neighbor.level !== platform.level) continue;
+        const neighborBounds = {
+          minX: neighbor.x - neighbor.width / 2,
+          maxX: neighbor.x + neighbor.width / 2,
+          minZ: neighbor.z - neighbor.depth / 2,
+          maxZ: neighbor.z + neighbor.depth / 2,
+        };
+        const sharesBoundary = edge.axis === "z"
+          ? Math.abs(edge.fixed - neighborBounds.minX) <= epsilon || Math.abs(edge.fixed - neighborBounds.maxX) <= epsilon
+          : Math.abs(edge.fixed - neighborBounds.minZ) <= epsilon || Math.abs(edge.fixed - neighborBounds.maxZ) <= epsilon;
+        if (!sharesBoundary) continue;
+        const overlapStart = edge.axis === "z"
+          ? Math.max(edge.start, neighborBounds.minZ)
+          : Math.max(edge.start, neighborBounds.minX);
+        const overlapEnd = edge.axis === "z"
+          ? Math.min(edge.end, neighborBounds.maxZ)
+          : Math.min(edge.end, neighborBounds.maxX);
+        if (overlapEnd - overlapStart > epsilon) intervals = intervalsMinus(intervals, overlapStart, overlapEnd);
+      }
+
+      const floorY = NESTED_CITY.levels[platform.level];
+      for (const endpoint of stairEnds) {
+        if (Math.abs(endpoint.y - floorY) > epsilon) continue;
+        const distanceToEdge = edge.axis === "z" ? Math.abs(endpoint.point.x - edge.fixed) : Math.abs(endpoint.point.z - edge.fixed);
+        if (distanceToEdge > endpoint.width / 2 - 0.05) continue;
+        const along = edge.axis === "z" ? endpoint.point.z : endpoint.point.x;
+        intervals = intervalsMinus(intervals, along - endpoint.width / 2, along + endpoint.width / 2);
+      }
+
+      intervals.forEach((interval, index) => {
+        if (interval.end - interval.start < minimumRailLength) return;
+        rails.push({
+          id: `${platform.id}:${edge.edge}:${index}`,
+          platformId: platform.id,
+          level: platform.level,
+          axis: edge.axis,
+          edge: edge.edge,
+          fixed: edge.fixed,
+          inward: edge.inward,
+          start: interval.start,
+          end: interval.end,
+        });
+      });
+    }
+  }
+  return rails;
+}
 
 export interface NestedCityFloorLabel {
   full: string;
   compact: string;
 }
 
-/** Convert a walking-surface height to a compact HUD label without updating on every ramp frame. */
+/** Convert a walking-surface height to a compact HUD label without updating on every stair tread. */
 export function nestedCityFloorLabel(floorY: number): NestedCityFloorLabel {
   if (!Number.isFinite(floorY)) return { full: "位置未知", compact: "未知" };
 
@@ -125,7 +365,7 @@ export function nestedCityFloorLabel(floorY: number): NestedCityFloorLabel {
     const level = NESTED_CITY.levels[levelIndex];
     return { full: `第 ${levelIndex} 層 · ${level} m`, compact: `${level}m` };
   }
-  return { full: "斜坡", compact: "坡道" };
+  return { full: "階梯", compact: "階梯" };
 }
 
 // 大面積玻璃窗（北牆 z = −depth/2），以落地採光取代單層小房間窗洞。
@@ -501,7 +741,7 @@ export const TEXTURES: {
     oak: "oak-floor.jpg", // 暖橡木拼板地板（保留，可切回 floor="oak"）
     marble: "marble-veined.jpg", // 中灰大理石（桌板／窗台／地坪；v8.6 自行產製的褐色紋理）
     plaster: "plaster.jpg", // 米白細顆粒牆面（南／東牆）
-    garden: "garden-view-misty.jpg", // 窗外綠意庭園（降飽和＋晨霧處理版）
+    garden: "mountain-courtyard-view.png", // 山景庭園全景；作為北側高窗與環境反射（生成素材）
     spines: "book-spines.jpg", // 書脊色票（保留；不再當背板）
     microcement: "microcement.jpg", // 書牆背牆：深褐微水泥
     blind: "blind-slats.jpg", // 透光橫紋簾 alphaMap（3px 亮 / 6px 暗）
@@ -749,64 +989,92 @@ export function shelfPlankY(row: number, _rowCount: number): number {
 }
 
 export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair" | "player" | "structure" | "railing";
+export interface OrientedColliderFootprint {
+  centerX: number;
+  centerZ: number;
+  width: number;
+  depth: number;
+  rotationY: number;
+}
 export interface Aabb extends RoomRect {
   kind: RoomColliderKind;
   bottom?: number;
   top: number;
   standable: boolean;
+  /** Exact footprint for rotated architectural members; min/max remain broad-phase bounds. */
+  oriented?: OrientedColliderFootprint;
 }
 export type RoomCollider = Aabb;
 
-/** 玩家以 XZ 圓形近似；bottom/top 讓樓層碰撞只阻擋與角色身高相交的物件。 */
-interface LocalFrameMember {
-  x: number;
-  z: number;
-  width: number;
-  depth: number;
-  bottom: number;
-  top: number;
-}
-function frameMembers(frame: CityFrame): LocalFrameMember[] {
-  const members: LocalFrameMember[] = [];
-  const postTop = frame.bottom + frame.height - frame.beamHeight;
-  const add = (x: number, z: number, width: number, depth: number, bottom: number, top: number) => {
-    members.push({ x, z, width, depth, bottom, top });
-  };
-  if (frame.plane === "x") {
-    for (const side of [-1, 1]) add(side * frame.width / 2, 0, frame.thickness, frame.thickness, frame.bottom, postTop);
-    add(0, 0, frame.width, frame.thickness, postTop, frame.bottom + frame.height);
-    for (const band of frame.bands ?? []) {
-      const half = frame.beamHeight * 0.36;
-      add(0, 0, frame.width, frame.thickness, frame.bottom + band - half, frame.bottom + band + half);
-    }
-  } else if (frame.plane === "z") {
-    for (const side of [-1, 1]) add(0, side * frame.width / 2, frame.thickness, frame.thickness, frame.bottom, postTop);
-    add(0, 0, frame.thickness, frame.width, postTop, frame.bottom + frame.height);
-    for (const band of frame.bands ?? []) {
-      const half = frame.beamHeight * 0.36;
-      add(0, 0, frame.thickness, frame.width, frame.bottom + band - half, frame.bottom + band + half);
-    }
-  } else {
-    const depth = frame.depth ?? frame.width;
-    for (const xSide of [-1, 1]) {
-      for (const zSide of [-1, 1]) add(xSide * frame.width / 2, zSide * depth / 2, frame.thickness, frame.thickness, frame.bottom, postTop);
-    }
-    const topY0 = postTop;
-    const topY1 = frame.bottom + frame.height;
-    for (const zSide of [-1, 1]) add(0, zSide * depth / 2, frame.width, frame.thickness, topY0, topY1);
-    for (const xSide of [-1, 1]) add(xSide * frame.width / 2, 0, frame.thickness, depth, topY0, topY1);
-    for (const band of frame.bands ?? []) {
-      const half = frame.beamHeight * 0.29;
-      const bottom = frame.bottom + band - half;
-      const top = frame.bottom + band + half;
-      for (const zSide of [-1, 1]) add(0, zSide * depth / 2, frame.width, frame.thickness, bottom, top);
-      for (const xSide of [-1, 1]) add(xSide * frame.width / 2, 0, frame.thickness, depth, bottom, top);
-    }
+/** Circle-versus-box footprint query; rotated members use their actual local rectangle, not the broad AABB. */
+export function colliderOverlapsCircle(collider: Aabb, x: number, z: number, radius = 0): boolean {
+  if (collider.oriented) {
+    const { centerX, centerZ, width, depth, rotationY } = collider.oriented;
+    const dx = x - centerX;
+    const dz = z - centerZ;
+    const cos = Math.cos(rotationY);
+    const sin = Math.sin(rotationY);
+    const localX = dx * cos - dz * sin;
+    const localZ = dx * sin + dz * cos;
+    const closestX = THREE.MathUtils.clamp(localX, -width / 2, width / 2);
+    const closestZ = THREE.MathUtils.clamp(localZ, -depth / 2, depth / 2);
+    return (localX - closestX) ** 2 + (localZ - closestZ) ** 2 <= radius ** 2 + 1e-10;
   }
-  return members;
+  const closestX = THREE.MathUtils.clamp(x, collider.minX, collider.maxX);
+  const closestZ = THREE.MathUtils.clamp(z, collider.minZ, collider.maxZ);
+  return (x - closestX) ** 2 + (z - closestZ) ** 2 <= radius ** 2 + 1e-10;
 }
+
+function separateCircleFromOrientedRect(
+  x: number,
+  z: number,
+  radius: number,
+  footprint: OrientedColliderFootprint
+): { x: number; z: number } | null {
+  const dx = x - footprint.centerX;
+  const dz = z - footprint.centerZ;
+  const cos = Math.cos(footprint.rotationY);
+  const sin = Math.sin(footprint.rotationY);
+  let localX = dx * cos - dz * sin;
+  let localZ = dx * sin + dz * cos;
+  const halfWidth = footprint.width / 2;
+  const halfDepth = footprint.depth / 2;
+  const closestX = THREE.MathUtils.clamp(localX, -halfWidth, halfWidth);
+  const closestZ = THREE.MathUtils.clamp(localZ, -halfDepth, halfDepth);
+  let pushX = localX - closestX;
+  let pushZ = localZ - closestZ;
+  const distance = Math.hypot(pushX, pushZ);
+  if (distance >= radius) return null;
+
+  if (distance > 1e-8) {
+    const scale = (radius - distance) / distance;
+    localX += pushX * scale;
+    localZ += pushZ * scale;
+  } else {
+    const candidates = [
+      { axis: "x" as const, value: -halfWidth - radius, distance: localX + halfWidth },
+      { axis: "x" as const, value: halfWidth + radius, distance: halfWidth - localX },
+      { axis: "z" as const, value: -halfDepth - radius, distance: localZ + halfDepth },
+      { axis: "z" as const, value: halfDepth + radius, distance: halfDepth - localZ },
+    ].sort((a, b) => {
+      const difference = a.distance - b.distance;
+      if (difference !== 0) return difference;
+      if (a.axis === b.axis) return 0;
+      return a.axis === "x" ? -1 : 1;
+    });
+    if (candidates[0].axis === "x") localX = candidates[0].value;
+    else localZ = candidates[0].value;
+  }
+
+  return {
+    x: footprint.centerX + localX * cos + localZ * sin,
+    z: footprint.centerZ - localX * sin + localZ * cos,
+  };
+}
+
+/** 玩家以 XZ 圓形近似；bottom/top 讓樓層碰撞只阻擋與角色身高相交的物件。 */
 const frameStructureColliders: Aabb[] = NESTED_CITY.frames.flatMap((frame) =>
-  frameMembers(frame).map((member) => {
+  cityFrameMembers(frame).map((member) => {
     const cos = Math.cos(frame.rotationY);
     const sin = Math.sin(frame.rotationY);
     const x = frame.x + member.x * cos + member.z * sin;
@@ -822,6 +1090,9 @@ const frameStructureColliders: Aabb[] = NESTED_CITY.frames.flatMap((frame) =>
       bottom: member.bottom,
       top: member.top,
       standable: false,
+      ...(Math.abs(frame.rotationY) > 1e-8 ? {
+        oriented: { centerX: x, centerZ: z, width: member.width, depth: member.depth, rotationY: frame.rotationY },
+      } : {}),
     };
   })
 );
@@ -852,29 +1123,46 @@ const bridgeRailColliders: Aabb[] = NESTED_CITY.bridgeRails.map((rail) => {
     standable: false,
   };
 });
-const rampRailColliders: Aabb[] = NESTED_CITY.ramps.flatMap((ramp) => {
-  const dx = ramp.end.x - ramp.start.x;
-  const dz = ramp.end.z - ramp.start.z;
+const platformRailColliders: Aabb[] = nestedCityPlatformRails().map((rail) => {
+  const floorY = NESTED_CITY.levels[rail.level];
+  const halfWidth = NESTED_CITY.platformRailPostWidth / 2;
+  const fixed = rail.fixed + rail.inward * halfWidth;
+  return {
+    minX: rail.axis === "x" ? rail.start : fixed - halfWidth,
+    maxX: rail.axis === "x" ? rail.end : fixed + halfWidth,
+    minZ: rail.axis === "z" ? rail.start : fixed - halfWidth,
+    maxZ: rail.axis === "z" ? rail.end : fixed + halfWidth,
+    kind: "railing",
+    bottom: floorY + NESTED_CITY.railHeight - halfWidth,
+    top: floorY + NESTED_CITY.railHeight + halfWidth,
+    standable: false,
+  };
+});
+const stairRailColliders: Aabb[] = NESTED_CITY.stairs.flatMap((stair) => {
+  const dx = stair.end.x - stair.start.x;
+  const dz = stair.end.z - stair.start.z;
   const length = Math.hypot(dx, dz);
-  const insetT = Math.min(0.35, NESTED_CITY.rampRailInset / length);
+  if (length <= 1e-9) return [];
+  const insetT = Math.min(0.15, NESTED_CITY.stairRailInset / length);
   const railStartT = insetT;
   const railEndT = 1 - insetT;
-  const samples = Math.max(2, Math.ceil(length * (railEndT - railStartT) / 1.8));
+  const postWidth = NESTED_CITY.platformRailPostWidth;
+  const samples = Math.max(2, Math.ceil(length * (railEndT - railStartT) / 1.65));
   const sideX = -dz / length;
   const sideZ = dx / length;
   return [-1, 1].flatMap((side) => Array.from({ length: samples + 1 }, (_, i) => {
     const t = railStartT + (railEndT - railStartT) * i / samples;
-    const y = ramp.start.y + (ramp.end.y - ramp.start.y) * t;
-    const x = ramp.start.x + dx * t + sideX * (ramp.width / 2 - 0.08) * side;
-    const z = ramp.start.z + dz * t + sideZ * (ramp.width / 2 - 0.08) * side;
+    const surfaceY = cityStairHeightAt(stair, t);
+    const x = stair.start.x + dx * t + sideX * (stair.width / 2 - postWidth / 2) * side;
+    const z = stair.start.z + dz * t + sideZ * (stair.width / 2 - postWidth / 2) * side;
     return {
-      minX: x - 0.07,
-      maxX: x + 0.07,
-      minZ: z - 0.07,
-      maxZ: z + 0.07,
+      minX: x - postWidth / 2,
+      maxX: x + postWidth / 2,
+      minZ: z - postWidth / 2,
+      maxZ: z + postWidth / 2,
       kind: "railing" as const,
-      bottom: y,
-      top: y + NESTED_CITY.railHeight,
+      bottom: surfaceY,
+      top: surfaceY + NESTED_CITY.railHeight,
       standable: false,
     };
   }));
@@ -905,7 +1193,8 @@ export const COLLIDERS: readonly Aabb[] = [
   ...structureColliders,
   ...frameStructureColliders,
   ...bridgeRailColliders,
-  ...rampRailColliders,
+  ...platformRailColliders,
+  ...stairRailColliders,
 ];
 
 export const PLAYER_RADIUS = 0.22;
@@ -958,6 +1247,21 @@ export function resolveCollision(
       const maxZ = collider.maxZ + chairOffsetZ + radius;
       if (px <= minX || px >= maxX || pz <= minZ || pz >= maxZ) continue;
 
+      if (collider.oriented) {
+        const orientation = {
+          ...collider.oriented,
+          centerX: collider.oriented.centerX + chairOffsetX,
+          centerZ: collider.oriented.centerZ + chairOffsetZ,
+        };
+        const separated = separateCircleFromOrientedRect(px, pz, radius, orientation);
+        if (!separated) continue;
+        const bounded = clampRoomPosition(separated.x, separated.z);
+        px = bounded.x;
+        pz = bounded.z;
+        changed = true;
+        continue;
+      }
+
       const candidates = [
         { axis: "x" as const, value: minX, distance: px - minX },
         { axis: "x" as const, value: maxX, distance: maxX - px },
@@ -988,30 +1292,30 @@ export function resolveCollision(
   return { x: px, z: pz };
 }
 
-/** 最大無跳躍垂直落差；斜坡每幀的高度增量遠低於此值。 */
+/** 最大無跳躍垂直落差；階梯踏步高度必須遠低於此值。 */
 export const MAX_WALKABLE_STEP = 0.62;
 
 /**
  * 回傳最接近目前樓層的可行走面高度。堆疊平台可投影到同一 XZ 區域，
- * 因此必須帶入目前高度，避免玩家從地面瞬移到上層；斜坡只在腳下可接續時採用。
+ * 因此必須帶入目前高度，避免玩家從地面瞬移到上層；階梯只在腳下可接續時採用。
  */
 export function groundHeightAt(x: number, z: number, referenceY = 0): number {
-  const rampHeights: number[] = [];
-  for (const ramp of NESTED_CITY.ramps) {
-    const dx = ramp.end.x - ramp.start.x;
-    const dz = ramp.end.z - ramp.start.z;
+  const stairHeights: number[] = [];
+  for (const stair of NESTED_CITY.stairs) {
+    const dx = stair.end.x - stair.start.x;
+    const dz = stair.end.z - stair.start.z;
     const lengthSq = dx * dx + dz * dz;
     if (lengthSq <= 1e-9) continue;
-    const t = ((x - ramp.start.x) * dx + (z - ramp.start.z) * dz) / lengthSq;
+    const t = ((x - stair.start.x) * dx + (z - stair.start.z) * dz) / lengthSq;
     if (t < 0 || t > 1) continue;
-    const closestX = ramp.start.x + dx * t;
-    const closestZ = ramp.start.z + dz * t;
-    if (Math.hypot(x - closestX, z - closestZ) > ramp.width / 2) continue;
-    const height = ramp.start.y + (ramp.end.y - ramp.start.y) * t;
-    if (Math.abs(height - referenceY) <= MAX_WALKABLE_STEP) rampHeights.push(height);
+    const closestX = stair.start.x + dx * t;
+    const closestZ = stair.start.z + dz * t;
+    if (Math.hypot(x - closestX, z - closestZ) > stair.width / 2) continue;
+    const height = cityStairHeightAt(stair, t);
+    if (Math.abs(height - referenceY) <= MAX_WALKABLE_STEP) stairHeights.push(height);
   }
-  if (rampHeights.length) {
-    return rampHeights.reduce((best, height) =>
+  if (stairHeights.length) {
+    return stairHeights.reduce((best, height) =>
       Math.abs(height - referenceY) < Math.abs(best - referenceY) ? height : best
     );
   }
@@ -1348,8 +1652,7 @@ function thirdPersonBlocked(x: number, y: number, z: number): boolean {
   ) return true;
   return COLLIDERS.some((collider) =>
     y > (collider.bottom ?? 0) - 0.1 && y < collider.top + 0.12 &&
-    x > collider.minX - 0.18 && x < collider.maxX + 0.18 &&
-    z > collider.minZ - 0.18 && z < collider.maxZ + 0.18
+    colliderOverlapsCircle(collider, x, z, 0.18)
   );
 }
 
@@ -1390,13 +1693,18 @@ export function resolveThirdPersonCamera(
       ),
     };
   };
+  const minimumVisibleDistance = Math.min(1.02, Math.max(0.5, distance * 0.4));
+  const isUsableCameraPosition = (candidate: { x: number; y: number; z: number }) =>
+    Math.hypot(candidate.x - pose.x, candidate.z - pose.z) > 0.28 &&
+    Math.hypot(candidate.x - pose.x, candidate.y - eyeY, candidate.z - pose.z) > minimumVisibleDistance &&
+    !thirdPersonBlocked(candidate.x, candidate.y, candidate.z);
 
-  // 1) 理想：從最遠處往內找第一個沒被擋住的位置，保留最大距離。
+  // 1) 理想：從最遠處往內找第一個沒被擋住、且未被牆角夾到角色身上的位置。
   const steps = 18;
   for (let i = steps; i >= 0; i -= 1) {
     const d = THIRD_PERSON.minDistance + (distance - THIRD_PERSON.minDistance) * (i / steps);
     const candidate = candidateAt(d, baseY);
-    if (!thirdPersonBlocked(candidate.x, candidate.y, candidate.z)) return candidate;
+    if (isUsableCameraPosition(candidate)) return candidate;
   }
 
   // 2) 貼牆／貼家具：抬高視點，讓角色仍在畫面內（不穿牆、也不消失在後腦）。
@@ -1405,7 +1713,7 @@ export function resolveThirdPersonCamera(
     for (let i = steps; i >= 0; i -= 1) {
       const d = THIRD_PERSON.minDistance + (distance - THIRD_PERSON.minDistance) * (i / steps);
       const lifted = candidateAt(d, y);
-      if (!thirdPersonBlocked(lifted.x, lifted.y, lifted.z)) return lifted;
+      if (isUsableCameraPosition(lifted)) return lifted;
     }
   }
 
@@ -1414,20 +1722,20 @@ export function resolveThirdPersonCamera(
   for (const angle of sideAngles) {
     for (const d of [1.5, 1.25, THIRD_PERSON.minDistance, 0.82]) {
       const side = candidateAt(d, baseY, angle);
-      if (!thirdPersonBlocked(side.x, side.y, side.z)) return side;
+      if (isUsableCameraPosition(side)) return side;
     }
     for (const lift of [0.55, 0.95]) {
       const y = Math.min(ROOM.height - 0.14, baseY + lift);
       for (const d of [1.4, 1.1, 0.82]) {
         const side = candidateAt(d, y, angle);
-        if (!thirdPersonBlocked(side.x, side.y, side.z)) return side;
+        if (isUsableCameraPosition(side)) return side;
       }
     }
   }
 
   // 4) 最後手段：抬高到角色上方、水平只退 0.45 m；相機仍在房內且不會與頭部重疊。
   const overhead = candidateAt(0.45, Math.min(ROOM.height - 0.12, eyeY + 1.25));
-  if (!thirdPersonBlocked(overhead.x, overhead.y, overhead.z)) return overhead;
+  if (isUsableCameraPosition(overhead)) return overhead;
   return candidateAt(0.45, Math.min(ROOM.height - 0.12, eyeY + 1.05));
 }
 

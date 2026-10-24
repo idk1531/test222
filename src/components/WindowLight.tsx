@@ -88,22 +88,18 @@ export const WindowLight: React.FC<{ api: StudySceneApi }> = ({ api }) => {
     // ---- 窗外景片：天空遠景、遠樹冠、中景樹、近灌木、草地 ----
     // v8.3：窗景「近過曝」——純白底色＋toneMapped:false，讓窗外突破 1.0 拉開明暗對比
     const skyMat = new THREE.MeshBasicMaterial({ color: "#ffffff", toneMapped: false });
-    // v8.6：窗外要比室內亮一階（參考照的庭園是透光的晨霧綠），維持 toneMapped:false 直接拉高 albedo。
+    // 窗外全景比室內亮一階，保留天空、山稜與林線的自然層次；材質不經 tone mapping。
     skyMat.color.setRGB(1.16, 1.2, 1.12);
-    // 以庭園照片作為主要窗景；尺寸與位置讓窗洞剛好看到「草坪＋綠籬＋樹林」，
-    // 不再用低面數球體擋在照片前面（實際預覽看起來像卡通樹）。
-    // v8.6：窗加寬到 4.9 m 後，原本 6 m 寬的景片不再覆蓋整個窗洞，
-    // 左側會露出空白（實際預覽是窗內一片死白）。景片必須比窗洞寬、也更高。
+    // 以生成式山景全景作為主要窗景；景片比窗洞寬高，透過玻璃可讀到天空、山巒與近景林線。
     const sky = new THREE.Mesh(new THREE.PlaneGeometry(WINDOW.width + 12, WINDOW.top - WINDOW.sill + 6), skyMat);
     sky.position.set(WINDOW.cx, (WINDOW.top + WINDOW.sill) / 2, outsideZ - 1.2);
     g.add(sky);
-    // v8.2：遠景換照片級庭園（單張、不平貼）。分層樹冠／灌木景片留在前方提供視差與投影。
+    // 單張不平貼的全景提供遠山與林線；窗外草地底片只作近地過渡，不以幾何樹冠遮擋景觀。
     const skyDisposer = attachPhotoMap(skyMat, "garden", {
       tileable: false,
-      tint: "#ffffff", // 晨霧庭園原圖已偏亮，不再壓暗
+      tint: "#ffffff", // 全景原圖已具自然亮度，保留山景色階
       anisotropy: Math.min(8, api.renderer.capabilities.getMaxAnisotropy()),
-      // 只取原圖下緣（草坪＋綠籬＋樹林），窗外才不會對到整片深色樹冠。
-      uv: { repeat: [1, 0.58], offset: [0, 0.02] },
+      // 全幅保留山脈、天空與林線；影像比例接近窗景平面，不裁掉山巒層次。
     });
     disposers.push(skyDisposer);
     const farMat = new THREE.MeshStandardMaterial({ color: "#8fb08a", roughness: 1 });
