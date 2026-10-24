@@ -18,7 +18,8 @@ const compileModule = async (sourcePath, outputName, replacements = []) => {
   return import(pathToFileURL(outputPath).href);
 };
 
-await compileModule("../src/lib/secureRoomTransport/config.ts", "config.mjs");
+const transportConfig = await compileModule("../src/lib/secureRoomTransport/config.ts", "config.mjs");
+const protocol = await compileModule("../src/lib/secureRoomTransport/protocol.ts", "protocol.mjs");
 const crypto = await compileModule(
   "../src/lib/secureRoomTransport/crypto.ts",
   "crypto.mjs",
@@ -59,4 +60,28 @@ test("AES-GCM packets conceal plaintext, use fresh IVs, and reject a wrong key",
   assert.notEqual(packet, secondPacket);
   assert.deepEqual(await crypto.decryptRoomMessage(key, packet), message);
   assert.equal(await crypto.decryptRoomMessage(wrongKey, packet), null);
+});
+
+test("accepts Unicode peer nicknames up to 24 code points and legacy relay messages", () => {
+  const base = { v: 1, id: "msg-1", from: "device-1", sentAt: 100 };
+  const hello = {
+    ...base,
+    type: "hello",
+    nickname: "😀".repeat(24),
+    joinedAt: 100,
+    expiresAt: null,
+  };
+  assert.equal(protocol.isRoomWireMessage(hello), true);
+  assert.equal(protocol.isRoomWireMessage({ ...hello, nickname: "😀".repeat(25) }), false);
+
+  const legacyAppMessage = { ...base, type: "app", payload: { kind: "string", data: "hello" } };
+  assert.equal(protocol.isRoomWireMessage(legacyAppMessage), true);
+  assert.equal(protocol.isRoomWireMessage({ ...legacyAppMessage, nickname: "😀".repeat(24) }), true);
+  assert.equal(protocol.isRoomWireMessage({ ...legacyAppMessage, nickname: "😀".repeat(25) }), false);
+});
+
+test("repeats peer discovery hello every three seconds and expires peers after ten seconds", () => {
+  assert.equal(transportConfig.TRANSPORT_CONFIG.helloIntervalMs, 3_000);
+  assert.equal(transportConfig.TRANSPORT_CONFIG.peerExpiryMs, 10_000);
+  assert.equal(transportConfig.TRANSPORT_CONFIG.peerSweepIntervalMs, 1_000);
 });

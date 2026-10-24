@@ -14,9 +14,9 @@ export const TRANSPORT_CONFIG = {
   mqttConnectTimeoutMs: 12_000,
   mqttPublishTimeoutMs: 10_000,
   relayMaxPacketBytes: 100_000,
-  helloIntervalMs: 12_000,
-  peerExpiryMs: 36_000,
-  peerSweepIntervalMs: 5_000,
+  helloIntervalMs: 3_000,
+  peerExpiryMs: 10_000,
+  peerSweepIntervalMs: 1_000,
   deduplicationTtlMs: 120_000,
   deduplicationMaxEntries: 4_096,
 } as const;
