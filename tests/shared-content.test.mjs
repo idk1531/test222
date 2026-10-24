@@ -248,6 +248,24 @@ test("applying remote records updates workspace-local ids and cascades card dele
   assert.equal(deleted.processLogs.length, 1);
 });
 
+test("owner can resend the existing snapshot after a joiner arrives late", () => {
+  const pair = createPair({
+    hostState: makeState("card-host", "Host card"),
+    guestState: makeState("card-guest", "Guest card"),
+  });
+
+  pair.host.start("owner");
+  pair.queue.length = 0; // MQTT does not retain the owner's first snapshot.
+  assert.equal(pair.host.resendSnapshot(), true);
+  pair.guest.start("joiner");
+  pair.drain();
+
+  assert.equal(pair.guestStore.getState().cards.some((card) => card.id === "card-host"), true);
+  assert.equal(pair.queue.length, 0);
+  pair.host.stop();
+  pair.guest.stop();
+});
+
 test("owner and editor merge initial books/cards, then sync edits, moves, ordering, and deletes", () => {
   const pair = createPair({
     hostState: makeState("card-host", "Host card", { x: 10 }),

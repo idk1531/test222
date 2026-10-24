@@ -555,26 +555,14 @@ export class SharedContentReplicator {
     }, 30_000);
     if (mode === "owner") {
       this.initialized = true;
-      const records = Array.from(this.previous.entries()).map(([key, record]) => {
-        const version = this.versions.get(key) ?? { clock: 0, actorId: this.options.actorId };
-        return { ...record, ...cloneVersion(version) };
-      });
-      const tombstones = Array.from(this.tombstones.entries()).map(([key, version]) => {
-        const separator = key.indexOf("\u0000");
-        return {
-          collection: key.slice(0, separator) as SharedCollection,
-          id: key.slice(separator + 1),
-          ...cloneVersion(version),
-        };
-      });
-      this.sendMessage({
-        v: 1,
-        type: "shared-snapshot",
-        actorId: this.options.actorId,
-        records,
-        tombstones,
-      });
+      this.sendSnapshot();
     }
+  }
+
+  /** Re-send the existing snapshot envelope when a relay peer joins after the owner. */
+  resendSnapshot(): boolean {
+    if (this.stopped || this.mode !== "owner" || !this.initialized) return false;
+    return this.sendSnapshot();
   }
 
   permissionsChanged(): void {
@@ -591,6 +579,28 @@ export class SharedContentReplicator {
     } else {
       this.flushPendingOperations();
     }
+  }
+
+  private sendSnapshot(): boolean {
+    const records = Array.from(this.previous.entries()).map(([key, record]) => {
+      const version = this.versions.get(key) ?? { clock: 0, actorId: this.options.actorId };
+      return { ...record, ...cloneVersion(version) };
+    });
+    const tombstones = Array.from(this.tombstones.entries()).map(([key, version]) => {
+      const separator = key.indexOf("\u0000");
+      return {
+        collection: key.slice(0, separator) as SharedCollection,
+        id: key.slice(separator + 1),
+        ...cloneVersion(version),
+      };
+    });
+    return this.sendMessage({
+      v: 1,
+      type: "shared-snapshot",
+      actorId: this.options.actorId,
+      records,
+      tombstones,
+    });
   }
 
   handleRaw(raw: unknown): boolean {

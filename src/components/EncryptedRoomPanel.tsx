@@ -12,6 +12,7 @@ import { normalizeRoomCode } from "@/lib/secureRoomTransport/crypto";
 
 interface EncryptedRoomPanelProps {
   nickname: string;
+  manualSessionActive?: boolean;
 }
 
 function statusLabel(status: RoomTransportStatus): string {
@@ -49,7 +50,7 @@ function BrokerIndicator({ state }: { state: "connecting" | "connected" | "offli
   return <span className="inline-flex items-center gap-1.5 text-xs text-slate-600"><span className={`h-2 w-2 rounded-full ${color}`} />{label}</span>;
 }
 
-export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps) {
+export default function EncryptedRoomPanel({ nickname, manualSessionActive = false }: EncryptedRoomPanelProps) {
   const transport = useMemo(() => getSecureRoomTransport(), []);
   const [status, setStatus] = useState<RoomTransportStatus>(() => transport.getStatus());
   const [peers, setPeers] = useState<RoomPeer[]>(() => transport.getPeers());
@@ -96,6 +97,10 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
   }, [transport]);
 
   const joinRoom = useCallback(async (rawCode: string, fromLink = false) => {
+    if (manualSessionActive) {
+      setErrorMessage("請先中斷手動 WebRTC 配對，再加入加密 relay 房間。");
+      return;
+    }
     setErrorMessage("");
     setNotice("");
     setIsBusy(true);
@@ -115,10 +120,10 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
     } finally {
       setIsBusy(false);
     }
-  }, [transport]);
+  }, [transport, manualSessionActive]);
 
   useEffect(() => {
-    if (autoJoinStartedRef.current || typeof window === "undefined" || window.location.hash.length < 2) return;
+    if (manualSessionActive || autoJoinStartedRef.current || typeof window === "undefined" || window.location.hash.length < 2) return;
     autoJoinStartedRef.current = true;
     let code: string;
     try {
@@ -128,9 +133,13 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
       return;
     }
     window.setTimeout(() => { void joinRoom(code, true); }, 0);
-  }, [joinRoom]);
+  }, [joinRoom, manualSessionActive]);
 
   const createRoom = async () => {
+    if (manualSessionActive) {
+      setErrorMessage("請先中斷手動 WebRTC 配對，再建立加密 relay 房間。");
+      return;
+    }
     setErrorMessage("");
     setNotice("");
     setIsBusy(true);
@@ -226,13 +235,19 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
             <ShieldCheck className="h-5 w-5 text-indigo-700" />加密房間
           </h2>
           <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
-            配對碼導出房間金鑰；傳輸封包以 AES-GCM 加密後，透過可用的 WSS broker 發送。此階段的 relay API 尚未接入既有書房／卡片協作資料。
+            配對碼導出房間金鑰；書樓協作訊息以 AES-GCM 加密後，透過可用的 WSS broker 傳送。這代表 relay 協作，不代表 WebRTC direct 已連線；手動 WebRTC 診斷會顯示在下方獨立面板。
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700" role="status" aria-live="polite">
           <Radio className="h-4 w-4 text-indigo-700" />{statusLabel(status)}
         </div>
       </div>
+
+      {manualSessionActive && (
+        <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+          手動 WebRTC 診斷連線正在使用本分頁的協作通道。請先在下方中斷它，再建立或加入加密 relay 房間。
+        </p>
+      )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-200 p-4">
@@ -246,14 +261,14 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
             step="0.01"
             value={lifetimeHours}
             onChange={(event) => setLifetimeHours(event.target.value)}
-            disabled={isBusy || roomActive}
+            disabled={isBusy || roomActive || manualSessionActive}
             placeholder="留空表示不設定期限"
             className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100"
           />
           <button
             type="button"
             onClick={() => void createRoom()}
-            disabled={isBusy || roomActive}
+            disabled={isBusy || roomActive || manualSessionActive}
             className="touch-target mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-700 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
@@ -293,7 +308,7 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
             id="room-join-code"
             value={joinCode}
             onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-            disabled={isBusy || roomActive}
+            disabled={isBusy || roomActive || manualSessionActive}
             autoComplete="off"
             spellCheck={false}
             maxLength={19}
@@ -304,7 +319,7 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
             <button
               type="button"
               onClick={() => void joinRoom(joinCodeRef.current)}
-              disabled={isBusy || roomActive || !joinCode.trim()}
+              disabled={isBusy || roomActive || manualSessionActive || !joinCode.trim()}
               className="touch-target inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Radio className="h-4 w-4" />}加入房間
@@ -312,7 +327,7 @@ export default function EncryptedRoomPanel({ nickname }: EncryptedRoomPanelProps
             <button
               type="button"
               onClick={() => { setScannerError(""); setScannerOpen(true); }}
-              disabled={isBusy || roomActive}
+              disabled={isBusy || roomActive || manualSessionActive}
               className="touch-target inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <QrCode className="h-4 w-4" />掃描 QR

@@ -1,6 +1,7 @@
 import type { BrokerId } from "./config";
 
 export type RoomTransportState = "idle" | "deriving-key" | "connecting" | "connected" | "partial" | "offline" | "leaving" | "failed";
+export type RoomLocalRole = "owner" | "joiner";
 export type BrokerConnectionState = "connecting" | "connected" | "offline";
 export type TransportRoute = "auto" | "direct" | "relay";
 
@@ -21,6 +22,7 @@ export interface RoomTransportStatus {
   state: RoomTransportState;
   encrypted: boolean;
   roomReady: boolean;
+  localRole: RoomLocalRole | null;
   expiresAt: number | null;
   connectedBrokerCount: number;
   brokerCount: number;

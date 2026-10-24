@@ -64,7 +64,8 @@ function StateMetric({ label, value }: { label: string; value: string }) {
 export default function ConnectionPage() {
   const {
     manager,
-    snapshot,
+    webrtcSnapshot: snapshot,
+    relayRoomActive,
     displayName,
     setDisplayName,
     guestRole,
@@ -89,7 +90,7 @@ export default function ConnectionPage() {
   const [copied, setCopied] = useState<"offer" | "answer" | null>(null);
 
   const busy = isBusy(snapshot.phase);
-  const canStart = canStartNewPairing(snapshot.phase);
+  const canStart = canStartNewPairing(snapshot.phase) && !relayRoomActive;
   const isInitiator = snapshot.role === "initiator";
   const isJoiner = snapshot.role === "joiner";
   const phaseText = connectionPhaseLabel(snapshot.phase);
@@ -299,7 +300,7 @@ export default function ConnectionPage() {
           </p>
         </section>
 
-        <EncryptedRoomPanel nickname={displayName} />
+        <EncryptedRoomPanel nickname={displayName} manualSessionActive={pairingInProgress} />
 
         <section className="mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(260px,0.6fr)] sm:items-end">
           <div>
@@ -471,13 +472,13 @@ export default function ConnectionPage() {
           </div>
           <div className="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
             <h3 className="mb-1 font-bold text-slate-800">重要限制</h3>
-            <p>DataChannel 會交換自行填寫的顯示名稱、房主指定的角色、角色位置／動作，以及書本分類／位置／排序和筆記卡內容／畫布位置。初次連線會按記錄 ID 合併兩端資料；同一張卡同時編輯時採整筆記錄的確定性版本順序決定勝者，另一端同時寫入的欄位可能被覆蓋；尚未實作欄位／文字 CRDT、游標或輸入狀態。離線修改只留在本機，重新連線合併時另一端的舊副本可能讓離線刪除復現；請以手動匯出／匯入處理離線變更。WebRTC 使用 STUN 嘗試 NAT 穿透，但本方案沒有 TURN 中繼；公司防火牆、對稱 NAT 或受限行動網路可能阻擋直連，這時連線可能失敗。</p>
+            <p>此區只診斷手動 WebRTC 的 PeerConnection／DataChannel；relay broker 與 peer 狀態顯示在上方加密房間面板，relay 在線不代表 WebRTC direct 已連線。手動 WebRTC DataChannel 或加密 relay 會承載既有書樓協作訊息：顯示名稱、房主指定角色、角色位置／動作、書本／筆記卡資料與文字 CRDT／編輯 presence。非文字欄位仍按記錄版本合併，同時修改可能覆蓋；離線修改只留本機，請用手動匯出／匯入處理。手動 WebRTC 使用 STUN 且沒有 TURN；受限網路可能阻擋 direct，可改用上方加密 relay。</p>
             <p className="mt-2">需要 HTTPS（GitHub Pages 預設提供）或 localhost。人工訊號交換沒有伺服器代替保管邀請；兩端需同時在線，並在逾時前完成 Offer／Answer 交換。</p>
             <p className="mt-2">排查順序：先讓兩台裝置在同一 Wi-Fi 測試，再改用不同網路（例如一端行動網路）。候選類型統計與 gathering complete 都不代表路徑可達；只有 DataChannel readyState 為 open 才算成功。</p>
           </div>
         </section>
 
-        <p className="mt-4 text-center text-[11px] text-slate-500">不建立自訂後端、不使用資料庫、不將 SDP 寫入 localStorage；跨頁切換會保留連線，直到你手動中斷或關閉分頁。</p>
+        <p className="mt-4 text-center text-[11px] text-slate-500">不建立自訂後端、不使用資料庫、不將 SDP 寫入 localStorage；跨頁切換會保留協作傳輸。手動 WebRTC 可在此中斷，relay 可在加密房間面板離開或到期時結束。</p>
       </div>
     </main>
   );

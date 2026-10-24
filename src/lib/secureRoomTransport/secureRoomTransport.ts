@@ -15,6 +15,7 @@ import type {
   BrokerStatus,
   ReceivedTransportMessage,
   RoomCreated,
+  RoomLocalRole,
   RoomPeer,
   RoomTransportEventName,
   RoomTransportEvents,
@@ -130,6 +131,7 @@ export class SecureRoomTransport {
   private key: CryptoKey | null = null;
   private topic: string | null = null;
   private deviceId = "";
+  private localRole: RoomLocalRole | null = null;
   private nickname = "書房夥伴";
   private joinedAt = 0;
   private expiresAt: number | null = null;
@@ -161,6 +163,7 @@ export class SecureRoomTransport {
       state: this.state,
       encrypted: Boolean(this.key),
       roomReady: this.roomReady,
+      localRole: this.localRole,
       expiresAt: this.expiresAt,
       connectedBrokerCount,
       brokerCount: brokers.length,
@@ -179,12 +182,12 @@ export class SecureRoomTransport {
     if (expiresInMs !== undefined && (!Number.isSafeInteger(expiresInMs) || expiresInMs <= 0)) {
       throw new Error("房間存活時間必須是大於 0 的有限數值。");
     }
-    await this.openRoom(code, nickname, expiresInMs);
+    await this.openRoom(code, nickname, "owner", expiresInMs);
     return { code, link: makePairingLink(code), expiresAt: this.expiresAt };
   }
 
   async join(codeInput: string, nickname: string): Promise<void> {
-    await this.openRoom(normalizeRoomCode(codeInput), nickname);
+    await this.openRoom(normalizeRoomCode(codeInput), nickname, "joiner");
   }
 
   async leave(): Promise<void> {
@@ -211,6 +214,7 @@ export class SecureRoomTransport {
     this.joinedAt = 0;
     this.expiresAt = null;
     this.roomReady = false;
+    this.localRole = null;
     this.peers.clear();
     this.seenIds.clear();
     this.state = "idle";
@@ -261,13 +265,14 @@ export class SecureRoomTransport {
     };
   }
 
-  private async openRoom(codeInput: string, nicknameInput: string, expiresInMs?: number): Promise<void> {
+  private async openRoom(codeInput: string, nicknameInput: string, localRole: RoomLocalRole, expiresInMs?: number): Promise<void> {
     if (typeof window === "undefined") throw new Error("加密房間只能在瀏覽器中使用。");
     const code = normalizeRoomCode(codeInput);
     if (this.state !== "idle" || this.clients.size) await this.leave();
     const generation = ++this.generation;
     this.state = "deriving-key";
     this.roomReady = false;
+    this.localRole = localRole;
     this.nickname = normalizeNickname(nicknameInput);
     this.deviceId = createSecureId("device");
     this.joinedAt = Date.now();
@@ -307,6 +312,7 @@ export class SecureRoomTransport {
         this.key = null;
         this.topic = null;
         this.deviceId = "";
+        this.localRole = null;
         this.state = "failed";
         this.roomReady = false;
         this.emitStatus();
@@ -333,6 +339,7 @@ export class SecureRoomTransport {
         this.key = null;
         this.topic = null;
         this.deviceId = "";
+        this.localRole = null;
         this.joinedAt = 0;
         this.expiresAt = null;
         this.roomReady = false;
