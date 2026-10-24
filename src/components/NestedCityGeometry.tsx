@@ -550,9 +550,9 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
     addReadingTable(group, 8.5, NESTED_CITY.levels[1], -7.35, 3.5, 1.1, timber, metal);
     addReadingTable(group, 15.5, NESTED_CITY.levels[1], -7.35, 3.5, 1.1, timber, metal);
     for (const x of [8.4, 12, 15.6]) {
-      addReadingTable(group, x, NESTED_CITY.levels[2], -5.65, 1.45, 0.72, timberLight, metal, false);
-      group.add(makeBox(1.25, 1.35, 0.065, core, x, NESTED_CITY.levels[2] + 0.68, -6.13, false));
-      group.add(makeBox(0.065, 1.05, 0.92, stoneLight, x - 0.82, NESTED_CITY.levels[2] + 0.53, -5.65, false));
+      addReadingTable(group, x, NESTED_CITY.levels[2], -8, 1.45, 0.72, timberLight, metal, false);
+      group.add(makeBox(1.25, 1.35, 0.065, core, x, NESTED_CITY.levels[2] + 0.68, -8.48, false));
+      group.add(makeBox(0.065, 1.05, 0.92, stoneLight, x - 0.82, NESTED_CITY.levels[2] + 0.53, -8, false));
     }
     // 4F observation terrace: low benches and planting beds preserve the open sky edge.
     for (const x of [9, 15]) {
@@ -569,7 +569,7 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
     // Lush but restrained planting: entry planters, atrium landings and the 4F sky terrace.
     for (const [x, y, z, size] of [
       [-19, 0, 7.2, 1.3], [19, 0, 7.2, 1.3], [-19, 0, -6.8, 1.1],
-      [7.2, 4, 1.2, 0.9], [17.1, 4, 1.2, 0.9],
+      [3.1, 4, 4.5, 0.9], [22, 4, -9, 0.9],
       [7.2, 12, 10, 0.8], [17.1, 12, 10, 0.8],
     ] as const) {
       addPlanter(group, x, y, z, size, planterMat, soilMat, trunkMat, foliageMat);

@@ -28,8 +28,10 @@
 - **2F（4 m）**：分類藏書、多人閱覽與跨區連接。
 - **3F（8 m）**：個人閱讀、筆記卡片與靜音閱讀；橋廊接續不同區域。
 - **4F（12 m）**：觀景、自由閱讀、休憩交流與戶外連接。
-- 各層採多塊錯位樓板圍繞中央挑空；橋廊、開放踏階、落腳平台與玻璃護欄是場景幾何，不是平面貼圖。樓梯路徑、平台連通性、通口、頭部淨高及碰撞共用同一份場景模型。
-- 木、石、玻璃、樓板、樓層標籤、閱讀家具、植栽與局部暖光均以三維物件實作。白模只切換呈現材質，不會隱藏或替換建築、原有書本及房間互動。
+- 依最新視覺回饋重排樓板，取消重複滿版環廊：2F、3F、4F 分別只覆蓋約 50.3%、54.7%、25.9% 的 48 × 24 m 平面；其餘由挑空、邊界開放區及錯位橋廊構成。
+- 2F–4F 共用 16 × 11 m 中庭（X `[4, 20]`、Z `[-3, 8]`），三層之間完全連通並保留 25/25 個中庭取樣點開放；每層使用不對齊的側翼、北側廊橋及局部觀景台，不設滿版天花／樓板。
+- 3F 東側樓板留出 1.6 m 寬的連續樓梯井，並用獨立落腳平台接續北側廊板；三段折返樓梯依序跨中庭、沿東側樓梯井升高、再沿中庭返回西側，欄杆在樓梯路徑上保留通口。樓梯路徑、平台連通性、支柱、頭部淨高及碰撞共用同一份場景模型。
+- 木、石、玻璃、局部樓板、樓層標籤、閱讀家具、植栽與局部暖光均以三維物件實作。白模只切換呈現材質，不會隱藏或替換建築、原有書本及房間互動。
 
 ## 相機與既有互動
 
@@ -42,10 +44,10 @@
 | 項目 | 狀態 | 說明 |
 | --- | --- | --- |
 | 48 × 24 × 16 m 外框、兩個偏移／旋轉內框及參考尺寸表 | **程式檢查通過** | `scripts/check-room3d.ts` 斷言尺寸、中心、樓層範圍、旋轉、框架構件與 1F–4F 標籤。 |
-| 四層平台、中央挑空、橋廊及樓梯連通 | **程式檢查通過** | 檢查同高平台重疊、平台連通、支柱落點、樓梯通口、踏面、頭部淨高與碰撞。 |
+| 局部樓板、連續挑空與平台連通 | **程式檢查通過** | 2F／3F／4F 樓板覆蓋率約 50.3%／54.7%／25.9%；16 × 11 m 中庭三層共用且 25/25 樣點開放；另檢查同高重疊、平台連通、支柱落點、樓梯井扶手通口、踏面、淨高與碰撞。 |
 | 保留原書架、家具、角色移動及工作／房間互動 | **程式檢查通過** | 定向房間回歸腳本涵蓋書本比例、碰撞、樓層高度、動作及相機行為。 |
-| TypeScript 與本輪修改檔案 lint | **通過** | `npm run typecheck` 與本輪六個修改 TS/TSX 檔案的定向 ESLint 均通過。 |
-| 瀏覽器實際視覺／可漫遊驗收 | **尚未完成** | 開發伺服器回應 HTTP 200；嘗試 headless Chromium 擷取時因執行環境缺少 `libnspr4.so` 未能啟動，因此沒有新 WebGL 截圖，也不宣稱視覺或實機漫遊已驗收。 |
+| TypeScript 與本輪修改檔案 lint | **通過** | `npm run typecheck` 與本輪三個修改 TS/TSX 檔案的定向 ESLint 均通過。 |
+| 瀏覽器實際視覺／可漫遊驗收 | **待使用者現場確認** | 開發預覽在 `0.0.0.0:3000` 回應 HTTP 200，可由本輪 live preview 開啟；headless Chromium 因環境缺少 `libnspr4.so` 無法啟動，因此未產生 WebGL 截圖、不宣稱視覺或實機漫遊已驗收。 |
 
 `docs/evidence/nested-city/` 中的截圖屬先前 24 × 20 m 版本，已被本次參考尺寸更新取代，不能作為目前幾何的視覺證據；尚未為新尺寸產生替代截圖。
 
@@ -53,9 +55,9 @@
 
 - `npm ci --ignore-scripts`：安裝成功；npm audit 回報 6 項依賴弱點（5 high、1 critical），本次建築工作未升級或改動依賴版本。
 - `npm run typecheck`：通過。
-- `npx eslint src/components/NestedCityGeometry.tsx src/components/RoomGeometry.tsx src/lib/room3d.ts src/lib/roomDimensions.ts src/lib/study.ts scripts/check-room3d.ts`：通過。
-- `npx tsx scripts/check-room3d.ts`：`ALL ROOM CHECKS PASS`。
+- `npx eslint src/components/NestedCityGeometry.tsx src/lib/room3d.ts scripts/check-room3d.ts`：通過。
+- `npx tsx scripts/check-room3d.ts`：`ALL ROOM CHECKS PASS`；涵蓋樓板覆蓋率、16 × 11 m 連續中庭及樓梯井護欄開口。
 - `npm run test:connection`、`npm run test:secure-room-crypto`、`npm run test:collaboration`、`npm run test:collaboration-editing`、`npm run test:shared-content`：全部通過（14、8、9、8、9 項）。
 - `NEXT_BASE_PATH=/test222 npm run export`：通過；靜態輸出包含 `/`、`/_not-found`、`/api/health`、`/connect`。
 - `git diff --check`：通過。
-- 開發預覽 `http://127.0.0.1:3000/` 回應 HTTP 200；目前仍有 live preview，但沒有用瀏覽器實際核對 WebGL 畫面。
+- 開發預覽綁定 `0.0.0.0:3000` 並回應 HTTP 200；本輪 live preview 已啟動供使用者現場檢視，尚未用瀏覽器實際核對 WebGL 畫面。

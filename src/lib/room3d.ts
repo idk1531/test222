@@ -96,8 +96,8 @@ export interface CityPlatformRail {
  */
 export const NESTED_CITY = {
   levels: [0, 4, 8, 12] as const,
-  // The open atrium sits inside the offset 24 × 12 m core; its sampled area stays open at each upper level.
-  atrium: { x: 12, z: 6, width: 12, depth: 6 },
+  // A continuous 16 × 11 m open shaft through 2F–4F; the ground floor stays fully walkable.
+  atrium: { x: 12, z: 2.5, width: 16, depth: 11 },
   frames: [
     // Primary timber shell: 48 × 24 × 16 m; its horizontal bands mark the four-floor rhythm.
     { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 24, height: 16, thickness: 1.1, beamHeight: 1.2, rotationY: 0, material: "timber", bands: [4, 8, 12] },
@@ -113,40 +113,45 @@ export const NESTED_CITY = {
     { id: "library-zone-frame", plane: "box", x: 5, z: 12, bottom: 0, width: 40, depth: 3, height: 8, thickness: 0.24, beamHeight: 0.28, rotationY: 0, material: "timber" },
   ] satisfies readonly CityFrame[],
   platforms: [
-    // 2F: broad library ring around the atrium, with a transverse bridge and a clear stair landing.
-    { id: "level-1-west-library-gallery", level: 1, x: -8.5, z: 0, width: 29, depth: 22, material: "timber" },
-    { id: "level-1-east-gallery", level: 1, x: 20.5, z: 0, width: 5, depth: 22, material: "stone" },
-    { id: "level-1-north-library-gallery", level: 1, x: 12, z: -4, width: 12, depth: 14, material: "core" },
-    { id: "level-1-south-reading-gallery", level: 1, x: 12, z: 10, width: 12, depth: 2, material: "timber" },
-    { id: "level-1-crossing-bridge", level: 1, x: 12, z: 4, width: 12, depth: 1.4, material: "core" },
-    // 3F: private reading / note area; the 20 × 4 m bridge is the south-side connection.
-    { id: "level-2-west-study-gallery", level: 2, x: -8.5, z: -1.5, width: 29, depth: 19, material: "stone" },
-    { id: "level-2-east-study-gallery", level: 2, x: 20.5, z: -1.5, width: 5, depth: 19, material: "stone" },
-    { id: "level-2-north-study-gallery", level: 2, x: 12, z: -4, width: 12, depth: 14, material: "timber" },
+    // 2F (50% deck coverage): library wing, east gallery and north-side connector frame a large open atrium.
+    { id: "level-1-west-library-gallery", level: 1, x: -9.75, z: 0, width: 27.5, depth: 14, material: "timber" },
+    { id: "level-1-east-gallery", level: 1, x: 21.5, z: 0, width: 3, depth: 22, material: "stone" },
+    { id: "level-1-north-library-gallery", level: 1, x: 12, z: -8, width: 16, depth: 6, material: "core" },
+    { id: "level-1-north-crossing-bridge", level: 1, x: 12, z: -4, width: 16, depth: 2, material: "core" },
+    // 3F (55%): a 1.6 m east stairwell slot and landing interrupt the gallery; short connectors preserve access around the void.
+    { id: "level-2-west-study-gallery", level: 2, x: -9.75, z: -0.25, width: 27.5, depth: 16.5, material: "stone" },
+    { id: "level-2-east-edge-gallery", level: 2, x: 22.3, z: 0, width: 1.4, depth: 22, material: "stone" },
+    { id: "level-2-stair-landing", level: 2, x: 20.8, z: -1, width: 1.6, depth: 2, material: "stone" },
+    { id: "level-2-east-south-connector", level: 2, x: 20.8, z: 10, width: 1.6, depth: 4, material: "stone" },
+    { id: "level-2-north-study-gallery", level: 2, x: 12, z: -9.25, width: 16, depth: 3.5, material: "timber" },
     { id: "level-2-long-bridge", level: 2, x: 10, z: 10, width: 20, depth: 4, material: "core" },
-    // 4F: observation / outdoor terrace ring; the central void remains open to the roof and sky.
-    { id: "level-3-west-observation-gallery", level: 3, x: -8.5, z: 0, width: 29, depth: 22, material: "timber" },
-    { id: "level-3-east-observation-gallery", level: 3, x: 20.5, z: 0, width: 5, depth: 22, material: "stone" },
-    { id: "level-3-north-observation-gallery", level: 3, x: 12, z: -4, width: 12, depth: 14, material: "core" },
-    { id: "level-3-sky-observation-terrace", level: 3, x: 12, z: 10, width: 12, depth: 2, material: "timber" },
+    // 4F (26%): a short west bridge, offset north connector and south sky terrace leave most of the level open.
+    { id: "level-3-west-observation-gallery", level: 3, x: -4, z: -4, width: 16, depth: 8, material: "timber" },
+    { id: "level-3-east-observation-gallery", level: 3, x: 21.5, z: 0, width: 3, depth: 22, material: "stone" },
+    { id: "level-3-north-observation-gallery", level: 3, x: 10, z: -9, width: 12, depth: 4, material: "core" },
+    { id: "level-3-north-connector", level: 3, x: 18, z: -9, width: 4, depth: 2, material: "core" },
+    { id: "level-3-north-observation-bridge", level: 3, x: 8, z: -5, width: 8, depth: 2, material: "core" },
+    { id: "level-3-sky-observation-terrace", level: 3, x: 12, z: 10, width: 16, depth: 2, material: "timber" },
   ] satisfies readonly CityPlatform[],
   stairs: [
-    // Three broad open flights cross the atrium east–west; endpoints meet the gallery edges without passing under slabs.
-    { id: "stair-ground-to-level-1", start: { x: 6, z: 6.5, y: 0 }, end: { x: 18, z: 6.5, y: 4 }, width: 1.6, steps: 24, material: "stone" },
-    { id: "stair-level-1-to-level-2", start: { x: 18, z: 6.5, y: 4 }, end: { x: 6, z: 6.5, y: 8 }, width: 1.6, steps: 24, material: "timber" },
-    { id: "stair-level-2-to-level-3", start: { x: 6, z: 6.5, y: 8 }, end: { x: 18, z: 6.5, y: 12 }, width: 1.6, steps: 24, material: "stone" },
+    // Switchback stair: cross west-to-east, rise through the east stairwell slot, then return west across the open atrium.
+    { id: "stair-ground-to-level-1", start: { x: 4, z: 6.5, y: 0 }, end: { x: 20, z: 6.5, y: 4 }, width: 1.6, steps: 32, material: "stone" },
+    { id: "stair-level-1-to-level-2", start: { x: 20.8, z: 6.5, y: 4 }, end: { x: 20.8, z: 0, y: 8 }, width: 1.6, steps: 23, material: "timber" },
+    { id: "stair-level-2-to-level-3", start: { x: 20.8, z: 0, y: 8 }, end: { x: 4, z: 0, y: 12 }, width: 1.6, steps: 32, material: "stone" },
   ] satisfies readonly CityStair[],
   bridgeRails: [
-    { id: "level-1-bridge-rail-near", level: 1, x: 12, z: 3.35, width: 12, depth: 0.1 },
-    { id: "level-1-bridge-rail-far", level: 1, x: 12, z: 4.65, width: 12, depth: 0.1 },
+    { id: "level-1-bridge-rail-near", level: 1, x: 12, z: -4.95, width: 16, depth: 0.1 },
+    { id: "level-1-bridge-rail-far", level: 1, x: 12, z: -3.05, width: 16, depth: 0.1 },
     { id: "level-2-bridge-rail-near", level: 2, x: 10, z: 8.05, width: 20, depth: 0.1 },
     { id: "level-2-bridge-rail-far", level: 2, x: 10, z: 11.95, width: 20, depth: 0.1 },
+    { id: "level-3-bridge-rail-near", level: 3, x: 8, z: -5.95, width: 8, depth: 0.1 },
+    { id: "level-3-bridge-rail-far", level: 3, x: 8, z: -4.05, width: 8, depth: 0.1 },
   ] as const,
   columns: [
-    { id: "stone-support-west", x: -20, z: 0, width: 0.82, depth: 0.82, bottom: 0, top: 15.2, material: "stone" },
-    { id: "stone-support-east", x: 22, z: 0, width: 0.82, depth: 0.82, bottom: 0, top: 15.2, material: "stone" },
+    { id: "stone-support-west", x: -20, z: 0, width: 0.82, depth: 0.82, bottom: 0, top: 11.7, material: "stone" },
+    { id: "stone-support-east", x: 22, z: 9.5, width: 0.82, depth: 0.82, bottom: 0, top: 15.2, material: "stone" },
     { id: "stone-support-north", x: 12, z: -9.5, width: 0.78, depth: 0.78, bottom: 0, top: 14.2, material: "stone" },
-    { id: "stone-support-terrace", x: 12, z: 10, width: 0.78, depth: 0.78, bottom: 0, top: 14.2, material: "stone" },
+    { id: "stone-support-terrace", x: 12, z: 10, width: 0.78, depth: 0.78, bottom: 8, top: 14.2, material: "stone" },
   ] as const,
   // South entrance interrupts the 40 × 3 × 8 m library wall; shelving leaves a 7 m lobby opening.
   obstacles: [
@@ -350,9 +355,28 @@ export function nestedCityPlatformRails(): CityPlatformRail[] {
       for (const endpoint of stairEnds) {
         if (Math.abs(endpoint.y - floorY) > epsilon) continue;
         const distanceToEdge = edge.axis === "z" ? Math.abs(endpoint.point.x - edge.fixed) : Math.abs(endpoint.point.z - edge.fixed);
-        if (distanceToEdge > endpoint.width / 2 - 0.05) continue;
+        if (distanceToEdge > endpoint.width / 2 + 0.05) continue;
         const along = edge.axis === "z" ? endpoint.point.z : endpoint.point.x;
         intervals = intervalsMinus(intervals, along - endpoint.width / 2, along + endpoint.width / 2);
+      }
+      // A flight that runs parallel to a platform edge needs a continuous open stairwell, not just end gaps.
+      for (const stair of NESTED_CITY.stairs) {
+        if (Math.abs(stair.start.y - floorY) > epsilon && Math.abs(stair.end.y - floorY) > epsilon) continue;
+        const dx = Math.abs(stair.end.x - stair.start.x);
+        const dz = Math.abs(stair.end.z - stair.start.z);
+        if (edge.axis === "z" && dx <= epsilon && Math.abs(stair.start.x - edge.fixed) <= stair.width / 2 + 0.05) {
+          intervals = intervalsMinus(
+            intervals,
+            Math.min(stair.start.z, stair.end.z) - stair.width / 2,
+            Math.max(stair.start.z, stair.end.z) + stair.width / 2
+          );
+        } else if (edge.axis === "x" && dz <= epsilon && Math.abs(stair.start.z - edge.fixed) <= stair.width / 2 + 0.05) {
+          intervals = intervalsMinus(
+            intervals,
+            Math.min(stair.start.x, stair.end.x) - stair.width / 2,
+            Math.max(stair.start.x, stair.end.x) + stair.width / 2
+          );
+        }
       }
 
       intervals.forEach((interval, index) => {
