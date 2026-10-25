@@ -70,7 +70,7 @@ export interface CityFrame {
   openings?: readonly CityFrameOpening[];
 }
 type PrimaryFrameScheduleRow = Pick<CityFrame,
-  "id" | "bottom" | "width" | "height" | "material" | "bands" | "openings"
+  "id" | "x" | "z" | "bottom" | "width" | "height" | "material" | "bands" | "openings"
 > & { depth: number };
 
 /**
@@ -82,8 +82,8 @@ function primaryFrameFromSchedule(row: PrimaryFrameScheduleRow): CityFrame {
   return {
     ...row,
     plane: "box",
-    x: 0,
-    z: 0,
+    x: row.x,
+    z: row.z,
     thickness: row.depth / 10,
     beamHeight: row.height / 10,
     rotationY: 0,
@@ -123,22 +123,17 @@ export const NESTED_CITY = {
     // Authoritative primary-layer envelopes from the schedule, in X × Z × Y order.
     // The square 48 × 48 m outline belongs to the building envelope, not to these nested rectangles.
     primaryFrameFromSchedule({
-      id: "outer-timber-shell", bottom: 0, width: 48, depth: 16, height: 16, material: "timber",
+      id: "outer-timber-shell", x: 0, z: 0, bottom: 0, width: 48, depth: 16, height: 16, material: "timber",
       bands: [4, 8, 12], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }],
     }),
     primaryFrameFromSchedule({
-      id: "middle-stone-frame", bottom: 2, width: 36, depth: 12, height: 12, material: "stone",
-      bands: [2, 6, 10], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }],
+      id: "middle-stone-frame", x: 4, z: 4, bottom: 2, width: 36, depth: 12, height: 12, material: "stone",
+      // Local interval 2.3–4.7 maps to world X=6.3–8.7, aligned with the X=7.5 stair.
+      bands: [2, 6, 10], openings: [{ edge: "south", start: 2.3, end: 4.7, bottom: 7.2, top: 8.8 }],
     }),
     primaryFrameFromSchedule({
-      id: "inner-core-frame", bottom: 4, width: 24, depth: 8, height: 8, material: "core",
+      id: "inner-core-frame", x: -4, z: -4, bottom: 4, width: 24, depth: 8, height: 8, material: "core",
       bands: [4],
-      // The west-top cut clears the 3F→4F stair; the south cut clears the stair at Y=8 only,
-      // leaving the other horizontal bands intact.
-      openings: [
-        { edge: "west", start: 0.2, end: 2.2, bottom: 11.1, top: 12.2 },
-        { edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 },
-      ],
     }),
   ] satisfies readonly CityFrame[],
   // Extra furnished-room volumes are shown only in the existing walk-through mode, not in structure inspection.
