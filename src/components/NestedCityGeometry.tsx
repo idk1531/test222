@@ -3,31 +3,18 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import {
-  cityCorridorFramePlan,
-  cityFrameMembers,
-  cityPlatformFootprint,
-  cityStairHeightAt,
   cityTrapezoidCornerFootprint,
   cityTrapezoidWallBandFootprint,
-  nestedCityPlatformRails,
   NESTED_CITY,
   ROOM,
-  type CityFrame,
-  type CityMaterial,
-  type CityPlatformRail,
-  type CityStair,
 } from "@/lib/room3d";
-import { attachPhotoMap } from "@/lib/roomTextures";
+import type { CityPlanPoint, CityTrapezoidWallSegment } from "@/lib/room3d";
 import type { StudySceneApi } from "./StudyScene";
 
 const SLAB_THICKNESS = 0.3;
-const TRAPEZOID_WALL_BAND_HEIGHT = 0.55; // Rendering-only; the reference does not specify a wall-beam height.
-const CORRIDOR_FRAME_MEMBER_SECTION = 0.4; // Rendering-only; the frame/deck plan width remains the specified 2 m.
-const STAIR_TREAD_THICKNESS = 0.12;
-const BRIDGE_POST_WIDTH = 0.085;
-const PLATFORM_RAIL_WIDTH = NESTED_CITY.platformRailPostWidth;
-const UNIT_BOX_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
-const LOCAL_Z = new THREE.Vector3(0, 0, 1);
+const WALL_BAND_HEIGHT = 0.55;
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const LOCAL_FORWARD = new THREE.Vector3(0, 0, 1);
 
 type BoxInstance = {
   width: number;
@@ -39,71 +26,73 @@ type BoxInstance = {
   rotationY?: number;
 };
 
-function makeBox(
-  width: number,
+type Segment3D = { from: CityPlanPoint; to: CityPlanPoint };
+
+function addPlanPrism(
+  group: THREE.Group,
+  footprint: readonly CityPlanPoint[],
+  bottomY: number,
   height: number,
-  depth: number,
   material: THREE.Material,
-  x: number,
-  y: number,
-  z: number,
-  castShadow = true
-): THREE.Mesh {
-  const mesh = new THREE.Mesh(UNIT_BOX_GEOMETRY, material);
-  mesh.position.set(x, y, z);
-  mesh.scale.set(width, height, depth);
-  mesh.castShadow = castShadow;
+  name: string,
+) {
+  if (footprint.length < 3 || height <= 0) return;
+
+  const shape = new THREE.Shape();
+  shape.moveTo(footprint[0].x, -footprint[0].z);
+  for (const point of footprint.slice(1)) shape.lineTo(point.x, -point.z);
+  shape.closePath();
+
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = name;
+  mesh.position.y = bottomY;
+  mesh.castShadow = true;
   mesh.receiveShadow = true;
-  mesh.userData.kind = "nestedCityStructure";
+  mesh.userData.kind = "trapezoidLibraryFloor";
+  group.add(mesh);
+}
+
+function addBox(
+  group: THREE.Group,
+  dimensions: { width: number; height: number; depth: number },
+  position: { x: number; y: number; z: number },
+  material: THREE.Material,
+  name: string,
+  rotationY = 0,
+) {
+  const mesh = new THREE.Mesh(UNIT_BOX, material);
+  mesh.name = name;
+  mesh.position.set(position.x, position.y, position.z);
+  mesh.rotation.y = rotationY;
+  mesh.scale.set(dimensions.width, dimensions.height, dimensions.depth);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
   return mesh;
 }
 
-function addBoxInstances(
-  group: THREE.Group,
-  material: THREE.Material,
-  instances: readonly BoxInstance[],
-  name: string,
-  castShadow = true
-) {
-  if (!instances.length) return;
-  const batch = new THREE.InstancedMesh(UNIT_BOX_GEOMETRY, material, instances.length);
-  batch.name = name;
-  batch.castShadow = castShadow;
-  batch.receiveShadow = true;
-  batch.userData.kind = "nestedCityStructureBatch";
+function addBoxBatch(group: THREE.Group, boxes: readonly BoxInstance[], material: THREE.Material, name: string) {
+  if (boxes.length === 0) return;
+
+  const instances = new THREE.InstancedMesh(UNIT_BOX, material, boxes.length);
+  instances.name = name;
+  instances.castShadow = true;
+  instances.receiveShadow = true;
   const transform = new THREE.Object3D();
-  instances.forEach((instance, index) => {
-    transform.position.set(instance.x, instance.y, instance.z);
-    transform.rotation.set(0, instance.rotationY ?? 0, 0);
-    transform.scale.set(instance.width, instance.height, instance.depth);
+  boxes.forEach((box, index) => {
+    transform.position.set(box.x, box.y, box.z);
+    transform.rotation.set(0, box.rotationY ?? 0, 0);
+    transform.scale.set(box.width, box.height, box.depth);
     transform.updateMatrix();
-    batch.setMatrixAt(index, transform.matrix);
+    instances.setMatrixAt(index, transform.matrix);
   });
-  batch.instanceMatrix.needsUpdate = true;
-  batch.computeBoundingSphere();
-  group.add(batch);
-}
-
-function addFrame(group: THREE.Group, frame: CityFrame, material: THREE.Material) {
-  const frameGroup = new THREE.Group();
-  frameGroup.name = `nested-city-frame:${frame.id}`;
-  frameGroup.position.set(frame.x, 0, frame.z);
-  frameGroup.rotation.y = frame.rotationY;
-  group.add(frameGroup);
-
-  for (const member of cityFrameMembers(frame)) {
-    const mesh = makeBox(
-      member.width,
-      member.top - member.bottom,
-      member.depth,
-      material,
-      member.x,
-      (member.bottom + member.top) / 2,
-      member.z
-    );
-    mesh.userData.frameId = frame.id;
-    frameGroup.add(mesh);
-  }
+  instances.instanceMatrix.needsUpdate = true;
+  instances.computeBoundingSphere();
+  group.add(instances);
 }
 
 function addBeamBetween(
@@ -112,617 +101,645 @@ function addBeamBetween(
   to: THREE.Vector3,
   width: number,
   height: number,
-  material: THREE.Material
+  material: THREE.Material,
+  name: string,
 ) {
-  const direction = to.clone().sub(from);
+  const direction = new THREE.Vector3().subVectors(to, from);
   const length = direction.length();
-  if (length <= 1e-4) return;
-  const mesh = makeBox(width, height, length, material, 0, 0, 0);
-  mesh.position.copy(from).add(to).multiplyScalar(0.5);
-  mesh.quaternion.setFromUnitVectors(LOCAL_Z, direction.normalize());
-  group.add(mesh);
+  if (length < 1e-5) return;
+
+  const beam = new THREE.Mesh(UNIT_BOX, material);
+  beam.name = name;
+  beam.position.copy(from).add(to).multiplyScalar(0.5);
+  beam.quaternion.setFromUnitVectors(LOCAL_FORWARD, direction.normalize());
+  beam.scale.set(width, height, length);
+  beam.castShadow = true;
+  beam.receiveShadow = true;
+  group.add(beam);
 }
 
-function addPlanPrism(
-  group: THREE.Group,
-  footprint: readonly { x: number; z: number }[],
-  bottomY: number,
-  height: number,
-  material: THREE.Material,
-  name: string
-) {
-  if (footprint.length < 3 || height <= 0) return;
-  const shape = new THREE.Shape();
-  shape.moveTo(footprint[0].x, -footprint[0].z);
-  for (const point of footprint.slice(1)) shape.lineTo(point.x, -point.z);
-  shape.closePath();
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
-  geometry.rotateX(-Math.PI / 2);
-  geometry.computeVertexNormals();
-  const prism = new THREE.Mesh(geometry, material);
-  prism.name = name;
-  prism.position.y = bottomY;
-  prism.castShadow = true;
-  prism.receiveShadow = true;
-  prism.userData.kind = "nestedCityPlanPrism";
-  group.add(prism);
+function planPointToVector(point: CityPlanPoint, y: number): THREE.Vector3 {
+  return new THREE.Vector3(point.x, y, point.z);
 }
 
-function addPolygonSlab(
-  group: THREE.Group,
-  footprint: readonly { x: number; z: number }[],
-  topY: number,
-  material: THREE.Material,
-  name: string
-) {
-  addPlanPrism(group, footprint, topY - SLAB_THICKNESS, SLAB_THICKNESS, material, name);
+function pointAlong(segment: Segment3D, t: number): CityPlanPoint {
+  return {
+    x: segment.from.x + (segment.to.x - segment.from.x) * t,
+    z: segment.from.z + (segment.to.z - segment.from.z) * t,
+  };
 }
 
-function addTrapezoidWallFrame(group: THREE.Group, material: THREE.Material) {
-  const wallThickness = ROOM.wall;
-  const bandHeight = TRAPEZOID_WALL_BAND_HEIGHT;
-  const frameGroup = new THREE.Group();
-  frameGroup.name = "nested-city-trapezoid-exterior-wall";
-  frameGroup.userData.exteriorBoundary = "ABCD";
-  frameGroup.userData.openEdge = "CD";
-  group.add(frameGroup);
+function segmentLength(segment: Segment3D): number {
+  return Math.hypot(segment.to.x - segment.from.x, segment.to.z - segment.from.z);
+}
 
+function segmentYaw(segment: Segment3D): number {
+  return Math.atan2(segment.to.x - segment.from.x, segment.to.z - segment.from.z);
+}
+
+function offsetPoint(point: CityPlanPoint, direction: CityPlanPoint, distance: number): CityPlanPoint {
+  return { x: point.x + direction.x * distance, z: point.z + direction.z * distance };
+}
+
+function addTrapezoidShell(group: THREE.Group, material: THREE.Material) {
   const { A, B, C, D } = NESTED_CITY.trapezoid.points;
+  const shell = new THREE.Group();
+  shell.name = "trapezoid-exterior-ABCD-open-CD";
+  shell.userData.exteriorBoundary = "ABCD";
+  shell.userData.openEdge = "CD";
+  group.add(shell);
+
+  // Four corner piers and the three specified perimeter bands; CD intentionally remains open.
   for (const [id, point] of Object.entries({ A, B, C, D })) {
     addPlanPrism(
-      frameGroup,
-      cityTrapezoidCornerFootprint(point, wallThickness),
+      shell,
+      cityTrapezoidCornerFootprint(point, ROOM.wall),
       0,
       ROOM.height,
       material,
-      `nested-city-exterior-corner:${id}`
+      `trapezoid-corner:${id}`,
     );
   }
+
   for (const wall of NESTED_CITY.trapezoid.wallEdges) {
-    const wallFootprint = cityTrapezoidWallBandFootprint(wall, wallThickness);
+    const footprint = cityTrapezoidWallBandFootprint(wall, ROOM.wall);
     for (const level of NESTED_CITY.trapezoid.wallBandLevels) {
-      const bottomY = level === ROOM.height ? level - bandHeight : level;
+      const bottom = level === ROOM.height ? level - WALL_BAND_HEIGHT : level;
       addPlanPrism(
-        frameGroup,
-        wallFootprint,
-        bottomY,
-        bandHeight,
+        shell,
+        footprint,
+        bottom,
+        WALL_BAND_HEIGHT,
         material,
-        `nested-city-exterior-wall:${wall.id}:${level}`
+        `trapezoid-wall:${wall.id}:${level}`,
       );
     }
   }
 }
 
-function addCorridorFrame(
-  group: THREE.Group,
-  frame: (typeof NESTED_CITY.corridor.frames)[number],
-  material: THREE.Material
-) {
-  const plan = cityCorridorFramePlan(frame);
-  if (!plan || plan.length <= 1e-4) return;
-  const { from, to } = plan;
-  const directionX = Math.sin(plan.rotationY);
-  const directionZ = Math.cos(plan.rotationY);
-  const sideX = -directionZ;
-  const sideZ = directionX;
-  const member = CORRIDOR_FRAME_MEMBER_SECTION;
-  const sideOffset = frame.width / 2 - member / 2;
-  const lowerY = frame.bottom + member / 2;
-  const upperY = frame.top - member / 2;
-  const frameGroup = new THREE.Group();
-  frameGroup.name = `nested-city-corridor-frame:${frame.id}`;
-  frameGroup.userData.corridorId = frame.corridorId;
-  group.add(frameGroup);
-
-  for (const side of [-1, 1]) {
-    const offsetX = sideX * sideOffset * side;
-    const offsetZ = sideZ * sideOffset * side;
-    const startPoint = new THREE.Vector3(from.x + offsetX, 0, from.z + offsetZ);
-    const endPoint = new THREE.Vector3(to.x + offsetX, 0, to.z + offsetZ);
-    for (const y of [lowerY, upperY]) {
-      addBeamBetween(
-        frameGroup,
-        new THREE.Vector3(startPoint.x, y, startPoint.z),
-        new THREE.Vector3(endPoint.x, y, endPoint.z),
-        member,
-        member,
-        material
-      );
-    }
-  }
-
-  for (const endpoint of [from, to]) {
-    const near = new THREE.Vector3(
-      endpoint.x - sideX * sideOffset,
-      0,
-      endpoint.z - sideZ * sideOffset
-    );
-    const far = new THREE.Vector3(
-      endpoint.x + sideX * sideOffset,
-      0,
-      endpoint.z + sideZ * sideOffset
-    );
-    for (const y of [lowerY, upperY]) {
-      addBeamBetween(
-        frameGroup,
-        new THREE.Vector3(near.x, y, near.z),
-        new THREE.Vector3(far.x, y, far.z),
-        member,
-        member,
-        material
-      );
-    }
-    for (const offset of [-sideOffset, sideOffset]) {
-      frameGroup.add(makeBox(
-        member,
-        frame.top - frame.bottom - member * 2,
-        member,
-        material,
-        endpoint.x + sideX * offset,
-        (frame.bottom + frame.top) / 2,
-        endpoint.z + sideZ * offset
-      ));
-    }
-  }
+function addGroundFloor(group: THREE.Group, material: THREE.Material) {
+  const { A, B, C, D } = NESTED_CITY.trapezoid.points;
+  addPlanPrism(group, [A, B, C, D], -0.16, 0.16, material, "library-ground-floor-ABCD");
 }
 
-function addTrapezoidCorridorStructure(
+function addGalleryFloors(
   group: THREE.Group,
-  deckMaterials: readonly THREE.Material[],
-  frameMaterials: Record<CityMaterial, THREE.Material>,
-  wallMaterial: THREE.Material
+  galleryMaterial: THREE.Material,
+  corridorMaterial: THREE.Material,
+  structureOnly: boolean,
 ) {
-  addTrapezoidWallFrame(group, wallMaterial);
-
-  // Keep the stepped galleries/bridges that define the study program, but crop every slab to ABCD.
-  // Corridors sit 2 cm above them only to avoid coplanar z-fighting in the structural preview.
-  for (const platform of NESTED_CITY.platforms) {
-    const floorY = NESTED_CITY.levels[platform.level];
-    const footprint = cityPlatformFootprint(platform);
-    addPolygonSlab(
-      group,
-      footprint,
-      floorY - 0.02,
-      platform.material === "timber" ? deckMaterials[0] : platform.material === "stone" ? deckMaterials[1] : deckMaterials[2],
-      `nested-city-clipped-platform:${platform.id}`
-    );
+  for (const level of NESTED_CITY.gallery.floors) {
+    NESTED_CITY.gallery.footprints.forEach((footprint, index) => {
+      // Tiny offsets at intersecting wings prevent coplanar overlap without creating a visible step.
+      const top = level + (index === 0 ? 0.003 : 0);
+      addPlanPrism(
+        group,
+        footprint,
+        top - SLAB_THICKNESS,
+        SLAB_THICKNESS,
+        galleryMaterial,
+        `library-gallery-floor:${level}m:${index}`,
+      );
+    });
   }
 
-  NESTED_CITY.corridor.floors.forEach((level, index) => {
-    const material = deckMaterials[index] ?? deckMaterials[deckMaterials.length - 1];
-    addPolygonSlab(
+  for (const level of NESTED_CITY.corridor.floors) {
+    const top = level === 0 && !structureOnly ? 0.014 : level + 0.014;
+    addPlanPrism(
       group,
       NESTED_CITY.corridor.footprint,
-      level,
-      material,
-      `nested-city-trapezoid-corridor-floor:${level}`
+      top - 0.045,
+      0.045,
+      corridorMaterial,
+      `connected-corridor:${level}m:CE-EF-FA-AB`,
     );
-  });
-  for (const frame of NESTED_CITY.corridor.frames) {
-    addCorridorFrame(group, frame, frameMaterials[frame.material]);
   }
 }
 
-function addStair(
+function addSideBookshelves(
   group: THREE.Group,
-  stair: CityStair,
-  materials: Record<CityMaterial, THREE.Material>,
-  railMat: THREE.Material,
-  treadMat: THREE.Material
+  walls: readonly CityTrapezoidWallSegment[],
+  panelMaterial: THREE.Material,
+  woodMaterial: THREE.Material,
+  bookMaterials: readonly THREE.Material[],
 ) {
-  const dx = stair.end.x - stair.start.x;
-  const dz = stair.end.z - stair.start.z;
-  const horizontalLength = Math.hypot(dx, dz);
-  const stepRun = horizontalLength / stair.steps;
-  const yaw = Math.atan2(dx, dz);
-  const directionX = dx / horizontalLength;
-  const directionZ = dz / horizontalLength;
-  const sideX = -directionZ;
-  const sideZ = directionX;
-  const treadInstances: BoxInstance[] = [];
-  const noseInstances: BoxInstance[] = [];
+  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
+  const panels: BoxInstance[] = [];
+  const verticalPosts: BoxInstance[] = [];
+  const shelves: BoxInstance[] = [];
+  const bookBatches = bookMaterials.map(() => [] as BoxInstance[]);
 
-  for (let index = 0; index < stair.steps; index++) {
-    const progress = (index + 0.5) / stair.steps;
-    const x = stair.start.x + dx * progress;
-    const z = stair.start.z + dz * progress;
-    const topY = stair.start.y + ((stair.end.y - stair.start.y) * (index + 1)) / stair.steps;
-    treadInstances.push({
-      width: stair.width,
-      height: STAIR_TREAD_THICKNESS,
-      depth: stepRun,
-      x,
-      y: topY - STAIR_TREAD_THICKNESS / 2,
-      z,
-      rotationY: yaw,
-    });
+  for (const wall of sideWalls) {
+    const wallLine = { from: wall.from, to: wall.to };
+    const length = segmentLength(wallLine);
+    const yaw = segmentYaw(wallLine);
+    const first = 0.55;
+    const last = length - 0.55;
+    const bayCount = Math.ceil((last - first) / 2.75);
+    const bayLength = (last - first) / bayCount;
+    const bays = Array.from({ length: bayCount }, (_, index) => ({
+      start: first + index * bayLength,
+      end: first + (index + 1) * bayLength,
+    }));
 
-    const noseDistance = (index + 1) * stepRun - 0.025;
-    noseInstances.push({
-      width: stair.width - 0.12,
-      height: 0.025,
-      depth: 0.04,
-      x: stair.start.x + directionX * noseDistance,
-      y: topY - 0.012,
-      z: stair.start.z + directionZ * noseDistance,
+    for (let floorIndex = 0; floorIndex < NESTED_CITY.levels.length; floorIndex++) {
+      const floorY = NESTED_CITY.levels[floorIndex];
+      for (let bayIndex = 0; bayIndex < bays.length; bayIndex++) {
+        const bay = bays[bayIndex];
+        const centerDistance = (bay.start + bay.end) / 2;
+        const centerOnWall = pointAlong(wallLine, centerDistance / length);
+        const bayDepth = bay.end - bay.start;
+        const shelfCenter = offsetPoint(centerOnWall, wall.inward, 0.76);
+        const backCenter = offsetPoint(centerOnWall, wall.inward, 0.43);
+        panels.push({
+          width: 0.14,
+          height: 3.72,
+          depth: bayDepth - 0.045,
+          x: backCenter.x,
+          y: floorY + 1.86,
+          z: backCenter.z,
+          rotationY: yaw,
+        });
+
+        // Narrow timber uprights divide the very long book wall into readable bays.
+        const postCenter = offsetPoint(centerOnWall, wall.inward, 0.74);
+        verticalPosts.push({
+          width: 0.17,
+          height: 3.76,
+          depth: 0.16,
+          x: postCenter.x,
+          y: floorY + 1.88,
+          z: postCenter.z,
+          rotationY: yaw,
+        });
+
+        const rowCount = 6;
+        for (let row = 0; row < rowCount; row++) {
+          const boardY = floorY + 0.43 + row * 0.55;
+          shelves.push({
+            width: 0.62,
+            height: 0.075,
+            depth: bayDepth - 0.08,
+            x: shelfCenter.x,
+            y: boardY,
+            z: shelfCenter.z,
+            rotationY: yaw,
+          });
+
+          const spacing = 0.14;
+          const bookCount = Math.max(1, Math.floor((bayDepth - 0.2) / spacing));
+          for (let bookIndex = 0; bookIndex < bookCount; bookIndex++) {
+            const distance = centerDistance + (bookIndex - (bookCount - 1) / 2) * spacing;
+            const spinePoint = offsetPoint(pointAlong(wallLine, distance / length), wall.inward, 0.79);
+            const height = 0.32 + ((bayIndex * 13 + row * 7 + bookIndex * 3 + floorIndex) % 11) * 0.014;
+            const materialIndex = (bayIndex * 3 + row + bookIndex * 5 + floorIndex) % bookBatches.length;
+            bookBatches[materialIndex].push({
+              width: 0.095,
+              height,
+              depth: 0.075 + ((bookIndex + row) % 3) * 0.012,
+              x: spinePoint.x,
+              y: boardY + 0.0375 + height / 2,
+              z: spinePoint.z,
+              rotationY: yaw,
+            });
+          }
+        }
+      }
+
+      // A consistent wooden stile at each bay joint emphasizes the repeated, multi-storey shelves.
+      for (const boundaryDistance of [first, ...bays.map(({ end }) => end)]) {
+        const postPoint = offsetPoint(pointAlong(wallLine, boundaryDistance / length), wall.inward, 0.73);
+        verticalPosts.push({
+          width: 0.2,
+          height: 3.8,
+          depth: 0.2,
+          x: postPoint.x,
+          y: floorY + 1.9,
+          z: postPoint.z,
+          rotationY: yaw,
+        });
+      }
+    }
+  }
+
+  addBoxBatch(group, panels, panelMaterial, "continuous-side-bookshelf-backing");
+  addBoxBatch(group, shelves, woodMaterial, "six-tier-oak-shelf-boards");
+  addBoxBatch(group, verticalPosts, woodMaterial, "bookshelf-bay-stiles");
+  bookBatches.forEach((books, index) => {
+    addBoxBatch(group, books, bookMaterials[index], `instanced-library-books:${index}`);
+  });
+}
+
+function inwardSide(wall: CityTrapezoidWallSegment): CityPlanPoint {
+  return wall.inward;
+}
+
+function addGuardrail(
+  group: THREE.Group,
+  segment: Segment3D,
+  floorY: number,
+  material: THREE.Material,
+  glassMaterial: THREE.Material,
+  name: string,
+) {
+  const length = segmentLength(segment);
+  if (length < 0.5) return;
+  const yaw = segmentYaw(segment);
+  const midpoint = pointAlong(segment, 0.5);
+  const postCount = Math.ceil(length / 2.2);
+  const posts: BoxInstance[] = [];
+  for (let index = 0; index <= postCount; index++) {
+    const point = pointAlong(segment, index / postCount);
+    posts.push({
+      width: 0.1,
+      height: 1.04,
+      depth: 0.1,
+      x: point.x,
+      y: floorY + 0.52,
+      z: point.z,
       rotationY: yaw,
     });
   }
-  addBoxInstances(group, materials[stair.material], treadInstances, `nested-city-stair-treads:${stair.id}`);
-  addBoxInstances(group, treadMat, noseInstances, `nested-city-stair-noses:${stair.id}`, false);
+  addBoxBatch(group, posts, material, `${name}:posts`);
 
-  const railInsetT = Math.min(0.15, NESTED_CITY.stairRailInset / horizontalLength);
-  const railStartT = railInsetT;
-  const railEndT = 1 - railInsetT;
-  for (const side of [-1, 1]) {
-    const sideOffset = (stair.width / 2 - PLATFORM_RAIL_WIDTH / 2) * side;
-    const stringerOffset = (stair.width / 2 - 0.08) * side;
-    const stringerStart = new THREE.Vector3(
-      stair.start.x + sideX * stringerOffset,
-      stair.start.y - 0.1,
-      stair.start.z + sideZ * stringerOffset
-    );
-    const stringerEnd = new THREE.Vector3(
-      stair.end.x + sideX * stringerOffset,
-      stair.end.y - 0.1,
-      stair.end.z + sideZ * stringerOffset
-    );
-    addBeamBetween(group, stringerStart, stringerEnd, 0.08, 0.1, railMat);
+  addBox(
+    group,
+    { width: 0.07, height: 0.8, depth: length },
+    { x: midpoint.x, y: floorY + 0.57, z: midpoint.z },
+    glassMaterial,
+    `${name}:clear-infill`,
+    yaw,
+  );
+  const from = planPointToVector(segment.from, floorY + 0.1);
+  const to = planPointToVector(segment.to, floorY + 0.1);
+  addBeamBetween(group, from, to, 0.12, 0.1, material, `${name}:bottom-rail`);
+  addBeamBetween(
+    group,
+    planPointToVector(segment.from, floorY + 1.02),
+    planPointToVector(segment.to, floorY + 1.02),
+    0.14,
+    0.14,
+    material,
+    `${name}:top-rail`,
+  );
+}
 
-    const railStart = new THREE.Vector3(
-      stair.start.x + dx * railStartT + sideX * sideOffset,
-      cityStairHeightAt(stair, railStartT) + NESTED_CITY.railHeight - 0.04,
-      stair.start.z + dz * railStartT + sideZ * sideOffset
-    );
-    const railEnd = new THREE.Vector3(
-      stair.start.x + dx * railEndT + sideX * sideOffset,
-      cityStairHeightAt(stair, railEndT) + NESTED_CITY.railHeight - 0.04,
-      stair.start.z + dz * railEndT + sideZ * sideOffset
-    );
-    addBeamBetween(group, railStart, railEnd, PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, railMat);
+function addGalleryGuardrails(
+  group: THREE.Group,
+  walls: readonly CityTrapezoidWallSegment[],
+  darkMaterial: THREE.Material,
+  glassMaterial: THREE.Material,
+) {
+  const innerEdgeOffset = NESTED_CITY.gallery.width - 0.22;
+  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
+  const bridge = NESTED_CITY.corridor.segments.find((segment) => segment.id === "EF");
+  if (!bridge) return;
 
-    const posts = Math.max(2, Math.ceil(horizontalLength * (railEndT - railStartT) / 1.65));
-    for (let index = 0; index <= posts; index++) {
-      const t = railStartT + (railEndT - railStartT) * index / posts;
-      const x = stair.start.x + dx * t + sideX * sideOffset;
-      const z = stair.start.z + dz * t + sideZ * sideOffset;
-      const surfaceY = cityStairHeightAt(stair, t);
-      group.add(makeBox(
-        PLATFORM_RAIL_WIDTH,
-        NESTED_CITY.railHeight,
-        PLATFORM_RAIL_WIDTH,
-        railMat,
-        x,
-        surfaceY + NESTED_CITY.railHeight / 2,
-        z
-      ));
+  const bridgeDx = bridge.to.x - bridge.from.x;
+  const bridgeDz = bridge.to.z - bridge.from.z;
+  const bridgeLength = Math.hypot(bridgeDx, bridgeDz);
+  const bridgeNormal = { x: -bridgeDz / bridgeLength, z: bridgeDx / bridgeLength };
+  for (const floorY of NESTED_CITY.gallery.floors) {
+    for (const wall of sideWalls) {
+      const edge = {
+        from: offsetPoint(wall.from, inwardSide(wall), innerEdgeOffset),
+        to: offsetPoint(wall.to, inwardSide(wall), innerEdgeOffset),
+      };
+      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial, `gallery-rail:${wall.id}:${floorY}m`);
+    }
+
+    for (const side of [-1, 1]) {
+      const offset = NESTED_CITY.gallery.width / 2 - 0.12;
+      const edge = {
+        from: offsetPoint(bridge.from, bridgeNormal, offset * side),
+        to: offsetPoint(bridge.to, bridgeNormal, offset * side),
+      };
+      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial, `bridge-rail:EF:${floorY}m:${side}`);
     }
   }
 }
 
-function addPlatformGuardrail(
+function addGallerySupportBeams(
   group: THREE.Group,
-  rail: CityPlatformRail,
-  topRailMaterial: THREE.Material,
-  postMaterial: THREE.Material,
-  glassMaterial: THREE.Material
+  walls: readonly CityTrapezoidWallSegment[],
+  material: THREE.Material,
 ) {
-  const floorY = NESTED_CITY.levels[rail.level];
-  const dx = rail.to.x - rail.from.x;
-  const dz = rail.to.z - rail.from.z;
-  const length = Math.hypot(dx, dz);
-  if (length <= 1e-4) return;
-  const direction = { x: dx / length, z: dz / length };
-  const panelHeight = NESTED_CITY.railHeight - 0.16;
-  const halfGlass = NESTED_CITY.glassRailThickness / 2;
-  const panelOffset = { x: rail.inward.x * halfGlass, z: rail.inward.z * halfGlass };
-  const panelFrom = new THREE.Vector3(rail.from.x + panelOffset.x, floorY + 0.08 + panelHeight / 2, rail.from.z + panelOffset.z);
-  const panelTo = new THREE.Vector3(rail.to.x + panelOffset.x, floorY + 0.08 + panelHeight / 2, rail.to.z + panelOffset.z);
-  addBeamBetween(group, panelFrom, panelTo, NESTED_CITY.glassRailThickness, panelHeight, glassMaterial);
-  group.children[group.children.length - 1].name = `nested-city-glass-guard:${rail.id}`;
-
-  const topOffset = PLATFORM_RAIL_WIDTH / 2;
-  const topFrom = new THREE.Vector3(
-    rail.from.x + rail.inward.x * topOffset,
-    floorY + NESTED_CITY.railHeight,
-    rail.from.z + rail.inward.z * topOffset
-  );
-  const topTo = new THREE.Vector3(
-    rail.to.x + rail.inward.x * topOffset,
-    floorY + NESTED_CITY.railHeight,
-    rail.to.z + rail.inward.z * topOffset
-  );
-  addBeamBetween(group, topFrom, topTo, PLATFORM_RAIL_WIDTH, PLATFORM_RAIL_WIDTH, topRailMaterial);
-  group.children[group.children.length - 1].name = `nested-city-platform-rail:${rail.id}`;
-
-  const postInset = PLATFORM_RAIL_WIDTH / Math.SQRT2;
-  const postCount = Math.max(1, Math.ceil(length / 1.65));
-  for (let index = 0; index <= postCount; index++) {
-    const t = (postInset + (length - 2 * postInset) * index / postCount) / length;
-    const x = rail.from.x + dx * t + rail.inward.x * postInset;
-    const z = rail.from.z + dz * t + rail.inward.z * postInset;
-    group.add(makeBox(
-      PLATFORM_RAIL_WIDTH,
-      NESTED_CITY.railHeight,
-      PLATFORM_RAIL_WIDTH,
-      postMaterial,
-      x,
-      floorY + NESTED_CITY.railHeight / 2,
-      z
-    ));
+  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
+  for (const floorY of NESTED_CITY.gallery.floors) {
+    for (const wall of sideWalls) {
+      const offset = NESTED_CITY.gallery.width - 0.34;
+      const from = offsetPoint(wall.from, wall.inward, offset);
+      const to = offsetPoint(wall.to, wall.inward, offset);
+      addBeamBetween(
+        group,
+        planPointToVector(from, floorY - 0.16),
+        planPointToVector(to, floorY - 0.16),
+        0.2,
+        0.26,
+        material,
+        `gallery-edge-girder:${wall.id}:${floorY}m`,
+      );
+    }
   }
 }
 
-function addBridgeRail(
+function addPortalFrame(
   group: THREE.Group,
-  rail: (typeof NESTED_CITY.bridgeRails)[number],
-  topRailMaterial: THREE.Material,
-  postMaterial: THREE.Material,
-  glassMaterial: THREE.Material
+  options: {
+    name: string;
+    centerX: number;
+    centerZ: number;
+    width: number;
+    depth: number;
+    bottom: number;
+    top: number;
+    section: number;
+    material: THREE.Material;
+    bandLevels: readonly number[];
+  },
 ) {
-  const floorY = NESTED_CITY.levels[rail.level];
-  const postCount = Math.max(2, Math.ceil(Math.max(rail.width, rail.depth) / 1.65));
-  const isXLong = rail.width >= rail.depth;
-  const panelHeight = NESTED_CITY.railHeight - 0.16;
-  const panel = isXLong
-    ? makeBox(rail.width, panelHeight, NESTED_CITY.glassRailThickness, glassMaterial, rail.x, floorY + 0.08 + panelHeight / 2, rail.z, false)
-    : makeBox(NESTED_CITY.glassRailThickness, panelHeight, rail.depth, glassMaterial, rail.x, floorY + 0.08 + panelHeight / 2, rail.z, false);
-  panel.name = `nested-city-glass-bridge-guard:${rail.id}`;
-  group.add(panel);
+  const { centerX, centerZ, width, depth, bottom, top, section, material, name, bandLevels } = options;
+  const xMin = centerX - width / 2;
+  const xMax = centerX + width / 2;
+  const zMin = centerZ - depth / 2;
+  const zMax = centerZ + depth / 2;
+  const postHeight = top - bottom;
 
-  const top = makeBox(
-    rail.width,
-    PLATFORM_RAIL_WIDTH,
-    rail.depth,
-    topRailMaterial,
-    rail.x,
-    floorY + NESTED_CITY.railHeight,
-    rail.z
-  );
-  top.name = `nested-city-bridge-rail:${rail.id}`;
-  group.add(top);
-
-  const railLength = isXLong ? rail.width : rail.depth;
-  for (let index = 0; index <= postCount; index++) {
-    // Keep each end post fully over the deck instead of centering it on the slab's outer edge.
-    const t = index / postCount;
-    const along = BRIDGE_POST_WIDTH / 2 + (railLength - BRIDGE_POST_WIDTH) * t;
-    const x = isXLong ? rail.x - rail.width / 2 + along : rail.x;
-    const z = isXLong ? rail.z : rail.z - rail.depth / 2 + along;
-    group.add(makeBox(BRIDGE_POST_WIDTH, NESTED_CITY.railHeight, BRIDGE_POST_WIDTH, postMaterial, x, floorY + NESTED_CITY.railHeight / 2, z));
+  for (const [x, z, id] of [
+    [xMin, zMin, "SW"], [xMin, zMax, "NW"], [xMax, zMin, "SE"], [xMax, zMax, "NE"],
+  ] as const) {
+    addBox(
+      group,
+      { width: section, height: postHeight, depth: section },
+      { x, y: (bottom + top) / 2, z },
+      material,
+      `${name}:post:${id}`,
+    );
   }
+
+  const levels = [...new Set([bottom, ...bandLevels, top])].filter((level) => level >= bottom && level <= top);
+  for (const level of levels) {
+    for (const z of [zMin, zMax]) {
+      addBeamBetween(
+        group,
+        new THREE.Vector3(xMin, level, z),
+        new THREE.Vector3(xMax, level, z),
+        section,
+        section,
+        material,
+        `${name}:beam:x:${z}:${level}`,
+      );
+    }
+    for (const x of [xMin, xMax]) {
+      addBeamBetween(
+        group,
+        new THREE.Vector3(x, level, zMin),
+        new THREE.Vector3(x, level, zMax),
+        section,
+        section,
+        material,
+        `${name}:beam:z:${x}:${level}`,
+      );
+    }
+  }
+}
+
+function rotateLocalPoint(center: CityPlanPoint, localX: number, localZ: number, yaw: number): CityPlanPoint {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  return {
+    x: center.x + localX * cos + localZ * sin,
+    z: center.z - localX * sin + localZ * cos,
+  };
 }
 
 function addReadingTable(
   group: THREE.Group,
-  x: number,
+  center: CityPlanPoint,
   floorY: number,
-  z: number,
-  width: number,
-  depth: number,
-  wood: THREE.Material,
-  metal: THREE.Material,
-  seating = true
+  yaw: number,
+  woodMaterial: THREE.Material,
+  metalMaterial: THREE.Material,
+  index: number,
 ) {
-  const topY = floorY + 0.78;
-  group.add(makeBox(width, 0.1, depth, wood, x, topY, z));
-  for (const dx of [-1, 1]) {
-    for (const dz of [-1, 1]) {
-      group.add(makeBox(0.075, 0.72, 0.075, metal, x + dx * (width / 2 - 0.12), floorY + 0.36, z + dz * (depth / 2 - 0.1), false));
+  const tableWidth = 0.82;
+  const tableDepth = 1.25;
+  const tableTopY = floorY + 0.78;
+  const tablePosition = { x: center.x, y: tableTopY, z: center.z };
+  addBox(
+    group,
+    { width: tableWidth, height: 0.09, depth: tableDepth },
+    tablePosition,
+    woodMaterial,
+    `gallery-reading-table:${index}:top`,
+    yaw,
+  );
+
+  for (const localX of [-tableWidth / 2 + 0.07, tableWidth / 2 - 0.07]) {
+    for (const localZ of [-tableDepth / 2 + 0.08, tableDepth / 2 - 0.08]) {
+      const leg = rotateLocalPoint(center, localX, localZ, yaw);
+      addBox(
+        group,
+        { width: 0.065, height: 0.74, depth: 0.065 },
+        { x: leg.x, y: floorY + 0.37, z: leg.z },
+        metalMaterial,
+        `gallery-reading-table:${index}:leg`,
+        yaw,
+      );
     }
   }
-  if (!seating) return;
 
-  for (const side of [-1, 1]) {
-    const chairX = x + side * (width * 0.33);
-    const chairZ = z + depth / 2 + 0.46;
-    group.add(makeBox(0.62, 0.08, 0.5, wood, chairX, floorY + 0.48, chairZ));
-    group.add(makeBox(0.62, 0.56, 0.08, wood, chairX, floorY + 0.76, chairZ + 0.22));
-    group.add(makeBox(0.07, 0.46, 0.07, metal, chairX - 0.22, floorY + 0.23, chairZ - 0.12, false));
-    group.add(makeBox(0.07, 0.46, 0.07, metal, chairX + 0.22, floorY + 0.23, chairZ - 0.12, false));
-  }
+  const seatCenter = rotateLocalPoint(center, 0, tableDepth / 2 + 0.3, yaw);
+  addBox(
+    group,
+    { width: 0.56, height: 0.08, depth: 0.32 },
+    { x: seatCenter.x, y: floorY + 0.46, z: seatCenter.z },
+    woodMaterial,
+    `gallery-reading-seat:${index}`,
+    yaw,
+  );
 }
 
 function addPlanter(
   group: THREE.Group,
-  x: number,
+  center: CityPlanPoint,
   floorY: number,
-  z: number,
-  size: number,
-  planterMaterial: THREE.Material,
+  woodMaterial: THREE.Material,
   soilMaterial: THREE.Material,
-  trunkMaterial: THREE.Material,
-  foliageMaterial: THREE.Material
+  leafMaterial: THREE.Material,
+  index: number,
 ) {
-  const planterHeight = 0.42;
-  group.add(makeBox(size, planterHeight, size * 0.82, planterMaterial, x, floorY + planterHeight / 2, z));
-  group.add(makeBox(size * 0.84, 0.05, size * 0.68, soilMaterial, x, floorY + planterHeight + 0.02, z));
+  addBox(
+    group,
+    { width: 0.72, height: 0.46, depth: 0.72 },
+    { x: center.x, y: floorY + 0.23, z: center.z },
+    woodMaterial,
+    `library-planter:${index}:box`,
+  );
+  addBox(
+    group,
+    { width: 0.62, height: 0.04, depth: 0.62 },
+    { x: center.x, y: floorY + 0.47, z: center.z },
+    soilMaterial,
+    `library-planter:${index}:soil`,
+  );
 
-  const trunkHeight = size * 1.65;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.055, size * 0.09, trunkHeight, 7), trunkMaterial);
-  trunk.position.set(x, floorY + planterHeight + trunkHeight / 2, z);
-  trunk.castShadow = true;
-  trunk.receiveShadow = true;
-  group.add(trunk);
-
-  const crownY = floorY + planterHeight + trunkHeight * 0.9;
+  const foliageGeometry = new THREE.IcosahedronGeometry(0.25, 1);
   for (const [dx, dy, dz, scale] of [
-    [0, 0, 0, 1],
-    [-size * 0.28, size * 0.18, 0, 0.7],
-    [size * 0.28, size * 0.14, size * 0.08, 0.68],
-    [0, size * 0.2, -size * 0.26, 0.72],
+    [-0.16, 0.78, 0, 0.9], [0.13, 0.91, 0.08, 1.1], [0.02, 1.08, -0.13, 0.82],
   ] as const) {
-    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(size * 0.42 * scale, 1), foliageMaterial);
-    crown.position.set(x + dx, crownY + dy, z + dz);
-    crown.castShadow = true;
-    crown.receiveShadow = true;
-    group.add(crown);
+    const foliage = new THREE.Mesh(foliageGeometry, leafMaterial);
+    foliage.name = `library-planter:${index}:foliage`;
+    foliage.position.set(center.x + dx, floorY + dy, center.z + dz);
+    foliage.scale.set(scale, scale * 1.15, scale);
+    foliage.castShadow = true;
+    foliage.receiveShadow = true;
+    group.add(foliage);
   }
 }
 
-function addLibraryWall(
+function addGalleryFurniture(
   group: THREE.Group,
-  wood: THREE.Material,
-  bookMaterials: readonly THREE.Material[],
-  led: THREE.Material
+  walls: readonly CityTrapezoidWallSegment[],
+  woodMaterial: THREE.Material,
+  metalMaterial: THREE.Material,
+  soilMaterial: THREE.Material,
+  leafMaterial: THREE.Material,
 ) {
-  const bookInstances: BoxInstance[][] = bookMaterials.map(() => []);
-  for (const obstacle of NESTED_CITY.obstacles) {
-    group.add(makeBox(
-      obstacle.width,
-      obstacle.top - obstacle.bottom,
-      obstacle.depth,
-      wood,
-      obstacle.x,
-      (obstacle.top + obstacle.bottom) / 2,
-      obstacle.z,
-      false
-    ));
+  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
+  let tableIndex = 0;
+  let planterIndex = 0;
+  for (const floorY of NESTED_CITY.gallery.floors) {
+    for (const wall of sideWalls) {
+      const side = { from: wall.from, to: wall.to };
+      const yaw = segmentYaw(side);
+      for (const t of [0.19, 0.39, 0.61, 0.81]) {
+        const center = offsetPoint(pointAlong(side, t), wall.inward, 2.82);
+        addReadingTable(group, center, floorY, yaw, woodMaterial, metalMaterial, tableIndex++);
+      }
 
-    const left = obstacle.x - obstacle.width / 2 + 0.16;
-    const right = obstacle.x + obstacle.width / 2 - 0.16;
-    const shelfRows = 8;
-    for (let row = 0; row < shelfRows; row++) {
-      const shelfY = 0.72 + row * 0.92;
-      group.add(makeBox(obstacle.width - 0.16, 0.075, 0.5, wood, obstacle.x, shelfY, obstacle.z - 0.24, false));
-      group.add(makeBox(obstacle.width - 0.28, 0.018, 0.025, led, obstacle.x, shelfY - 0.055, obstacle.z - 0.48, false));
-
-      let cursor = left;
-      let bookIndex = row * 13;
-      while (cursor < right - 0.2) {
-        const width = 0.13 + (bookIndex % 4) * 0.025;
-        const height = 0.48 + ((bookIndex * 7 + row * 3) % 5) * 0.065;
-        const materialIndex = bookIndex % bookInstances.length;
-        bookInstances[materialIndex].push({
-          width,
-          height,
-          depth: 0.15,
-          x: cursor + width / 2,
-          y: shelfY + 0.04 + height / 2,
-          z: obstacle.z - obstacle.depth / 2 - 0.07,
-        });
-        cursor += width + 0.055;
-        bookIndex++;
+      for (const t of [0.08, 0.92]) {
+        const center = offsetPoint(pointAlong(side, t), wall.inward, 3.52);
+        addPlanter(group, center, floorY, woodMaterial, soilMaterial, leafMaterial, planterIndex++);
       }
     }
   }
-  bookInstances.forEach((instances, index) => {
-    addBoxInstances(group, bookMaterials[index], instances, `nested-city-library-books:${index}`, false);
-  });
 }
 
-/** Reference floor program: 1F entrance/exhibition, 2F public stacks, 3F quiet study, 4F sky terrace. */
-export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boolean; structureOnly?: boolean }> = ({ api, whiteModel = false, structureOnly = false }) => {
+export const NestedCityGeometry: React.FC<{
+  api: StudySceneApi;
+  whiteModel?: boolean;
+  structureOnly?: boolean;
+}> = ({ api, whiteModel = false, structureOnly = false }) => {
   useEffect(() => {
     const group = new THREE.Group();
-    group.name = "nested-city-architecture";
+    group.name = "multi-level-trapezoid-library";
     api.scene.add(group);
-    const textureDisposers: Array<() => void> = [];
+
     const originalEnvironmentIntensity = api.scene.environmentIntensity;
-    // Three.js owns this mutable scene property; clear reflections only for the isolated inspection scene.
+    // Three.js owns this mutable scene property; isolate the structural view from environment reflections.
     // eslint-disable-next-line react-hooks/immutability -- intentional imperative Three.js scene mutation
     if (structureOnly) api.scene.environmentIntensity = 0;
 
-    const materialColor = (base: string) => whiteModel ? "#d8d5cf" : base;
-    const timberBase = structureOnly ? "#c7894f" : "#8b6545";
-    const stoneBase = structureOnly ? "#8799a8" : "#99958c";
-    const coreBase = structureOnly ? "#9874c7" : "#665e60";
-    const timber = new THREE.MeshStandardMaterial({ color: materialColor(timberBase), roughness: 1, metalness: 0, envMapIntensity: structureOnly ? 0 : 0.08 });
-    const timberLight = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#d19a60" : "#ae8a63"), roughness: 1, metalness: 0 });
-    const stone = new THREE.MeshStandardMaterial({ color: materialColor(stoneBase), roughness: 1, metalness: 0, envMapIntensity: structureOnly ? 0 : 0.05 });
-    const stoneLight = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#a7b3bd" : "#b9b2a7"), roughness: 1, metalness: 0 });
-    const core = new THREE.MeshStandardMaterial({ color: materialColor(coreBase), roughness: 1, metalness: 0, envMapIntensity: structureOnly ? 0 : 0.08 });
-    const coreLight = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#b49bdd" : "#87787b"), roughness: 1, metalness: 0 });
-    const deckTimber = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#dfc4a2" : "#59483a"), roughness: 1, metalness: 0, envMapIntensity: 0 });
-    const deckStone = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#d5dce1" : "#88847c"), roughness: 1, metalness: 0, envMapIntensity: 0 });
-    const deckCore = new THREE.MeshStandardMaterial({ color: materialColor(structureOnly ? "#d2c4e3" : "#514a4d"), roughness: 1, metalness: 0, envMapIntensity: 0 });
-    const rail = new THREE.MeshStandardMaterial({ color: materialColor("#4a3a30"), roughness: 0.7 });
-    const railStone = new THREE.MeshStandardMaterial({ color: materialColor("#69655f"), roughness: 0.82, metalness: 0.12 });
-    const metal = new THREE.MeshStandardMaterial({ color: materialColor("#79736a"), roughness: 0.42, metalness: 0.68 });
-    const glass = new THREE.MeshPhysicalMaterial({
-      color: whiteModel ? "#f1efeb" : "#9dbec1",
-      roughness: 0.08,
-      metalness: 0.04,
-      transparent: true,
-      opacity: whiteModel ? 0.12 : 0.24,
-      transmission: whiteModel ? 0 : 0.28,
-      thickness: 0.08,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      envMapIntensity: 0.45,
-    });
-    const tread = new THREE.MeshStandardMaterial({ color: materialColor("#c2a17b"), roughness: 0.85 });
-    const planterMat = new THREE.MeshStandardMaterial({ color: materialColor("#79766e"), roughness: 0.94 });
-    const soilMat = new THREE.MeshStandardMaterial({ color: materialColor("#473c30"), roughness: 1 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: materialColor("#72583c"), roughness: 0.95 });
-    const foliageMat = new THREE.MeshStandardMaterial({ color: materialColor("#58764f"), roughness: 0.92 });
-    const led = new THREE.MeshBasicMaterial({ color: whiteModel ? "#f4f2ed" : "#ffc887", toneMapped: false });
-    const materials: Record<CityMaterial, THREE.Material> = { timber, stone, core };
-    const allMaterials: THREE.Material[] = [
-      timber, timberLight, stone, stoneLight, core, coreLight, deckTimber, deckStone, deckCore,
-      rail, railStone, metal, glass, tread, planterMat, soilMat, trunkMat, foliageMat, led,
-    ];
-
-    const disposeSceneGroup = () => {
-      api.scene.remove(group);
-      if (structureOnly) api.scene.environmentIntensity = originalEnvironmentIntensity;
-      textureDisposers.forEach((dispose) => dispose());
-      group.traverse((object) => {
-        const mesh = object as THREE.Mesh;
-        if (mesh.geometry && mesh.geometry !== UNIT_BOX_GEOMETRY) mesh.geometry.dispose();
-      });
-      allMaterials.forEach((material) => material.dispose());
+    const materials: THREE.Material[] = [];
+    const material = (options: THREE.MeshStandardMaterialParameters) => {
+      const created = new THREE.MeshStandardMaterial(options);
+      materials.push(created);
+      return created;
     };
+    const color = (normal: string, white = "#f2f0ec") => whiteModel ? white : normal;
 
-    if (!whiteModel && !structureOnly) {
-      const anisotropy = Math.min(8, api.renderer.capabilities.getMaxAnisotropy());
-      textureDisposers.push(attachPhotoMap(timber, "walnut", { repeat: [5, 1], tint: "#d0ad86", anisotropy }));
-      textureDisposers.push(attachPhotoMap(stone, "microcement", { repeat: [4, 3], tint: "#c5c0b7", anisotropy }));
-      textureDisposers.push(attachPhotoMap(core, "microcement", { repeat: [3, 2], tint: "#958d87", anisotropy }));
-    }
+    const wallMaterial = material({
+      color: color("#41474b"), roughness: 0.88, metalness: 0.08, envMapIntensity: structureOnly ? 0 : 0.05,
+    });
+    const groundMaterial = material({
+      color: color(structureOnly ? "#795d42" : "#725c47"), roughness: 0.82, metalness: 0.02, envMapIntensity: 0,
+    });
+    const galleryMaterial = material({
+      color: color(structureOnly ? "#846747" : "#806345"), roughness: 0.78, metalness: 0.01, envMapIntensity: 0,
+    });
+    const corridorMaterial = material({
+      color: color(structureOnly ? "#a18461" : "#947352"), roughness: 0.78, metalness: 0.01, envMapIntensity: 0,
+    });
+    const darkMaterial = material({
+      color: color("#343a3e"), roughness: 0.72, metalness: 0.32, envMapIntensity: structureOnly ? 0 : 0.06,
+    });
+    const shelfPanelMaterial = material({
+      color: color("#35393a"), roughness: 0.88, metalness: 0.02, envMapIntensity: 0,
+    });
+    const timberMaterial = material({
+      color: color("#b78350"), roughness: 0.73, metalness: 0.01, envMapIntensity: 0,
+    });
+    const frameWoodMaterial = material({
+      color: color("#a67748"), roughness: 0.68, metalness: 0.02, envMapIntensity: 0,
+    });
+    const bookMaterials = [
+      "#a45c43", "#bc864c", "#557765", "#395b6c", "#c8ad7b", "#88515a", "#5f5449", "#d4c2a5",
+    ].map((bookColor) => material({
+      color: color(bookColor), roughness: 0.82, metalness: 0, envMapIntensity: 0,
+    }));
+    const glassMaterial = material({
+      color: color("#a9c1c6"), roughness: 0.16, metalness: 0.08, transparent: true, opacity: whiteModel ? 0.28 : 0.24,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const tableMetalMaterial = material({
+      color: color("#4a4d4b"), roughness: 0.58, metalness: 0.42, envMapIntensity: 0,
+    });
+    const soilMaterial = material({ color: color("#49382b"), roughness: 1, metalness: 0, envMapIntensity: 0 });
+    const leafMaterial = material({
+      color: color("#698253"), roughness: 0.9, metalness: 0, envMapIntensity: 0,
+    });
 
-    // Both walk-through and structural inspection use the same trapezoid shell, clipped floors,
-    // and 2 m corridor geometry. CD stays deliberately open; the room view is an interior, not a square shell.
-    const visibleFrames = structureOnly ? NESTED_CITY.frames : [...NESTED_CITY.frames, ...NESTED_CITY.featureFrames];
-    for (const frame of visibleFrames) {
-      const material = frame.material === "timber" ? timber : frame.material === "stone" ? stone : core;
-      addFrame(group, frame, material);
-    }
-    addTrapezoidCorridorStructure(group, [deckTimber, deckStone, deckCore, deckStone], materials, timber);
+    const ownedGeometries: THREE.BufferGeometry[] = [];
+    addTrapezoidShell(group, wallMaterial);
+    if (structureOnly) addGroundFloor(group, groundMaterial);
+    addGalleryFloors(group, galleryMaterial, corridorMaterial, structureOnly);
+    addSideBookshelves(group, NESTED_CITY.trapezoid.wallEdges, shelfPanelMaterial, timberMaterial, bookMaterials);
+    addGallerySupportBeams(group, NESTED_CITY.trapezoid.wallEdges, darkMaterial);
+    addGalleryGuardrails(group, NESTED_CITY.trapezoid.wallEdges, darkMaterial, glassMaterial);
 
-    if (!structureOnly) {
-      for (const column of NESTED_CITY.columns) {
-        group.add(makeBox(column.width, column.top - column.bottom, column.depth, stone, column.x, (column.top + column.bottom) / 2, column.z));
-      }
+    addPortalFrame(group, {
+      name: "central-atrium-frame-outer",
+      centerX: 0,
+      centerZ: 0,
+      width: 14.4,
+      depth: 11.2,
+      bottom: 0,
+      top: ROOM.height,
+      section: 0.44,
+      material: frameWoodMaterial,
+      bandLevels: NESTED_CITY.levels,
+    });
+    addPortalFrame(group, {
+      name: "central-atrium-frame-middle",
+      centerX: 0.55,
+      centerZ: 0.25,
+      width: 9.4,
+      depth: 7.6,
+      bottom: 2,
+      top: 14,
+      section: 0.34,
+      material: darkMaterial,
+      bandLevels: NESTED_CITY.gallery.floors,
+    });
+    addPortalFrame(group, {
+      name: "central-atrium-frame-inner",
+      centerX: -0.6,
+      centerZ: -0.45,
+      width: 5.8,
+      depth: 4.7,
+      bottom: 4,
+      top: 12,
+      section: 0.27,
+      material: frameWoodMaterial,
+      bandLevels: [8],
+    });
 
-      for (const stair of NESTED_CITY.stairs) {
-        addStair(group, stair, materials, rail, tread);
-      }
-      for (const bridgeRail of NESTED_CITY.bridgeRails) {
-        addBridgeRail(group, bridgeRail, railStone, metal, glass);
-      }
-      for (const platformRail of nestedCityPlatformRails()) {
-        addPlatformGuardrail(group, platformRail, railStone, metal, glass);
-      }
-    }
+    addGalleryFurniture(group, NESTED_CITY.trapezoid.wallEdges, timberMaterial, tableMetalMaterial, soilMaterial, leafMaterial);
 
     if (structureOnly) {
-      for (const column of NESTED_CITY.columns) {
-        group.add(makeBox(
-          column.width,
-          column.top - column.bottom,
-          column.depth,
-          materials[column.material],
-          column.x,
-          (column.top + column.bottom) / 2,
-          column.z
-        ));
-      }
-      for (const stair of NESTED_CITY.stairs) addStair(group, stair, materials, rail, tread);
-
-      const hemi = new THREE.HemisphereLight("#f5f7fb", "#85817a", 2.1);
-      const key = new THREE.DirectionalLight("#fff4e6", 2.6);
+      const hemisphere = new THREE.HemisphereLight("#f4f6fa", "#77736c", 2.25);
+      const key = new THREE.DirectionalLight("#fff4e6", 2.65);
       key.position.set(42, 64, 38);
       key.target.position.set(0, 7, 0);
       key.castShadow = true;
@@ -734,71 +751,23 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       key.shadow.camera.near = 0.1;
       key.shadow.camera.far = 120;
       key.shadow.bias = -0.0002;
-      group.add(hemi, key, key.target);
-      return disposeSceneGroup;
+      group.add(hemisphere, key, key.target);
     }
 
-    // 1F: welcome counter, exhibition plinths, and planted lobby edges.
-    group.add(makeBox(4.4, 0.16, 1.15, timber, -8.5, 1.06, 6.5));
-    group.add(makeBox(3.9, 0.72, 0.82, core, -8.5, 0.43, 6.5));
-    for (const [x, z, height] of [[-2.5, 1.8, 0.8], [4.2, -0.8, 0.62], [0.5, -4.2, 0.7]] as const) {
-      group.add(makeBox(1.35, 0.12, 1.35, stoneLight, x, height, z));
-      group.add(makeBox(0.46, height * 1.35, 0.46, timberLight, x, height + height * 0.68, z));
-    }
-
-    // 2F public library: communal reading tables; 3F: small quiet-study / note desks.
-    addReadingTable(group, 8.5, NESTED_CITY.levels[1], -7.35, 3.5, 1.1, timber, metal);
-    addReadingTable(group, 13, NESTED_CITY.levels[1], -7.35, 3.5, 1.1, timber, metal);
-    for (const x of [8, 11.2, 14.2]) {
-      addReadingTable(group, x, NESTED_CITY.levels[2], -8, 1.45, 0.72, timberLight, metal, false);
-      group.add(makeBox(1.25, 1.35, 0.065, core, x, NESTED_CITY.levels[2] + 0.68, -8.48, false));
-      group.add(makeBox(0.065, 1.05, 0.92, stoneLight, x - 0.82, NESTED_CITY.levels[2] + 0.53, -8, false));
-    }
-    // 4F observation terrace: low benches and planting beds preserve the open sky edge.
-    for (const x of [9, 15]) {
-      group.add(makeBox(2.25, 0.12, 0.52, timber, x, 12.48, 9.95));
-      group.add(makeBox(2.25, 0.54, 0.08, timber, x, 12.75, 10.2));
-      for (const dx of [-0.8, 0.8]) {
-        group.add(makeBox(0.07, 0.42, 0.07, metal, x + dx, 12.21, 9.95, false));
+    // Keep the plant geometry shared among planters, but dispose it with this scene group.
+    group.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.geometry !== UNIT_BOX && !ownedGeometries.includes(object.geometry)) {
+        ownedGeometries.push(object.geometry);
       }
-    }
+    });
 
-    // The double-height reference library wall retains an open, glazed entrance at its centre.
-    addLibraryWall(group, timber, [timberLight, stoneLight, coreLight], led);
-
-    // Lush but restrained planting: entry planters, atrium landings and the 4F sky terrace.
-    for (const [x, y, z, size] of [
-      [-18.5, 0, 7.2, 1.3], [18.5, 0, 7.2, 1.3], [-15, 0, -6.8, 1.1],
-      [3.1, 4, 4.5, 0.9], [14.5, 4, -9, 0.9],
-      [7.2, 12, 10, 0.8], [17.1, 12, 10, 0.8],
-    ] as const) {
-      addPlanter(group, x, y, z, size, planterMat, soilMat, trunkMat, foliageMat);
-    }
-
-    // Warm LED lines follow the local trapezoid width rather than assuming a 48 m square strip.
-    const halfWidthAtZ = (z: number) => {
-      const { B, C } = NESTED_CITY.trapezoid.points;
-      const t = THREE.MathUtils.clamp((z - B.z) / (C.z - B.z), 0, 1);
-      return B.x + (C.x - B.x) * t;
+    return () => {
+      api.scene.remove(group);
+      if (structureOnly) api.scene.environmentIntensity = originalEnvironmentIntensity;
+      ownedGeometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((entry) => entry.dispose());
     };
-    for (const y of [4, 8, 12]) {
-      for (const z of [-ROOM.depth / 2 + 0.72, ROOM.depth / 2 - 0.72]) {
-        const width = Math.min(ROOM.width - 2.2, 2 * (halfWidthAtZ(z) - ROOM.wall - 0.2));
-        group.add(makeBox(width, 0.025, 0.035, led, 0, y - 0.66, z, false));
-      }
-    }
-    for (const [x, y, z] of [
-      [-8, 3.5, -2], [8, 3.5, -3], [14, 7.5, 1], [8, 7.5, -7],
-      [12, 11.5, 5], [10, 15.1, 2],
-    ] as const) {
-      const point = new THREE.PointLight(whiteModel ? "#ffffff" : "#ffd5a0", whiteModel ? 0.2 : 0.38, 9, 2);
-      point.position.set(x, y, z);
-      point.castShadow = false;
-      group.add(point);
-    }
-
-    return disposeSceneGroup;
-  }, [api, whiteModel, structureOnly]);
+  }, [api, structureOnly, whiteModel]);
 
   return null;
 };
