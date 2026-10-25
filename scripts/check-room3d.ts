@@ -4,10 +4,9 @@ import path from "node:path";
 import * as THREE from "three";
 import {
   CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
-  MARBLE_ROUGH, MATCH_VIEW, MAX_WALKABLE_STEP, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
-  cityCorridorFramePlan, cityFrameMembers, cityPlatformFootprint, cityStairHeightAt, cityTrapezoidCornerFootprint,
-  cityTrapezoidWallBandFootprint, clipCityPolygonToTrapezoid, isCityPointInsidePolygon, isCityPointInsideTrapezoid,
-  colliderOverlapsCircle, nestedCityPlatformRails, nestedCityInspectionDistance,
+  MARBLE_ROUGH, MATCH_VIEW, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
+  cityTrapezoidCornerFootprint, cityTrapezoidWallBandFootprint, clipCityPolygonToTrapezoid,
+  isCityPointInsidePolygon, isCityPointInsideTrapezoid, colliderOverlapsCircle, nestedCityInspectionDistance,
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
@@ -24,7 +23,7 @@ assert.ok(isCityPointInsidePolygon(edge, NESTED_CITY.trapezoid.walkableFootprint
   "camera/player clamps must use the inset trapezoid, not the old square room boundary");
 assert.ok(!isCityPointInsideTrapezoid({ x: 100, z: -100 }, 0.84));
 
-// Reference-board envelope and walkable floor rhythm (1F–4F).
+// Trapezoid envelope and four corridor levels (1F–4F).
 assert.equal(ROOM_AREA_SCALE, 16);
 assert.equal(ROOM.width, 48);
 assert.equal(ROOM.depth, 48);
@@ -33,17 +32,16 @@ assert.equal(ROOM.height, 16);
 assert.equal(ROOM.wall, 0.32);
 assert.deepEqual(DEFAULT_CAMERA, { yaw: 70, pitch: 15, x: 0, z: 22.4, height: 1.52, floorY: 0 });
 assert.deepEqual(NESTED_CITY.levels, [0, 4, 8, 12]);
-assert.deepEqual(NESTED_CITY.atrium, { x: 0, z: 0, width: 20, depth: 20 }, "2F–4F 應保留 20 × 20 m 中央挑空；跨層走道只容許局部穿越");
 assert.deepEqual(nestedCityFloorLabel(0), { full: "1F · 0 m", compact: "1F" });
 assert.deepEqual(nestedCityFloorLabel(4), { full: "2F · 4 m", compact: "2F" });
 assert.deepEqual(nestedCityFloorLabel(8), { full: "3F · 8 m", compact: "3F" });
 assert.deepEqual(nestedCityFloorLabel(12), { full: "4F · 12 m", compact: "4F" });
-assert.deepEqual(nestedCityFloorLabel(2), { full: "階梯", compact: "階梯" });
+assert.deepEqual(nestedCityFloorLabel(2), { full: "樓層間", compact: "樓層間" });
 assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compact: "未知" });
 
 // Trapezoid envelope and connected 2 m corridor chain (coordinates are X/Z in metres).
 {
-  const { trapezoid, corridor } = NESTED_CITY;
+  const { trapezoid, corridor, gallery } = NESTED_CITY;
   const { A, B, C, D, E, F } = trapezoid.points;
   assert.deepEqual([A, B, C, D, E, F], [
     { x: -12, z: -24 }, { x: 12, z: -24 }, { x: 24, z: 24 },
@@ -86,6 +84,14 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
     assert.ok(Math.hypot(actual.x, actual.z) > 0);
     assert.ok(Math.abs(actual.x * reference.z - actual.z * reference.x) < 1e-6,
       `${segment.id} corridor floor projection must remain parallel to its named run`);
+    if (segment.id !== "EF") {
+      const referenceLength = Math.hypot(reference.x, reference.z);
+      const distanceFromWall = (point: { x: number; z: number }) =>
+        Math.abs(reference.x * (point.z - referenceFrom.z) - reference.z * (point.x - referenceFrom.x)) / referenceLength;
+      assert.ok(Math.abs(distanceFromWall(segment.from) - corridor.width / 2) < 1e-6 &&
+        Math.abs(distanceFromWall(segment.to) - corridor.width / 2) < 1e-6,
+      `${segment.id} must sit against its named wall with the corridor's outer edge touching it`);
+    }
   }
 
   const trapezoidVertices = [A, B, C, D];
@@ -103,6 +109,25 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
   assert.equal(trapezoidArea, 1728);
   assert.ok(corridorArea > 0 && corridorArea < trapezoidArea * 0.2,
     "the narrow connected corridors must leave the majority of the trapezoid open to view");
+  const galleryArea = gallery.footprints.reduce((area, footprint) => area + Math.abs(signedArea(footprint)), 0);
+  assert.ok(galleryArea < trapezoidArea * 0.75,
+    "even counting overlapping gallery wings twice, the floor slabs must leave a broad central atrium");
+  assert.ok(!gallery.footprints.some((footprint) => isCityPointInsidePolygon({ x: 0, z: 0 }, footprint)),
+    "the centre of the building stays open rather than becoming a full-floor slab");
+  for (const footprint of gallery.footprints) {
+    assert.ok(footprint.length >= 3 && footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
+      "all elevated gallery wings must remain inside ABCD");
+  }
+  for (const wall of trapezoid.wallEdges.filter(({ id }) => id === "BC" || id === "AD")) {
+    const sideMidpoint = {
+      x: (wall.from.x + wall.to.x) / 2 + wall.inward.x * gallery.width / 2,
+      z: (wall.from.z + wall.to.z) / 2 + wall.inward.z * gallery.width / 2,
+    };
+    assert.ok(gallery.footprints.some((footprint) => isCityPointInsidePolygon(sideMidpoint, footprint)),
+      `${wall.id} full-length side gallery must sit beside its book wall`);
+    assert.equal(groundHeightAt(sideMidpoint.x, sideMidpoint.z, 8), 8,
+      `${wall.id} upper wing must be walkable at 8 m`);
+  }
   const orientation = Math.sign(signedArea(trapezoidVertices));
   for (const point of corridor.footprint) {
     for (let index = 0; index < trapezoidVertices.length; index++) {
@@ -130,232 +155,27 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
   "corridor slab geometry must stay within the 48×48 m envelope");
   corridorGeometry.dispose();
 
-  const [t1, t2] = corridor.frames;
-  assert.deepEqual(corridor.frames.map(({ id, corridorId, width, bottom, top }) => ({ id, corridorId, width, bottom, top })), [
-    { id: "T1", corridorId: "EF", width: 2, bottom: 0, top: 8 },
-    { id: "T2", corridorId: "FA", width: 2, bottom: 8, top: 12 },
-  ]);
-  for (const frame of corridor.frames) {
-    const segment = corridor.segments.find(({ id }) => id === frame.corridorId);
-    assert.ok(segment, `${frame.id} must refer to a rendered corridor segment`);
-    assert.equal(frame.width, corridor.width, `${frame.id} floor/ceiling rectangle width matches the corridor`);
-    assert.ok(Number.isInteger((frame.top - frame.bottom) / NESTED_CITY.floorHeight),
-      `${frame.id} height must be an integer multiple of floor height h`);
-    const direction = { x: segment!.to.x - segment!.from.x, z: segment!.to.z - segment!.from.z };
-    const plan = cityCorridorFramePlan(frame);
-    assert.ok(plan);
-    assert.ok(Math.abs(plan.length - Math.hypot(direction.x, direction.z)) < 1e-9 && plan.width === corridor.width,
-      `${frame.id} floor/ceiling rectangle must retain the corridor's length and width`);
-    const projectedRectangleAxis = { x: Math.sin(plan.rotationY), z: Math.cos(plan.rotationY) };
-    assert.ok(Math.abs(direction.x * projectedRectangleAxis.z - direction.z * projectedRectangleAxis.x) < 1e-9,
-      `${frame.id} floor/ceiling projection must have the same long-axis orientation as ${frame.corridorId}`);
-  }
-  assert.ok(t1.bottom < NESTED_CITY.levels[1] && t1.top > NESTED_CITY.levels[1],
-    "T1 spans 1h below and 1h above the 2F corridor");
-  assert.equal(t2.top, t1.top + NESTED_CITY.floorHeight,
-    "T2 ceiling is at least one floor height above the T1 ceiling");
-}
-
-assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 1).length, 5, "2F 由兩側廊、錯位跨橋和南北連接段組成");
-assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 2).length, 4, "3F 以錯位側廊、跨橋和北連接段維持大挑空");
-assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 3).length, 4, "4F 由錯位觀景平台、短橋和小露台組成，而非鋪滿整層");
-assert.equal(NESTED_CITY.frames.length, 3, "主構圖由外框、中框與內核三重同向縮尺結構組成");
-assert.deepEqual(NESTED_CITY.frames.map(({ width, depth, height }) => ({ width, depth, height })), [
-  { width: 30, depth: 16, height: 16 },
-  { width: 22.5, depth: 12, height: 12 },
-  { width: 15, depth: 8, height: 8 },
-], "W/S/C 保留垂直層級與逐層等比例，平面尺寸已配合梯形外牆內縮");
-assert.deepEqual(NESTED_CITY.frames.map(({ x, z, bottom }) => ({ x, z, bottom })), [
-  { x: 0, z: 0, bottom: 0 },
-  { x: 4, z: 4, bottom: 2 },
-  { x: -4, z: -4, bottom: 4 },
-], "三層使用明確有限的水平錯位，並保持各自 Y 底標高");
-assert.ok(NESTED_CITY.frames.every((frame) => Math.abs(frame.rotationY) < 1e-12), "三層框架必須共用 X/Z 軸，不得彼此旋轉");
-for (let index = 1; index < NESTED_CITY.frames.length; index++) {
-  const parent = NESTED_CITY.frames[index - 1];
-  const child = NESTED_CITY.frames[index];
-  const scaleX = child.width / parent.width;
-  const scaleZ = child.depth! / parent.depth!;
-  const scaleY = child.height / parent.height;
-  assert.ok(scaleX > 0 && scaleX < 1 && Math.abs(scaleX - scaleZ) < 1e-12 && Math.abs(scaleZ - scaleY) < 1e-12,
-    `${child.id} 必須是前一層等比例縮小的長方形，不得改變長寬比`);
-}
-assert.deepEqual(NESTED_CITY.featureFrames.map(({ x, z, width, depth, height, bottom }) => ({ x, z, width, depth, height, bottom })), [
-  { x: 4, z: 8, width: 26, depth: 16, height: 4, bottom: 4 },
-  { x: 10, z: 10, width: 18, depth: 4, height: 3, bottom: 8 },
-  { x: 4, z: 12, width: 30, depth: 3, height: 8, bottom: 0 },
-]);
-assert.equal(NESTED_CITY.frames.length, 3, "主構圖由外框、中框與內核三重同向縮尺結構組成");
-assert.equal(NESTED_CITY.stairs.length, 3);
-assert.ok(NESTED_CITY.stairs.every((stair, index) =>
-  stair.start.y === NESTED_CITY.levels[index] && stair.end.y === NESTED_CITY.levels[index + 1] &&
-  (stair.end.y - stair.start.y) / stair.steps <= 0.2 &&
-  Math.hypot(stair.end.x - stair.start.x, stair.end.z - stair.start.z) / stair.steps >= 0.28
-), "三段開放踏階要連接四個高度，踏高與踏深均需可走");
-
-// Same-height deck slabs must meet at walkable edges, not overlap (z-fighting) or leave holes.
-const PLATFORM_EPSILON = 1e-6;
-const MIN_PLATFORM_CONNECTION_WIDTH = 0.8;
-const platformBounds = (platform: (typeof NESTED_CITY.platforms)[number]) => ({
-  minX: platform.x - platform.width / 2,
-  maxX: platform.x + platform.width / 2,
-  minZ: platform.z - platform.depth / 2,
-  maxZ: platform.z + platform.depth / 2,
-});
-const platformsShareWalkableEdge = (
-  a: (typeof NESTED_CITY.platforms)[number],
-  b: (typeof NESTED_CITY.platforms)[number]
-) => {
-  const aBounds = platformBounds(a);
-  const bBounds = platformBounds(b);
-  const overlapX = Math.min(aBounds.maxX, bBounds.maxX) - Math.max(aBounds.minX, bBounds.minX);
-  const overlapZ = Math.min(aBounds.maxZ, bBounds.maxZ) - Math.max(aBounds.minZ, bBounds.minZ);
-  const shareXEdge = Math.abs(aBounds.maxX - bBounds.minX) <= PLATFORM_EPSILON ||
-    Math.abs(bBounds.maxX - aBounds.minX) <= PLATFORM_EPSILON;
-  const shareZEdge = Math.abs(aBounds.maxZ - bBounds.minZ) <= PLATFORM_EPSILON ||
-    Math.abs(bBounds.maxZ - aBounds.minZ) <= PLATFORM_EPSILON;
-  return (shareXEdge && overlapZ >= MIN_PLATFORM_CONNECTION_WIDTH) ||
-    (shareZEdge && overlapX >= MIN_PLATFORM_CONNECTION_WIDTH);
-};
-const trapezoidPlanArea = (NESTED_CITY.trapezoid.shortBase + NESTED_CITY.trapezoid.longBase) * NESTED_CITY.trapezoid.depth / 2;
-const testPolygonArea = (points: readonly { x: number; z: number }[]) => Math.abs(points.reduce((sum, point, index) => {
-  const next = points[(index + 1) % points.length];
-  return sum + point.x * next.z - next.x * point.z;
-}, 0) / 2);
-for (const level of [1, 2, 3]) {
-  const floorPlatforms = NESTED_CITY.platforms.filter((platform) => platform.level === level);
-  assert.ok(floorPlatforms.length > 0, `第 ${level} 層必須有可走平台`);
-  const clippedFootprints = floorPlatforms.map(cityPlatformFootprint);
-  assert.ok(clippedFootprints.every((footprint) => footprint.length >= 3 &&
-    footprint.every((point) => isCityPointInsideTrapezoid(point))),
-  `第 ${level + 1}F 每片實際樓板都必須裁切在 ABCD 外牆內`);
-  const floorCoverage = clippedFootprints.reduce((area, footprint) => area + testPolygonArea(footprint), 0) / trapezoidPlanArea;
-  assert.ok(floorCoverage <= 0.5, `第 ${level + 1}F 樓板需至少保留一半梯形面積作為挑空／開放（目前 ${(floorCoverage * 100).toFixed(1)}%）`);
-  for (let i = 0; i < floorPlatforms.length; i++) {
-    for (let j = i + 1; j < floorPlatforms.length; j++) {
-      const a = platformBounds(floorPlatforms[i]);
-      const b = platformBounds(floorPlatforms[j]);
-      const overlapX = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
-      const overlapZ = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
-      assert.ok(!(overlapX > PLATFORM_EPSILON && overlapZ > PLATFORM_EPSILON),
-        `${floorPlatforms[i].id} 與 ${floorPlatforms[j].id} 同高重疊，會形成重複樓板表面`);
-    }
-  }
-  const connected = new Set([0]);
-  const queue = [0];
-  while (queue.length) {
-    const current = queue.shift()!;
-    for (let next = 0; next < floorPlatforms.length; next++) {
-      if (!connected.has(next) && platformsShareWalkableEdge(floorPlatforms[current], floorPlatforms[next])) {
-        connected.add(next);
-        queue.push(next);
-      }
-    }
-  }
-  assert.equal(connected.size, floorPlatforms.length, `第 ${level} 層所有平台需以至少 ${MIN_PLATFORM_CONNECTION_WIDTH} m 寬的邊相連`);
-}
-
-const BRIDGE_POST_WIDTH = 0.085;
-for (const rail of NESTED_CITY.bridgeRails) {
-  const railBounds = {
-    minX: rail.x - rail.width / 2,
-    maxX: rail.x + rail.width / 2,
-    minZ: rail.z - rail.depth / 2,
-    maxZ: rail.z + rail.depth / 2,
-  };
-  const support = NESTED_CITY.platforms.find((platform) => {
-    if (platform.level !== rail.level) return false;
-    const bounds = platformBounds(platform);
-    return railBounds.minX >= bounds.minX - PLATFORM_EPSILON &&
-      railBounds.maxX <= bounds.maxX + PLATFORM_EPSILON &&
-      railBounds.minZ >= bounds.minZ - PLATFORM_EPSILON &&
-      railBounds.maxZ <= bounds.maxZ + PLATFORM_EPSILON;
-  });
-  assert.ok(support, `${rail.id} 的欄杆底座必須完整落在同層橋板上`);
-  const postsAlongX = rail.width >= rail.depth;
-  const postInset = BRIDGE_POST_WIDTH / 2;
-  const postStart = postsAlongX ? rail.x - rail.width / 2 + postInset : rail.z - rail.depth / 2 + postInset;
-  const postEnd = postsAlongX ? rail.x + rail.width / 2 - postInset : rail.z + rail.depth / 2 - postInset;
-  const supportBounds = platformBounds(support!);
-  const postMin = Math.min(postStart, postEnd) - postInset;
-  const postMax = Math.max(postStart, postEnd) + postInset;
-  const supportMin = postsAlongX ? supportBounds.minX : supportBounds.minZ;
-  const supportMax = postsAlongX ? supportBounds.maxX : supportBounds.maxZ;
-  assert.ok(postMin >= supportMin - PLATFORM_EPSILON && postMax <= supportMax + PLATFORM_EPSILON,
-    `${rail.id} 兩端支柱不得懸在橋板外`);
-}
-
-const platformRails = nestedCityPlatformRails();
-assert.ok(platformRails.length >= 20, "環廊外露邊需有連續護欄，不只橋道有欄杆");
-assert.ok(COLLIDERS.some((collider) => collider.kind === "railing"), "護欄應納入角色碰撞資料");
-for (const rail of platformRails) {
-  const support = NESTED_CITY.platforms.find((platform) => platform.id === rail.platformId)!;
-  const footprint = cityPlatformFootprint(support);
-  const midpoint = { x: (rail.from.x + rail.to.x) / 2, z: (rail.from.z + rail.to.z) / 2 };
-  const insideOffset = {
-    x: midpoint.x + rail.inward.x * 0.01,
-    z: midpoint.z + rail.inward.z * 0.01,
-  };
-  assert.ok(isCityPointInsidePolygon(rail.from, footprint) && isCityPointInsidePolygon(rail.to, footprint) &&
-    isCityPointInsidePolygon(insideOffset, footprint), `${rail.id} must sit on an exposed clipped platform edge`);
-  assert.ok(isCityPointInsideTrapezoid(rail.from) && isCityPointInsideTrapezoid(rail.to),
-    `${rail.id} railing endpoints must stay inside ABCD`);
-  assert.ok(Math.abs(Math.hypot(rail.inward.x, rail.inward.z) - 1) < 1e-8,
-    `${rail.id} needs a normalized inward normal for collision/rendering`);
-}
-const pointSegmentDistance = (point: { x: number; z: number }, from: { x: number; z: number }, to: { x: number; z: number }) => {
-  const dx = to.x - from.x;
-  const dz = to.z - from.z;
-  const lengthSq = dx * dx + dz * dz;
-  const t = lengthSq > 1e-12 ? Math.max(0, Math.min(1, ((point.x - from.x) * dx + (point.z - from.z) * dz) / lengthSq)) : 0;
-  return Math.hypot(point.x - (from.x + dx * t), point.z - (from.z + dz * t));
-};
-const stairLanding = NESTED_CITY.stairs[2].end;
-assert.ok(!platformRails.some((rail) => rail.platformId === "level-3-west-observation-gallery" &&
-  pointSegmentDistance(stairLanding, rail.from, rail.to) < NESTED_CITY.stairs[2].width / 2 - PLATFORM_EPSILON),
-"the clipped west observation gallery must retain an open stair landing mouth");
-const bridgeRailBlocksX = (rail: (typeof NESTED_CITY.bridgeRails)[number], x: number, halfWidth: number) =>
-  rail.x - rail.width / 2 < x + halfWidth && rail.x + rail.width / 2 > x - halfWidth;
-const southNearRails = NESTED_CITY.bridgeRails.filter((rail) => rail.id.startsWith("level-1-south-connector-rail-near"));
-for (const stair of [NESTED_CITY.stairs[0], NESTED_CITY.stairs[1]]) {
-  assert.ok(!southNearRails.some((rail) => bridgeRailBlocksX(rail, stair.end.y === 4 ? stair.end.x : stair.start.x, stair.width / 2)),
-    `${stair.id} 必須穿過南側 2F 連接橋的護欄開口`);
-}
-const upperBridgeFarRail = NESTED_CITY.bridgeRails.find((rail) => rail.id === "level-2-crossing-rail-far-west")!;
-assert.ok(!bridgeRailBlocksX(upperBridgeFarRail, NESTED_CITY.stairs[1].end.x, NESTED_CITY.stairs[1].width / 2),
-  "2F→3F 樓梯落點需對準 3F 跨橋護欄缺口");
-const footprintCoveredByFloor = (
-  footprint: { minX: number; maxX: number; minZ: number; maxZ: number },
-  floorPlatforms: readonly (typeof NESTED_CITY.platforms)[number][]
-) => {
-  const corners = [
-    { x: footprint.minX, z: footprint.minZ },
-    { x: footprint.maxX, z: footprint.minZ },
-    { x: footprint.maxX, z: footprint.maxZ },
-    { x: footprint.minX, z: footprint.maxZ },
-  ];
-  return floorPlatforms.some((platform) => {
-    const floorFootprint = cityPlatformFootprint(platform);
-    return corners.every((corner) => isCityPointInsidePolygon(corner, floorFootprint, PLATFORM_EPSILON));
-  });
-};
-for (const column of NESTED_CITY.columns) {
-  const footprint = {
-    minX: column.x - column.width / 2,
-    maxX: column.x + column.width / 2,
-    minZ: column.z - column.depth / 2,
-    maxZ: column.z + column.depth / 2,
-  };
-  for (const level of [1, 2, 3]) {
-    const floorY = NESTED_CITY.levels[level];
-    if (column.bottom < floorY && column.top > floorY) {
-      const floorPlatforms = NESTED_CITY.platforms.filter((platform) => platform.level === level);
-      assert.ok(footprintCoveredByFloor(footprint, floorPlatforms),
-        `${column.id} 在第 ${level} 層的柱腳投影需完整落在樓板聯集上`);
-    }
+  assert.equal(Object.hasOwn(corridor, "frames"), false, "legacy cross-floor T1/T2 structures are removed");
+  assert.ok(corridor.segments.every((segment) => segment.width === corridor.width),
+    "all four wall-following corridor runs must have the same 2 m width");
+  assert.deepEqual(corridor.segments.map(({ width }) => width), [2, 2, 2, 2]);
+  for (let index = 0; index < corridor.segments.length - 1; index++) {
+    assert.deepEqual(corridor.segments[index].to, corridor.segments[index + 1].from,
+      `${corridor.segments[index].id} must join ${corridor.segments[index + 1].id} without a gap`);
   }
 }
-console.log("  ✓ 平台拓撲連通／無同高重疊，橋欄支柱與承重柱均落在樓板支承範圍內");
+
+assert.deepEqual(Object.keys(NESTED_CITY).sort(), ["corridor", "floorHeight", "gallery", "levels", "trapezoid"],
+  "the shared building model must contain the trapezoid, corridors, upper-gallery footprints, and floor levels");
+assert.deepEqual(Object.keys(NESTED_CITY.gallery).sort(), ["floors", "footprints", "width"],
+  "upper-library floors must share one gallery width and explicit footprints");
+assert.equal(NESTED_CITY.gallery.width, 4.6);
+assert.deepEqual(NESTED_CITY.gallery.floors, [4, 8, 12]);
+assert.equal(NESTED_CITY.gallery.footprints.length, 3,
+  "upper galleries include the connected route plus both full-height side wings");
+assert.deepEqual(Object.keys(NESTED_CITY.corridor).sort(), ["floors", "footprint", "segments", "width"],
+  "no legacy T1/T2 structure data may remain in the corridor model");
+console.log("  ✓ 四層等寬連通走廊、全高書牆、側廊平台、中庭留白與閱讀家具");
 assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
 assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
 
@@ -386,7 +206,7 @@ const categoryLabelSize = canvasSizeForPlane(CATEGORY_LABEL_PLANE.width, CATEGOR
 assert.ok(Math.abs(categoryLabelSize.aspect - CATEGORY_LABEL_PLANE.width / CATEGORY_LABEL_PLANE.height) < 1 / categoryLabelSize.height);
 const deskPreviewSize = canvasSizeForPlane(DESK_PREVIEW_PLANE.width, DESK_PREVIEW_PLANE.height, 512);
 assert.ok(Math.abs(deskPreviewSize.aspect - DESK_PREVIEW_PLANE.width / DESK_PREVIEW_PLANE.height) < 1 / deskPreviewSize.height);
-console.log("  ✓ 48 × 48 × 16 m 參考建築／稀疏樓板與既有書本／畫布標籤比例");
+console.log("  ✓ 48 × 48 × 16 m 梯形建築與既有書本／畫布標籤比例");
 
 // v8.4 家具 AABB：櫃體碰撞沿用 RoomGeometry 的同一 footprint，桌緣採玩家半徑擴張。
 assert.deepEqual(
@@ -566,176 +386,55 @@ assert.ok(shelfPlankY(4, 5) > SHELF.ledge.top + 0.1);
 // 書脊面在牆與室內之間，且朝 +X
 assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
 
-// ---- 嵌套之城白模：梯形走廊與 T1/T2；保留三重長方框架、中央挑空、樓梯與淨高 ----
+// ---- 多層梯形圖書館：保留 2 m 連通動線，並加入留白的樓層廊台與兩側書牆 ----
 {
-  const [outerFrame, middleFrame, coreFrame] = NESTED_CITY.frames;
-  assert.equal(outerFrame.id, "outer-timber-frame");
-  assert.equal(outerFrame.plane, "box", "外部巨構應為連續三維框架，而不是四片互不相接的門架");
-  assert.equal(middleFrame.id, "middle-stone-frame");
-  assert.equal(middleFrame.plane, "box", "中框也必須是實際梁柱框架，不能只存水平規格");
-  assert.equal(coreFrame.id, "inner-core-frame");
-  assert.equal(coreFrame.plane, "box");
-  assert.deepEqual(NESTED_CITY.frames.map(({ width, depth, height, x, z, bottom }) => ({ width, depth, height, x, z, bottom })), [
-    { width: 30, depth: 16, height: 16, x: 0, z: 0, bottom: 0 },
-    { width: 22.5, depth: 12, height: 12, x: 4, z: 4, bottom: 2 },
-    { width: 15, depth: 8, height: 8, x: -4, z: -4, bottom: 4 },
-  ]);
-  assert.ok(NESTED_CITY.frames.every((frame) => Math.abs(frame.rotationY) < 1e-12),
-    "三層長方形框架保留指定的中心錯位但一律不得旋轉");
-  assert.deepEqual(NESTED_CITY.frames.map(({ bottom, height }) => bottom + height / 2), [8, 8, 8],
-    "三層等比例縮尺必須以同一個 Y=8 中心對齊");
-  const localPlanCorners = (frame: typeof outerFrame, x = 0, z = 0, width = frame.width, depth = frame.depth!) => {
-    const cos = Math.cos(frame.rotationY);
-    const sin = Math.sin(frame.rotationY);
-    return [[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([sx, sz]) => ({
-      x: frame.x + x * cos + z * sin + sx * width / 2 * cos + sz * depth / 2 * sin,
-      z: frame.z - x * sin + z * cos - sx * width / 2 * sin + sz * depth / 2 * cos,
-    }));
-  };
-  const pointInFramePlan = (frame: typeof outerFrame, x: number, z: number, inset = 0) => {
-    const dx = x - frame.x;
-    const dz = z - frame.z;
-    const cos = Math.cos(frame.rotationY);
-    const sin = Math.sin(frame.rotationY);
-    const localX = dx * cos - dz * sin;
-    const localZ = dx * sin + dz * cos;
-    return Math.abs(localX) <= frame.width / 2 - inset + 1e-9 &&
-      Math.abs(localZ) <= frame.depth! / 2 - inset + 1e-9;
-  };
-  const trapezoidBoundary = [NESTED_CITY.trapezoid.points.A, NESTED_CITY.trapezoid.points.B,
-    NESTED_CITY.trapezoid.points.C, NESTED_CITY.trapezoid.points.D];
-  for (const corner of localPlanCorners(middleFrame)) {
-    assert.ok(isCityPointInsideTrapezoid(corner),
-      "調整後的偏移中框與全部角點須位於真正的梯形外牆內");
-  }
-  assert.equal(middleFrame.z + middleFrame.depth! / 2 - (outerFrame.z + outerFrame.depth! / 2), 2,
-    "S 框仍在 +Z 方向超出 W 框 2 m，但不得超出梯形外牆");
-  for (const corner of localPlanCorners(coreFrame)) {
-    assert.ok(isCityPointInsideTrapezoid(corner) &&
-      pointInFramePlan(outerFrame, corner.x, corner.z),
-    "C 框需位於整棟梯形外牆及 W 框範圍內；不假設它完全置中於 S 框");
-  }
-  assert.equal(middleFrame.bottom + middleFrame.height, 14);
-  assert.equal(coreFrame.bottom + coreFrame.height, 12);
-  assert.ok(coreFrame.bottom >= middleFrame.bottom &&
-    coreFrame.bottom + coreFrame.height <= middleFrame.bottom + middleFrame.height,
-  "內核需落在中框高度範圍內，對應 2F–4F 挑空");
-  for (const frame of NESTED_CITY.frames) {
-    const members = cityFrameMembers(frame);
-    const memberBounds = {
-      minX: Math.min(...members.map((member) => member.x - member.width / 2)),
-      maxX: Math.max(...members.map((member) => member.x + member.width / 2)),
-      minZ: Math.min(...members.map((member) => member.z - member.depth / 2)),
-      maxZ: Math.max(...members.map((member) => member.z + member.depth / 2)),
-      minY: Math.min(...members.map((member) => member.bottom)),
-      maxY: Math.max(...members.map((member) => member.top)),
+  const { corridor, gallery } = NESTED_CITY;
+  assert.deepEqual(corridor.floors, [0, 4, 8, 12]);
+  assert.equal(corridor.width, 2);
+  assert.equal(NESTED_CITY.floorHeight, 4);
+  assert.deepEqual(corridor.segments.map(({ id }) => id), ["CE", "EF", "FA", "AB"]);
+  assert.ok(corridor.floors.every((floor) => NESTED_CITY.levels.includes(floor as (typeof NESTED_CITY.levels)[number])));
+  assert.ok(corridor.segments.every(({ width }) => width === corridor.width));
+
+  for (const segment of corridor.segments) {
+    const midpoint = {
+      x: (segment.from.x + segment.to.x) / 2,
+      z: (segment.from.z + segment.to.z) / 2,
     };
-    assert.deepEqual(memberBounds, {
-      minX: -frame.width / 2,
-      maxX: frame.width / 2,
-      minZ: -frame.depth! / 2,
-      maxZ: frame.depth! / 2,
-      minY: frame.bottom,
-      maxY: frame.bottom + frame.height,
-    }, `${frame.id} 實際梁柱網格外包必須等於尺寸表，不可只改規格資料`);
-    assert.equal(frame.thickness, NESTED_CITY.corridor.width,
-      `${frame.id} 平面構件寬度須沿用 2 m 走廊寬，外包尺寸不變`);
-    assert.ok(Math.abs(frame.beamHeight / frame.height - 0.1) < 1e-12,
-      `${frame.id} 未標定的垂直梁高只作一致呈現假設，不可冒稱圖面量值`);
-    const posts = members.filter((member) => member.bottom === frame.bottom &&
-      member.top === frame.bottom + frame.height &&
-      Math.abs(member.width - frame.thickness) < 1e-9 &&
-      Math.abs(member.depth - frame.thickness) < 1e-9);
-    assert.equal(posts.length, 4, `${frame.id} 必須以四根角柱形成連續門式框架，側邊中點保持通透`);
-    for (const member of members) {
-      assert.ok(member.bottom >= -1e-9 && member.top <= ROOM.height + 1e-9, `${frame.id} 構件須位於 0–16 m 剖面內`);
-      for (const corner of localPlanCorners(frame, member.x, member.z, member.width, member.depth)) {
-        assert.ok(isCityPointInsidePolygon(corner, trapezoidBoundary) && isCityPointInsideTrapezoid(corner, 0.5 - 1e-6),
-          `${frame.id} 的每根梁柱須保留至少 0.5 m 淨距，完全落在整棟梯形外牆內`);
-      }
+    assert.ok(isCityPointInsidePolygon(midpoint, corridor.footprint), `${segment.id} must be part of the shared corridor floor`);
+    for (const floor of corridor.floors) {
+      assert.equal(groundHeightAt(midpoint.x, midpoint.z, floor), floor,
+        `${segment.id} must be walkable at ${floor} m`);
     }
   }
-  assert.deepEqual(coreFrame.openings ?? [], [], "位於 C 框 +Z 外側的上層樓梯不應再切開內核梁柱");
-  const upperStair = NESTED_CITY.stairs[2];
-  assert.ok(upperStair.start.z - upperStair.width / 2 > coreFrame.z + coreFrame.depth! / 2,
-    "3F→4F 踏階須完整走在偏移內核 +Z 邊界之外，保留 30 cm 構件淨距");
-  const frameMemberOverlapCount = (frameA: typeof outerFrame, frameB: typeof outerFrame) => {
-    const membersA = cityFrameMembers(frameA);
-    const membersB = cityFrameMembers(frameB);
-    let count = 0;
-    for (const a of membersA) {
-      const aMinX = frameA.x + a.x - a.width / 2;
-      const aMaxX = frameA.x + a.x + a.width / 2;
-      const aMinZ = frameA.z + a.z - a.depth / 2;
-      const aMaxZ = frameA.z + a.z + a.depth / 2;
-      for (const b of membersB) {
-        const overlapX = Math.min(aMaxX, frameB.x + b.x + b.width / 2) - Math.max(aMinX, frameB.x + b.x - b.width / 2);
-        const overlapZ = Math.min(aMaxZ, frameB.z + b.z + b.depth / 2) - Math.max(aMinZ, frameB.z + b.z - b.depth / 2);
-        const overlapY = Math.min(a.top, b.top) - Math.max(a.bottom, b.bottom);
-        if (overlapX > 1e-6 && overlapZ > 1e-6 && overlapY > 1e-6) count++;
-      }
-    }
-    return count;
+  const middleOfEF = {
+    x: (corridor.segments[1].from.x + corridor.segments[1].to.x) / 2,
+    z: (corridor.segments[1].from.z + corridor.segments[1].to.z) / 2,
   };
-  assert.deepEqual([
-    frameMemberOverlapCount(outerFrame, middleFrame),
-    frameMemberOverlapCount(outerFrame, coreFrame),
-    frameMemberOverlapCount(middleFrame, coreFrame),
-  ], [19, 12, 11], "指定錯位且採 2 m 構件寬的實際梁柱交疊數需保持可追蹤，對應圖中的交錯節點");
-  const level2Stair = NESTED_CITY.stairs[1];
-  const upperFlight = NESTED_CITY.stairs[2];
-  const westStairOpening = middleFrame.openings?.find(({ edge }) => edge === "west");
-  assert.ok(westStairOpening, "S 框西側 Y=12 梁需為 3F→4F 踏階留出穿越口");
-  assert.ok(westStairOpening!.start <= upperFlight.start.z - middleFrame.z - upperFlight.width / 2 - PLAYER_RADIUS &&
-    westStairOpening!.end >= upperFlight.start.z - middleFrame.z + upperFlight.width / 2 + PLAYER_RADIUS,
-  "S 框西側開口須涵蓋樓梯淨寬與玩家碰撞半徑");
-  const westBandCenterY = middleFrame.bottom + 10;
-  const westBandHalfHeight = middleFrame.beamHeight * 0.58 / 2;
-  assert.ok(westStairOpening!.bottom <= westBandCenterY - westBandHalfHeight &&
-    westStairOpening!.top >= westBandCenterY + westBandHalfHeight,
-  "S 框西側開口須完整移除 Y=12 梁帶的碰撞高度");
-  for (const frame of [outerFrame, middleFrame]) {
-    const opening = frame.openings?.find(({ edge }) => edge === "south");
-    assert.ok(opening, `${frame.id} 需為 2F→3F 樓梯保留南側橫梁淨空`);
-    assert.equal((opening.start + opening.end) / 2, level2Stair.start.x - frame.x,
-      `${frame.id} 的局部開口必須轉換到指定中心後，與世界 X=${level2Stair.start.x} 樓梯對齊`);
-    const bandHeight = frame.beamHeight * 0.58;
-    const bandBottom = 8 - bandHeight / 2;
-    const southEdgeZ = frame.depth! / 2 - frame.thickness / 2;
-    const bandSegments = cityFrameMembers(frame).filter((member) =>
-      Math.abs(member.z - southEdgeZ) < 1e-9 &&
-      Math.abs(member.depth - frame.thickness) < 1e-9 &&
-      Math.abs(member.bottom - bandBottom) < 1e-9 &&
-      Math.abs(member.top - (bandBottom + bandHeight)) < 1e-9
-    );
-    assert.equal(bandSegments.length, 2, `${frame.id} 的 Y=8 南側環梁需在樓梯通道分成兩段`);
-    for (const segment of bandSegments) {
-      const start = segment.x - segment.width / 2;
-      const end = segment.x + segment.width / 2;
-      assert.ok(end <= opening.start + 1e-6 || start >= opening.end - 1e-6,
-        `${frame.id} 的南側環梁不得侵入樓梯淨空`);
-    }
-    for (const y of [4, 12]) {
-      const otherBandBottom = y - bandHeight / 2;
-      const intactBandSegments = cityFrameMembers(frame).filter((member) =>
-        Math.abs(member.z - southEdgeZ) < 1e-9 &&
-        Math.abs(member.depth - frame.thickness) < 1e-9 &&
-        Math.abs(member.bottom - otherBandBottom) < 1e-9 &&
-        Math.abs(member.top - (otherBandBottom + bandHeight)) < 1e-9
-      );
-      assert.equal(intactBandSegments.length, 1, `${frame.id} 的 Y=${y} 南側環梁不得因樓梯開口被切斷`);
-    }
-  }
-  assert.ok(cityFrameMembers(outerFrame).length >= 20 && cityFrameMembers(middleFrame).length >= 20 &&
-    cityFrameMembers(coreFrame).length >= 12 && NESTED_CITY.featureFrames.every((frame) => cityFrameMembers(frame).length >= 8),
-  "三重主框架與平台／橋廊／書庫模組均需由真實梁柱構成");
-  for (const frame of NESTED_CITY.featureFrames) {
-    for (const member of cityFrameMembers(frame)) {
-      for (const corner of localPlanCorners(frame, member.x, member.z, member.width, member.depth)) {
-        assert.ok(isCityPointInsideTrapezoid(corner), `${frame.id} 任何附加梁柱都不可越過梯形外牆`);
-      }
-    }
-  }
+  assert.ok(!isCityPointInsidePolygon({ x: 0, z: 0 }, corridor.footprint), "most of the trapezoid stays open");
+  assert.equal(groundHeightAt(middleOfEF.x, middleOfEF.z, 0), 0,
+    "the ground-level corridor remains at 0 m without snapping upward");
+  assert.equal(groundHeightAt(0, 0, 8), 0,
+    "an open area outside the upper corridors must not create an invisible floor");
+
+  const nestedCitySource = fs.readFileSync(path.join(process.cwd(), "src/components/NestedCityGeometry.tsx"), "utf8");
+  assert.match(nestedCitySource, /trapezoid-exterior-ABCD-open-CD/);
+  assert.match(nestedCitySource, /NESTED_CITY\.trapezoid\.wallEdges/);
+  assert.match(nestedCitySource, /NESTED_CITY\.corridor\.floors/);
+  assert.match(nestedCitySource, /NESTED_CITY\.corridor\.footprint/);
+  assert.match(nestedCitySource, /NESTED_CITY\.gallery\.floors/);
+  assert.match(nestedCitySource, /NESTED_CITY\.gallery\.footprints/);
+  assert.match(nestedCitySource, /addSideBookshelves/);
+  assert.match(nestedCitySource, /addGalleryGuardrails/);
+  assert.match(nestedCitySource, /addPortalFrame/);
+  assert.match(nestedCitySource, /addReadingTable/);
+  assert.match(nestedCitySource, /addPlanter/);
+  assert.doesNotMatch(nestedCitySource, /NESTED_CITY\.(?:legacyFrames|featureFrames|stairs|obsoleteColumns)/,
+    "the renderer uses the current gallery data instead of the removed legacy T1/T2 structures");
+  const room3dSource = fs.readFileSync(path.join(process.cwd(), "src/lib/room3d.ts"), "utf8");
+  assert.doesNotMatch(room3dSource, /CityFrame|CityPlatform|CityStair|bridgeRails|featureFrames/,
+    "legacy T1/T2 geometry data must be deleted rather than kept dormant");
+
   assert.deepEqual(Object.keys(NESTED_CITY_CAMERA_VIEWS).sort(), ["main", "side", "top"]);
   const modelRadius = Math.hypot(ROOM.width / 2, ROOM.height / 2, ROOM.depth / 2);
   for (const aspect of [0.4, 0.56, 1, 16 / 9]) {
@@ -748,117 +447,17 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
       const requiredDistance = modelRadius / Math.sin(Math.min(verticalHalfFov, horizontalHalfFov)) * 1.08;
       assert.ok(Number.isFinite(nestedCityInspectionDistance(view, aspect)) &&
         nestedCityInspectionDistance(view, aspect) >= requiredDistance - 1e-9,
-      `${view} 驗收視角在 aspect=${aspect} 時需完整涵蓋 48 × 48 × 16 m 外包絡`);
+      `${view} inspection view at aspect=${aspect} must fit the 48 × 48 × 16 m envelope`);
     }
-  }
-
-  const onPlatform = (level: number, x: number, z: number) => NESTED_CITY.platforms.some((platform) =>
-    platform.level === level &&
-    Math.abs(x - platform.x) <= platform.width / 2 &&
-    Math.abs(z - platform.z) <= platform.depth / 2
-  );
-  for (const level of [1, 2, 3]) {
-    let openSamples = 0;
-    const sampleCount = 10;
-    const atrium = NESTED_CITY.atrium;
-    for (let xi = 0; xi < sampleCount; xi++) {
-      const x = atrium.x - atrium.width / 2 + (xi + 0.5) * atrium.width / sampleCount;
-      for (let zi = 0; zi < sampleCount; zi++) {
-        const z = atrium.z - atrium.depth / 2 + (zi + 0.5) * atrium.depth / sampleCount;
-        if (!onPlatform(level, x, z)) openSamples++;
-      }
-    }
-    assert.ok(openSamples >= 80, `第 ${level} 層的 20 × 20 m 中央挑空需至少保留 80% 視線通透（目前 ${openSamples}/100）`);
-  }
-  assert.ok(![1, 2, 3].some((level) => onPlatform(level, NESTED_CITY.atrium.x, NESTED_CITY.atrium.z)), "中央挑空中心不可被樓板填滿");
-  assert.equal(groundHeightAt(NESTED_CITY.atrium.x, NESTED_CITY.atrium.z, 0), 0, "地面仍可穿越挑空底部");
-  assert.equal(groundHeightAt(-17, 0, 4), 4, "2F 西側環廊可行走");
-  assert.equal(groundHeightAt(-17, -2, 8), 8, "同一投影位置依目前高度選取 3F 西側環廊");
-  assert.equal(groundHeightAt(-17, 0, 0), 0, "不能從地面瞬移到重疊上層");
-
-  for (const [index, stair] of NESTED_CITY.stairs.entries()) {
-    const startFloor: number = NESTED_CITY.levels[index];
-    const endFloor: number = NESTED_CITY.levels[index + 1];
-    assert.equal(stair.start.y, startFloor, `${stair.id} 起點高度`);
-    assert.equal(stair.end.y, endFloor, `${stair.id} 終點高度`);
-    for (const endpoint of [stair.start, stair.end]) {
-      if (endpoint.y === 0) continue;
-      const levelIndex = NESTED_CITY.levels.indexOf(endpoint.y as (typeof NESTED_CITY.levels)[number]);
-      assert.ok(NESTED_CITY.platforms.some((platform) => {
-        const bounds = platformBounds(platform);
-        return platform.level === levelIndex && endpoint.x >= bounds.minX - PLATFORM_EPSILON &&
-          endpoint.x <= bounds.maxX + PLATFORM_EPSILON && endpoint.z >= bounds.minZ - PLATFORM_EPSILON &&
-          endpoint.z <= bounds.maxZ + PLATFORM_EPSILON;
-      }), `${stair.id} 的落點必須接上對應樓層平台`);
-    }
-
-    const endLevel = index + 1;
-    const ceilingBottom = endFloor - 0.3;
-    const samples = stair.steps * 4;
-    const dx = stair.end.x - stair.start.x;
-    const dz = stair.end.z - stair.start.z;
-    const horizontalLength = Math.hypot(dx, dz);
-    const direction = { x: dx / horizontalLength, z: dz / horizontalLength };
-    const transverse = { x: direction.z, z: -direction.x };
-    const stepRun = horizontalLength / stair.steps;
-    const treadOverlapsPlatform = (center: { x: number; z: number }, platform: (typeof NESTED_CITY.platforms)[number]) => {
-      const bounds = platformBounds(platform);
-      const delta = { x: center.x - platform.x, z: center.z - platform.z };
-      const axes = [
-        { x: 1, z: 0 }, { x: 0, z: 1 }, direction, transverse,
-      ];
-      return axes.every((axis) => {
-        const treadRadius = stair.width / 2 * Math.abs(transverse.x * axis.x + transverse.z * axis.z) +
-          stepRun / 2 * Math.abs(direction.x * axis.x + direction.z * axis.z);
-        const platformRadius = platform.width / 2 * Math.abs(axis.x) + platform.depth / 2 * Math.abs(axis.z);
-        const distance = Math.abs(delta.x * axis.x + delta.z * axis.z);
-        return distance < treadRadius + platformRadius - PLATFORM_EPSILON;
-      });
-    };
-    for (let step = 0; step < stair.steps; step++) {
-      const progress = (step + 0.5) / stair.steps;
-      const center = {
-        x: stair.start.x + dx * progress,
-        z: stair.start.z + dz * progress,
-      };
-      for (const platform of NESTED_CITY.platforms.filter((candidate) => candidate.level === endLevel)) {
-        assert.ok(!treadOverlapsPlatform(center, platform),
-          `${stair.id} 第 ${step + 1} 個踏板不得侵入 ${endLevel + 1}F 上層平台或樓板`);
-      }
-    }
-    for (let i = 0; i < samples; i++) {
-      const t = i / samples;
-      const x = stair.start.x + (stair.end.x - stair.start.x) * t;
-      const z = stair.start.z + (stair.end.z - stair.start.z) * t;
-      const surfaceY = cityStairHeightAt(stair, t);
-      assert.ok(Math.abs(groundHeightAt(x, z, surfaceY) - surfaceY) < 1e-6,
-        `${stair.id} 每個踏階都要是角色可讀取的實際行走面`);
-      for (const platform of NESTED_CITY.platforms.filter((candidate) => candidate.level === endLevel)) {
-        const bounds = platformBounds(platform);
-        const underUpperSlab = x > bounds.minX + PLATFORM_EPSILON && x < bounds.maxX - PLATFORM_EPSILON &&
-          z > bounds.minZ + PLATFORM_EPSILON && z < bounds.maxZ - PLATFORM_EPSILON;
-        if (underUpperSlab) {
-          assert.ok(surfaceY + 1.75 <= ceilingBottom + 1e-6,
-            `${stair.id} 不得在上層樓板下方穿越角色頭部淨高`);
-        }
-      }
-      const moved = resolveCollision(x, z, PLAYER_RADIUS, false, false, undefined, undefined, surfaceY);
-      assert.ok(Math.hypot(moved.x - x, moved.z - z) < 0.12,
-        `${stair.id} 的扶手／框架碰撞不可封住動線`);
-      assert.ok(Math.abs(groundHeightAt(moved.x, moved.z, surfaceY) - surfaceY) <= MAX_WALKABLE_STEP + 1e-6,
-        `${stair.id} 不可有不可走的高度斷差`);
-    }
-    assert.ok(Math.abs(cityStairHeightAt(stair, 1) - endFloor) < 1e-9);
   }
 
   const deskRect = DESK_FOOTPRINT[0];
   const deskCenter = { x: DESK.cx, z: (deskRect.minZ + deskRect.maxZ) / 2 };
   const lowerCollision = resolveCollision(deskCenter.x, deskCenter.z);
-  // The specified 2 m S-frame member reaches z=0; sample just inside the open atrium for this desk-only projection check.
   const upperWalkPoint = { x: 0, z: 0.5 };
   const upperClearance = resolveCollision(upperWalkPoint.x, upperWalkPoint.z, PLAYER_RADIUS, false, false, undefined, undefined, 4);
-  assert.notDeepEqual(lowerCollision, deskCenter, "地面仍要撞到桌體");
-  assert.deepEqual(upperClearance, upperWalkPoint, "上層角色不應被地面桌櫃的投影碰撞阻擋");
+  assert.notDeepEqual(lowerCollision, deskCenter, "the retained ground-floor desk remains solid");
+  assert.deepEqual(upperClearance, upperWalkPoint, "ground-floor furniture must not block upper-floor movement");
 }
 
 // ---- v8.4 clampToDesk 與 resolveAction 完整輸入表（5 命中 × 7 輸入）----
@@ -1109,4 +708,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (trapezoid footprint / connected corridors / T1-T2 projections / nested W-S-C frames / 4 levels / central void / legacy platform connectivity / stairs and collisions / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (trapezoid library / equal-width connected corridors / multi-storey side galleries and bookshelves / open atrium / reading furniture / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");

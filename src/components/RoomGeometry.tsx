@@ -315,7 +315,7 @@ function box(
  * 書房家具與資料內容幾何：
  * - 西側低層真實書牆、可互動 3D 書本、分類標籤與工作桌預覽
  * - 北側高窗玻璃幕牆、桌面／櫃體／椅子與暖色層板燈
- * - 開放地面由此元件建立；三重框架、挑空樓板與連接斜坡由 NestedCityGeometry 管理
+ * - 開放梯形地面與書房家具由此元件建立；梯形外牆與等寬走廊由 NestedCityGeometry 管理
  * 保留既有物件／卡片資料通路，卸載時完整 dispose。
  */
 export const RoomGeometry: React.FC<{
