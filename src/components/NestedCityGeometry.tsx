@@ -393,13 +393,13 @@ function addGalleryGuardrails(
   darkMaterial: THREE.Material,
   glassMaterial: THREE.Material,
 ) {
-  const innerEdgeOffset = NESTED_CITY.gallery.width - 0.22;
   const bridgeOffset = NESTED_CITY.gallery.width / 2 - 0.12;
   for (const layout of NESTED_CITY.gallery.floorLayouts) {
     const floorY = layout.level;
     const sideWall = walls.find(({ id }) => id === layout.sideWall);
-    const bridge = NESTED_CITY.corridor.segments.find(({ id }) => id === layout.bridgeId);
-    if (!sideWall || !bridge) continue;
+    const bridge = layout.bridgeSegment;
+    const innerEdgeOffset = layout.sideOffset + NESTED_CITY.gallery.width - 0.22;
+    if (!sideWall) continue;
 
     const sideEdge = {
       from: offsetPoint(sideWall.from, inwardSide(sideWall), innerEdgeOffset),
@@ -429,13 +429,13 @@ function addGallerySupportBeams(
   walls: readonly CityTrapezoidWallSegment[],
   material: THREE.Material,
 ) {
-  const sideOffset = NESTED_CITY.gallery.width - 0.34;
   const bridgeOffset = NESTED_CITY.gallery.width / 2 - 0.22;
   for (const layout of NESTED_CITY.gallery.floorLayouts) {
     const floorY = layout.level;
     const wall = walls.find(({ id }) => id === layout.sideWall);
-    const bridge = NESTED_CITY.corridor.segments.find(({ id }) => id === layout.bridgeId);
-    if (!wall || !bridge) continue;
+    const bridge = layout.bridgeSegment;
+    const sideOffset = layout.sideOffset + NESTED_CITY.gallery.width - 0.34;
+    if (!wall) continue;
 
     const sideFrom = offsetPoint(wall.from, wall.inward, sideOffset);
     const sideTo = offsetPoint(wall.to, wall.inward, sideOffset);
@@ -475,13 +475,13 @@ function addGallerySupportColumns(
   walls: readonly CityTrapezoidWallSegment[],
   material: THREE.Material,
 ) {
-  const edgeOffset = NESTED_CITY.gallery.width - 0.52;
   for (const layout of NESTED_CITY.gallery.floorLayouts) {
     const floorY = layout.level;
     const levelIndex = NESTED_CITY.levels.indexOf(floorY as (typeof NESTED_CITY.levels)[number]);
     const bottomY = NESTED_CITY.levels[levelIndex - 1] ?? 0;
     const height = floorY - bottomY;
     const wall = walls.find(({ id }) => id === layout.sideWall);
+    const edgeOffset = layout.sideOffset + NESTED_CITY.gallery.width - 0.52;
     if (!wall) continue;
 
     const side = { from: wall.from, to: wall.to };
@@ -669,12 +669,12 @@ function addGalleryFurniture(
     const side = { from: wall.from, to: wall.to };
     const yaw = segmentYaw(side);
     for (const t of [0.19, 0.39, 0.61, 0.81]) {
-      const center = offsetPoint(pointAlong(side, t), wall.inward, 2.82);
+      const center = offsetPoint(pointAlong(side, t), wall.inward, layout.sideOffset + 2.82);
       addReadingTable(group, center, layout.level, yaw, woodMaterial, metalMaterial, tableIndex++);
     }
 
     for (const t of [0.08, 0.92]) {
-      const center = offsetPoint(pointAlong(side, t), wall.inward, 3.52);
+      const center = offsetPoint(pointAlong(side, t), wall.inward, layout.sideOffset + 3.52);
       addPlanter(group, center, layout.level, woodMaterial, soilMaterial, leafMaterial, planterIndex++);
     }
   }

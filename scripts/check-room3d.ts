@@ -109,28 +109,14 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
   assert.equal(trapezoidArea, 1728);
   assert.ok(corridorArea > 0 && corridorArea < trapezoidArea * 0.2,
     "the specified connected corridor chain must leave the majority of the trapezoid open to view");
-  assert.deepEqual(corridor.floorLayouts.map(({ level, floorNumber, parity, sideWall, bridgeId }) => ({
-    level, floorNumber, parity, sideWall, bridgeId,
+  assert.deepEqual(corridor.floorLayouts.map(({ level, floorNumber, parity, sideWall, sideOffset, bridgeId }) => ({
+    level, floorNumber, parity, sideWall, sideOffset, bridgeId,
   })), [
-    { level: 0, floorNumber: 1, parity: "odd", sideWall: "AD", bridgeId: "EF" },
-    { level: 4, floorNumber: 2, parity: "even", sideWall: "BC", bridgeId: "AB" },
-    { level: 8, floorNumber: 3, parity: "odd", sideWall: "AD", bridgeId: "EF" },
-    { level: 12, floorNumber: 4, parity: "even", sideWall: "BC", bridgeId: "AB" },
-  ], "odd and even floors alternate the book-wall corridor and cross-bridge orientation");
-  const segmentParity = { CE: "even", EF: "odd", FA: "odd", AB: "even" } as const;
-  for (const segment of corridor.segments) {
-    const midpoint = {
-      x: (segment.from.x + segment.to.x) / 2,
-      z: (segment.from.z + segment.to.z) / 2,
-    };
-    const expectedParity = segmentParity[segment.id];
-    assert.ok(corridor.floorLayouts.some((layout) => layout.parity === expectedParity &&
-      layout.corridorFootprints.some((footprint) => isCityPointInsidePolygon(midpoint, footprint))),
-    `${segment.id} must appear on the expected ${expectedParity} floor plan`);
-    assert.ok(corridor.floorLayouts.filter((layout) => layout.parity !== expectedParity).every((layout) =>
-      layout.corridorFootprints.every((footprint) => !isCityPointInsidePolygon(midpoint, footprint))),
-    `${segment.id} must not be copied onto the opposite-parity corridors`);
-  }
+    { level: 0, floorNumber: 1, parity: "odd", sideWall: "AD", sideOffset: 0, bridgeId: "EF" },
+    { level: 4, floorNumber: 2, parity: "even", sideWall: "BC", sideOffset: corridor.width, bridgeId: "AB" },
+    { level: 8, floorNumber: 3, parity: "odd", sideWall: "AD", sideOffset: 0, bridgeId: "EF" },
+    { level: 12, floorNumber: 4, parity: "even", sideWall: "BC", sideOffset: corridor.width, bridgeId: "AB" },
+  ], "odd and even floors alternate sides, with even-floor corridors set one corridor-width off the wall");
   assert.deepEqual(gallery.floorLayouts.map(({ level, parity }) => ({ level, parity })), [
     { level: 4, parity: "even" }, { level: 8, parity: "odd" }, { level: 12, parity: "even" },
   ]);
@@ -149,23 +135,42 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
 
     const activeWall = trapezoid.wallEdges.find(({ id }) => id === layout.sideWall)!;
     const inactiveWall = trapezoid.wallEdges.find(({ id }) => id !== "AB" && id !== layout.sideWall)!;
-    const activePoint = {
-      x: (activeWall.from.x + activeWall.to.x) / 2 + activeWall.inward.x * gallery.width / 2,
-      z: (activeWall.from.z + activeWall.to.z) / 2 + activeWall.inward.z * gallery.width / 2,
-    };
-    const inactivePoint = {
-      x: (inactiveWall.from.x + inactiveWall.to.x) / 2 + inactiveWall.inward.x * gallery.width / 2,
-      z: (inactiveWall.from.z + inactiveWall.to.z) / 2 + inactiveWall.inward.z * gallery.width / 2,
-    };
+    const pointAtWallOffset = (wall: typeof activeWall, distance: number) => ({
+      x: (wall.from.x + wall.to.x) / 2 + wall.inward.x * distance,
+      z: (wall.from.z + wall.to.z) / 2 + wall.inward.z * distance,
+    });
+    const activePoint = pointAtWallOffset(activeWall, layout.sideOffset + gallery.width / 2);
+    const corridorCenter = pointAtWallOffset(activeWall, layout.sideOffset + corridor.width / 2);
+    const inactivePoint = pointAtWallOffset(inactiveWall, gallery.width / 2);
     assert.ok(isCityPointInsidePolygon(activePoint, layout.galleryFootprints[0]),
       `${layout.floorNumber}F gallery must follow active wall ${layout.sideWall}`);
+    assert.ok(isCityPointInsidePolygon(corridorCenter, layout.corridorFootprints[0]),
+      `${layout.floorNumber}F corridor must follow active wall ${layout.sideWall}`);
     assert.ok(!layout.galleryFootprints.some((footprint) => isCityPointInsidePolygon(inactivePoint, footprint)),
       `${layout.floorNumber}F must leave the opposite wall gallery open`);
+    if (layout.sideOffset > 0) {
+      const clearancePoint = pointAtWallOffset(activeWall, layout.sideOffset / 2);
+      const justBeforeCorridor = pointAtWallOffset(activeWall, layout.sideOffset - 0.01);
+      const justInsideCorridor = pointAtWallOffset(activeWall, layout.sideOffset + 0.01);
+      assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
+        isCityPointInsidePolygon(clearancePoint, footprint)),
+      `${layout.floorNumber}F must leave a full corridor-width open gap at the wall`);
+      assert.notEqual(groundHeightAt(clearancePoint.x, clearancePoint.z, layout.level), layout.level,
+        `${layout.floorNumber}F open gap must not be treated as walkable floor`);
+      assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
+        isCityPointInsidePolygon(justBeforeCorridor, footprint)),
+      `${layout.floorNumber}F gallery platform cannot start before its full-width wall clearance`);
+      assert.ok(isCityPointInsidePolygon(justInsideCorridor, layout.corridorFootprints[0]),
+        `${layout.floorNumber}F corridor must begin immediately after its wall clearance`);
+    }
 
-    const bridge = corridor.segments.find(({ id }) => id === layout.bridgeId)!;
+    const bridge = layout.bridgeSegment;
+    assert.equal(bridge.id, layout.bridgeId);
     const bridgeMidpoint = { x: (bridge.from.x + bridge.to.x) / 2, z: (bridge.from.z + bridge.to.z) / 2 };
     assert.ok(isCityPointInsidePolygon(bridgeMidpoint, layout.corridorFootprints[1]),
       `${layout.floorNumber}F must render its ${layout.bridgeId} crossing`);
+    assert.ok(isCityPointInsidePolygon(bridge.to, layout.corridorFootprints[0]),
+      `${layout.floorNumber}F bridge must connect to the active side corridor`);
     assert.equal(groundHeightAt(activePoint.x, activePoint.z, layout.level), layout.level,
       `${layout.floorNumber}F active side corridor must be walkable`);
   }
