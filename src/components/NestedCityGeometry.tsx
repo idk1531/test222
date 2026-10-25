@@ -188,32 +188,32 @@ function addGalleryFloors(
   corridorMaterial: THREE.Material,
   structureOnly: boolean,
 ) {
-  for (const level of NESTED_CITY.gallery.floors) {
-    NESTED_CITY.gallery.footprints.forEach((footprint, index) => {
-      // Tiny offsets at intersecting wings prevent coplanar overlap without creating a visible step.
-      const top = level + (index === 0 ? 0.003 : 0);
+  for (const layout of NESTED_CITY.gallery.floorLayouts) {
+    layout.galleryFootprints.forEach((footprint, index) => {
+      // Keep the bridge and side deck coplanar while avoiding z-fighting at their joins.
+      const top = layout.level + (index === 1 ? 0.003 : 0);
       addPlanPrism(
         group,
         footprint,
         top - SLAB_THICKNESS,
         SLAB_THICKNESS,
         galleryMaterial,
-        `library-gallery-floor:${level}m:${index}`,
+        `library-gallery-floor:${layout.floorNumber}F:${layout.parity}:${index}`,
       );
     });
   }
 
-  for (const level of NESTED_CITY.corridor.floors) {
-    const top = level === 0 && !structureOnly ? 0.014 : level + 0.014;
-    NESTED_CITY.corridor.footprints.forEach((footprint, index) => {
-      const run = index === 0 ? "CE-EF-FA-AB" : NESTED_CITY.corridor.extensions[index - 1].id;
+  for (const layout of NESTED_CITY.corridor.floorLayouts) {
+    const top = layout.level === 0 && !structureOnly ? 0.014 : layout.level + 0.014;
+    layout.corridorFootprints.forEach((footprint, index) => {
+      const run = index === 0 ? layout.sideWall : layout.bridgeId;
       addPlanPrism(
         group,
         footprint,
         top - 0.045,
         0.045,
         corridorMaterial,
-        `connected-corridor:${level}m:${run}`,
+        `connected-corridor:${layout.floorNumber}F:${layout.parity}:${run}`,
       );
     });
   }
@@ -393,31 +393,33 @@ function addGalleryGuardrails(
   darkMaterial: THREE.Material,
   glassMaterial: THREE.Material,
 ) {
-  const innerEdgeOffset = NESTED_CITY.gallery.width - 0.22;
-  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
-  const bridge = NESTED_CITY.corridor.segments.find((segment) => segment.id === "EF");
-  if (!bridge) return;
+  const bridgeOffset = NESTED_CITY.gallery.width / 2 - 0.12;
+  for (const layout of NESTED_CITY.gallery.floorLayouts) {
+    const floorY = layout.level;
+    const wall = walls.find(({ id }) => id === layout.sideWall);
+    if (!wall) continue;
 
-  const bridgeDx = bridge.to.x - bridge.from.x;
-  const bridgeDz = bridge.to.z - bridge.from.z;
-  const bridgeLength = Math.hypot(bridgeDx, bridgeDz);
-  const bridgeNormal = { x: -bridgeDz / bridgeLength, z: bridgeDx / bridgeLength };
-  for (const floorY of NESTED_CITY.gallery.floors) {
-    for (const wall of sideWalls) {
-      const edge = {
-        from: offsetPoint(wall.from, inwardSide(wall), innerEdgeOffset),
-        to: offsetPoint(wall.to, inwardSide(wall), innerEdgeOffset),
-      };
-      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial, `gallery-rail:${wall.id}:${floorY}m`);
-    }
+    const sideEdgeOffset = layout.sideClearance + NESTED_CITY.gallery.width - 0.22;
+    const sideEdge = {
+      from: offsetPoint(wall.from, wall.inward, sideEdgeOffset),
+      to: offsetPoint(wall.to, wall.inward, sideEdgeOffset),
+    };
+    addGuardrail(group, sideEdge, floorY, darkMaterial, glassMaterial,
+      `gallery-rail:${layout.parity}:${wall.id}:${floorY}m`);
 
-    for (const side of [-1, 1]) {
-      const offset = NESTED_CITY.gallery.width / 2 - 0.12;
+    const bridge = layout.bridgeSegment;
+    const dx = bridge.to.x - bridge.from.x;
+    const dz = bridge.to.z - bridge.from.z;
+    const length = Math.hypot(dx, dz);
+    const normal = { x: -dz / length, z: dx / length };
+    const sides = layout.bridgeId === "EF" ? [-1, 1] : [1];
+    for (const side of sides) {
       const edge = {
-        from: offsetPoint(bridge.from, bridgeNormal, offset * side),
-        to: offsetPoint(bridge.to, bridgeNormal, offset * side),
+        from: offsetPoint(bridge.from, normal, bridgeOffset * side),
+        to: offsetPoint(bridge.to, normal, bridgeOffset * side),
       };
-      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial, `bridge-rail:EF:${floorY}m:${side}`);
+      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial,
+        `bridge-rail:${layout.bridgeId}:${floorY}m:${side}`);
     }
   }
 }
@@ -427,13 +429,34 @@ function addGallerySupportBeams(
   walls: readonly CityTrapezoidWallSegment[],
   material: THREE.Material,
 ) {
-  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
-  const bridge = NESTED_CITY.corridor.segments.find((segment) => segment.id === "EF");
-  for (const floorY of NESTED_CITY.gallery.floors) {
-    for (const wall of sideWalls) {
-      const offset = NESTED_CITY.gallery.width - 0.34;
-      const from = offsetPoint(wall.from, wall.inward, offset);
-      const to = offsetPoint(wall.to, wall.inward, offset);
+  const bridgeOffset = NESTED_CITY.gallery.width / 2 - 0.22;
+  for (const layout of NESTED_CITY.gallery.floorLayouts) {
+    const floorY = layout.level;
+    const wall = walls.find(({ id }) => id === layout.sideWall);
+    if (!wall) continue;
+
+    const sideOffset = layout.sideClearance + NESTED_CITY.gallery.width - 0.34;
+    const sideFrom = offsetPoint(wall.from, wall.inward, sideOffset);
+    const sideTo = offsetPoint(wall.to, wall.inward, sideOffset);
+    addBeamBetween(
+      group,
+      planPointToVector(sideFrom, floorY - 0.16),
+      planPointToVector(sideTo, floorY - 0.16),
+      0.2,
+      0.26,
+      material,
+      `gallery-edge-girder:${layout.parity}:${wall.id}:${floorY}m`,
+    );
+
+    const bridge = layout.bridgeSegment;
+    const dx = bridge.to.x - bridge.from.x;
+    const dz = bridge.to.z - bridge.from.z;
+    const length = Math.hypot(dx, dz);
+    const normal = { x: -dz / length, z: dx / length };
+    const sides = layout.bridgeId === "EF" ? [-1, 1] : [1];
+    for (const side of sides) {
+      const from = offsetPoint(bridge.from, normal, bridgeOffset * side);
+      const to = offsetPoint(bridge.to, normal, bridgeOffset * side);
       addBeamBetween(
         group,
         planPointToVector(from, floorY - 0.16),
@@ -441,29 +464,8 @@ function addGallerySupportBeams(
         0.2,
         0.26,
         material,
-        `gallery-edge-girder:${wall.id}:${floorY}m`,
+        `bridge-edge-girder:${layout.bridgeId}:${floorY}m:${side}`,
       );
-    }
-
-    if (bridge) {
-      const dx = bridge.to.x - bridge.from.x;
-      const dz = bridge.to.z - bridge.from.z;
-      const length = Math.hypot(dx, dz);
-      const normal = { x: -dz / length, z: dx / length };
-      const offset = NESTED_CITY.gallery.width / 2 - 0.22;
-      for (const side of [-1, 1]) {
-        const from = offsetPoint(bridge.from, normal, offset * side);
-        const to = offsetPoint(bridge.to, normal, offset * side);
-        addBeamBetween(
-          group,
-          planPointToVector(from, floorY - 0.16),
-          planPointToVector(to, floorY - 0.16),
-          0.2,
-          0.26,
-          material,
-          `bridge-edge-girder:EF:${floorY}m:${side}`,
-        );
-      }
     }
   }
 }
@@ -473,23 +475,25 @@ function addGallerySupportColumns(
   walls: readonly CityTrapezoidWallSegment[],
   material: THREE.Material,
 ) {
-  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
-  const edgeOffset = NESTED_CITY.gallery.width - 0.52;
-  for (const [levelIndex, floorY] of NESTED_CITY.gallery.floors.entries()) {
-    const bottomY = NESTED_CITY.levels[levelIndex];
+  for (const layout of NESTED_CITY.gallery.floorLayouts) {
+    const floorY = layout.level;
+    const levelIndex = NESTED_CITY.levels.indexOf(floorY as (typeof NESTED_CITY.levels)[number]);
+    const bottomY = NESTED_CITY.levels[levelIndex - 1] ?? 0;
     const height = floorY - bottomY;
-    for (const wall of sideWalls) {
-      const side = { from: wall.from, to: wall.to };
-      for (const t of [0.24, 0.5, 0.76]) {
-        const point = offsetPoint(pointAlong(side, t), wall.inward, edgeOffset);
-        addBox(
-          group,
-          { width: 0.28, height, depth: 0.28 },
-          { x: point.x, y: bottomY + height / 2, z: point.z },
-          material,
-          `gallery-support-column:${wall.id}:${floorY}m:${t}`,
-        );
-      }
+    const wall = walls.find(({ id }) => id === layout.sideWall);
+    if (!wall) continue;
+
+    const edgeOffset = layout.sideClearance + NESTED_CITY.gallery.width - 0.52;
+    const side = { from: wall.from, to: wall.to };
+    for (const t of [0.24, 0.5, 0.76]) {
+      const point = offsetPoint(pointAlong(side, t), wall.inward, edgeOffset);
+      addBox(
+        group,
+        { width: 0.28, height, depth: 0.28 },
+        { x: point.x, y: bottomY + height / 2, z: point.z },
+        material,
+        `gallery-support-column:${layout.parity}:${wall.id}:${floorY}m:${t}`,
+      );
     }
   }
 }
@@ -657,22 +661,22 @@ function addGalleryFurniture(
   soilMaterial: THREE.Material,
   leafMaterial: THREE.Material,
 ) {
-  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
   let tableIndex = 0;
   let planterIndex = 0;
-  for (const floorY of NESTED_CITY.gallery.floors) {
-    for (const wall of sideWalls) {
-      const side = { from: wall.from, to: wall.to };
-      const yaw = segmentYaw(side);
-      for (const t of [0.19, 0.39, 0.61, 0.81]) {
-        const center = offsetPoint(pointAlong(side, t), wall.inward, 2.82);
-        addReadingTable(group, center, floorY, yaw, woodMaterial, metalMaterial, tableIndex++);
-      }
+  for (const layout of NESTED_CITY.gallery.floorLayouts) {
+    const wall = walls.find(({ id }) => id === layout.sideWall);
+    if (!wall) continue;
 
-      for (const t of [0.08, 0.92]) {
-        const center = offsetPoint(pointAlong(side, t), wall.inward, 3.52);
-        addPlanter(group, center, floorY, woodMaterial, soilMaterial, leafMaterial, planterIndex++);
-      }
+    const side = { from: wall.from, to: wall.to };
+    const yaw = segmentYaw(side);
+    for (const t of [0.19, 0.39, 0.61, 0.81]) {
+      const center = offsetPoint(pointAlong(side, t), wall.inward, layout.sideClearance + 2.82);
+      addReadingTable(group, center, layout.level, yaw, woodMaterial, metalMaterial, tableIndex++);
+    }
+
+    for (const t of [0.08, 0.92]) {
+      const center = offsetPoint(pointAlong(side, t), wall.inward, layout.sideClearance + 3.52);
+      addPlanter(group, center, layout.level, woodMaterial, soilMaterial, leafMaterial, planterIndex++);
     }
   }
 }
