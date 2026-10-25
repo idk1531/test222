@@ -476,9 +476,10 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
       minY: frame.bottom,
       maxY: frame.bottom + frame.height,
     }, `${frame.id} 實際梁柱網格外包必須等於尺寸表，不可只改規格資料`);
-    assert.ok(Math.abs(frame.thickness / frame.depth! - 0.1) < 1e-12 &&
-      Math.abs(frame.beamHeight / frame.height - 0.1) < 1e-12,
-    `${frame.id} 未標定的梁柱截面須按同一可見比例縮放`);
+    const referenceSectionRatio = NESTED_CITY.frames[0].thickness / NESTED_CITY.frames[0].depth!;
+    assert.ok(Math.abs(frame.thickness / frame.depth! - referenceSectionRatio) < 1e-12 &&
+      Math.abs(frame.beamHeight / frame.height - referenceSectionRatio) < 1e-12,
+    `${frame.id} 未標定的梁柱截面只能採一致比例，不得破壞逐層縮尺`);
     const posts = members.filter((member) => member.bottom === frame.bottom &&
       member.top === frame.bottom + frame.height &&
       Math.abs(member.width - frame.thickness) < 1e-9 &&

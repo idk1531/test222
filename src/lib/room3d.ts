@@ -74,8 +74,9 @@ type PrimaryFrameScheduleRow = Pick<CityFrame,
 > & { depth: number };
 
 /**
- * Keep the table's X×Z×Y envelope dimensions authoritative. The board does not separately dimension
- * each rail section, so use one consistent 10% section proportion without changing those envelopes.
+ * Interpret the clarified X×Z×Y triplets as the nested-layer envelopes and keep them authoritative.
+ * The repeated rail-section proportion is only a rendering assumption (10% of Z/Y), not a measured value
+ * to claim from the drawing; this helper keeps that assumption consistent across every shrinking layer.
  */
 function primaryFrameFromSchedule(row: PrimaryFrameScheduleRow): CityFrame {
   return {
