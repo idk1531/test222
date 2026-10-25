@@ -99,27 +99,28 @@ export const NESTED_CITY = {
   // 20 × 20 m clear shaft through 2F–4F; narrow crossings are deliberately offset by level.
   atrium: { x: 0, z: 0, width: 20, depth: 20 },
   frames: [
-    // Unified envelope from the plans/elevations: 48 × 48 × 16 m.
-    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 48, height: 16, thickness: 1.2, beamHeight: 1.2, rotationY: 0, material: "timber", bands: [4, 8, 12] },
-    // Square 36 m stone insert, shifted 1.5 m and rotated; its rotated bounds stay inside the outer shell.
-    { id: "middle-horizontal-insert", plane: "box", x: 1.5, z: 1.5, bottom: 2, width: 36, depth: 36, height: 12, thickness: 0.9, beamHeight: 0.9, rotationY: THREE.MathUtils.degToRad(15), material: "stone", bands: [2, 6, 10] },
-    // Square 24 m inner core, offset again and counter-rotated; vertically fitted to 4–12 m.
+    // Table dimensions are X × Z × Y: each unrotated rectangle is a proportional inset of the previous one.
+    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 16, height: 16, thickness: 1.6, beamHeight: 1.6, rotationY: 0, material: "timber", bands: [4, 8, 12], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }] },
+    { id: "middle-stone-frame", plane: "box", x: 0, z: 0, bottom: 2, width: 36, depth: 12, height: 12, thickness: 1.2, beamHeight: 1.2, rotationY: 0, material: "stone", bands: [2, 6, 10], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }] },
     {
-      id: "offset-rotated-core",
+      id: "inner-core-frame",
       plane: "box",
-      x: 3,
-      z: 1,
+      x: 0,
+      z: 0,
       bottom: 4,
       width: 24,
-      depth: 24,
+      depth: 8,
       height: 8,
-      thickness: 0.65,
-      beamHeight: 0.75,
-      rotationY: THREE.MathUtils.degToRad(-10),
+      thickness: 0.8,
+      beamHeight: 0.8,
+      rotationY: 0,
       material: "core",
       bands: [4],
-      // A local west-side lintel opening lets the 3F→4F stair clear the core's top ring beam.
-      openings: [{ edge: "west", start: 3, end: 5.6, bottom: 11.1, top: 12.2 }],
+      // Cut only the stair-clearance intervals through the top-west beam and Y=8 south band.
+      openings: [
+        { edge: "west", start: 0.2, end: 2.2, bottom: 11.1, top: 12.2 },
+        { edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 },
+      ],
     },
   ] satisfies readonly CityFrame[],
   // Extra furnished-room volumes are shown only in the existing walk-through mode, not in structure inspection.
@@ -138,7 +139,7 @@ export const NESTED_CITY = {
     // 3F: offset side galleries, a small crossing and north connector leave an open central approach.
     { id: "level-2-west-study-gallery", level: 2, x: -17, z: -2, width: 13, depth: 26, material: "stone" },
     { id: "level-2-east-study-gallery", level: 2, x: 17, z: -9, width: 13, depth: 12, material: "timber" },
-    { id: "level-2-offset-crossing-bridge", level: 2, x: 0, z: 3.2, width: 21, depth: 2, material: "core" },
+    { id: "level-2-offset-crossing-bridge", level: 2, x: 0, z: 1.2, width: 21, depth: 2, material: "core" },
     { id: "level-2-north-connector-bridge", level: 2, x: 0, z: -15, width: 21, depth: 2.4, material: "stone" },
     // 4F: short observation wings, a thin counter-shifted bridge and a small south terrace (about 24% coverage).
     { id: "level-3-west-observation-gallery", level: 3, x: -18, z: -2, width: 12, depth: 20, material: "timber" },
@@ -147,11 +148,11 @@ export const NESTED_CITY = {
     { id: "level-3-south-observation-terrace", level: 3, x: 18, z: 15, width: 12, depth: 4, material: "timber" },
   ] satisfies readonly CityPlatform[],
   stairs: [
-    // 1F–2F rises through the open south atrium to the connector; 2F–3F follows the east wing to the offset bridge;
-    // 3F–4F crosses the void to a side-gallery landing without passing beneath an upper slab.
+    // 1F–2F rises to the south connector; 2F–3F crosses the open atrium to a near-center 3F bridge;
+    // 3F–4F crosses the void to the west gallery without passing beneath an upper slab.
     { id: "stair-ground-to-level-1", start: { x: 0, z: 5.5, y: 0 }, end: { x: 0, z: 15.5, y: 4 }, width: 1.8, steps: 24, material: "stone" },
-    { id: "stair-level-1-to-level-2", start: { x: 7.5, z: 15.5, y: 4 }, end: { x: 7.5, z: 4.2, y: 8 }, width: 1.8, steps: 24, material: "timber" },
-    { id: "stair-level-2-to-level-3", start: { x: 6, z: 3.2, y: 8 }, end: { x: -12, z: 3.2, y: 12 }, width: 1.8, steps: 25, material: "stone" },
+    { id: "stair-level-1-to-level-2", start: { x: 7.5, z: 15.5, y: 4 }, end: { x: 7.5, z: 2.2, y: 8 }, width: 1.8, steps: 24, material: "timber" },
+    { id: "stair-level-2-to-level-3", start: { x: 6, z: 1.2, y: 8 }, end: { x: -12, z: 1.2, y: 12 }, width: 1.8, steps: 25, material: "stone" },
   ] satisfies readonly CityStair[],
   bridgeRails: [
     { id: "level-1-crossing-rail-near", level: 1, x: 0, z: -3.15, width: 21, depth: 0.1 },
@@ -164,8 +165,8 @@ export const NESTED_CITY = {
     { id: "level-1-south-connector-rail-near-east", level: 1, x: 11.1, z: 15.55, width: 4.8, depth: 0.1 },
     { id: "level-1-south-connector-rail-far", level: 1, x: 0, z: 18.45, width: 27, depth: 0.1 },
     // Leave a 4 m landing mouth in the far-side rail; the opposite edge remains guarded.
-    { id: "level-2-crossing-rail-near", level: 2, x: 0, z: 2.25, width: 21, depth: 0.1 },
-    { id: "level-2-crossing-rail-far-west", level: 2, x: -2, z: 4.15, width: 17, depth: 0.1 },
+    { id: "level-2-crossing-rail-near", level: 2, x: 0, z: 0.25, width: 21, depth: 0.1 },
+    { id: "level-2-crossing-rail-far-west", level: 2, x: -2, z: 2.15, width: 17, depth: 0.1 },
     { id: "level-2-north-connector-rail-near", level: 2, x: 0, z: -16.15, width: 21, depth: 0.1 },
     { id: "level-2-north-connector-rail-far", level: 2, x: 0, z: -13.85, width: 21, depth: 0.1 },
     { id: "level-3-crossing-rail-near", level: 3, x: 0, z: -5.95, width: 24, depth: 0.1 },
@@ -326,11 +327,13 @@ export function cityFrameMembers(frame: CityFrame): CityFrameMember[] {
     axis: "x" | "z",
     fixed: number,
     start: number,
-    end: number
+    end: number,
+    bottom: number,
+    top: number
   ) => {
     let intervals = [{ start, end }];
     for (const opening of frame.openings ?? []) {
-      if (opening.edge !== edge || opening.bottom >= roofTop || opening.top <= roofBottom) continue;
+      if (opening.edge !== edge || opening.bottom >= top || opening.top <= bottom) continue;
       const next: Array<{ start: number; end: number }> = [];
       for (const interval of intervals) {
         if (opening.end <= interval.start || opening.start >= interval.end) {
@@ -345,24 +348,24 @@ export function cityFrameMembers(frame: CityFrame): CityFrameMember[] {
     for (const interval of intervals) {
       if (interval.end - interval.start <= 1e-4) continue;
       if (axis === "x") {
-        add((interval.start + interval.end) / 2, fixed, interval.end - interval.start, frame.thickness, roofBottom, roofTop);
+        add((interval.start + interval.end) / 2, fixed, interval.end - interval.start, frame.thickness, bottom, top);
       } else {
-        add(fixed, (interval.start + interval.end) / 2, frame.thickness, interval.end - interval.start, roofBottom, roofTop);
+        add(fixed, (interval.start + interval.end) / 2, frame.thickness, interval.end - interval.start, bottom, top);
       }
     }
   };
-  addBoxEdge("north", "x", -halfZ, -frame.width / 2, frame.width / 2);
-  addBoxEdge("south", "x", halfZ, -frame.width / 2, frame.width / 2);
-  addBoxEdge("west", "z", -halfX, -depth / 2, depth / 2);
-  addBoxEdge("east", "z", halfX, -depth / 2, depth / 2);
+  addBoxEdge("north", "x", -halfZ, -frame.width / 2, frame.width / 2, roofBottom, roofTop);
+  addBoxEdge("south", "x", halfZ, -frame.width / 2, frame.width / 2, roofBottom, roofTop);
+  addBoxEdge("west", "z", -halfX, -depth / 2, depth / 2, roofBottom, roofTop);
+  addBoxEdge("east", "z", halfX, -depth / 2, depth / 2, roofBottom, roofTop);
   for (const band of frame.bands ?? []) {
     const height = frame.beamHeight * 0.58;
     const bottom = frame.bottom + band - height / 2;
     const top = bottom + height;
-    add(0, -halfZ, frame.width, frame.thickness, bottom, top);
-    add(0, halfZ, frame.width, frame.thickness, bottom, top);
-    add(-halfX, 0, frame.thickness, depth, bottom, top);
-    add(halfX, 0, frame.thickness, depth, bottom, top);
+    addBoxEdge("north", "x", -halfZ, -frame.width / 2, frame.width / 2, bottom, top);
+    addBoxEdge("south", "x", halfZ, -frame.width / 2, frame.width / 2, bottom, top);
+    addBoxEdge("west", "z", -halfX, -depth / 2, depth / 2, bottom, top);
+    addBoxEdge("east", "z", halfX, -depth / 2, depth / 2, bottom, top);
   }
   return members;
 }
