@@ -108,7 +108,24 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
     "polygon clipping must return the real trapezoid, not merely a 48×48 bounding box");
   assert.equal(trapezoidArea, 1728);
   assert.ok(corridorArea > 0 && corridorArea < trapezoidArea * 0.2,
-    "the narrow connected corridors must leave the majority of the trapezoid open to view");
+    "the specified connected corridor chain must leave the majority of the trapezoid open to view");
+  const continuousCorridorArea = corridor.footprints.reduce((area, footprint) => area + Math.abs(signedArea(footprint)), 0);
+  assert.ok(continuousCorridorArea < trapezoidArea * 0.25,
+    "full-length side corridors and crossings must still preserve a large open centre");
+  assert.equal(corridor.footprints.length, 3);
+  assert.deepEqual(corridor.extensions.map(({ id, referenceFrom, referenceTo }) => ({ id, referenceFrom, referenceTo })), [
+    { id: "BE", referenceFrom: "B", referenceTo: "E" },
+    { id: "DF", referenceFrom: "D", referenceTo: "F" },
+  ], "the full-length side walks extend the named route without closing the open CD edge");
+  assert.ok(corridor.extensions.every((extension) => extension.width === corridor.width));
+  for (const footprint of corridor.footprints) {
+    assert.ok(footprint.length >= 3 && footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
+      "all connected and extended corridor floors must remain inside ABCD");
+  }
+  assert.deepEqual(corridor.extensions[0].to, corridor.segments[0].to,
+    "BE must meet CE at E without a gap");
+  assert.deepEqual(corridor.extensions[1].to, corridor.segments[2].from,
+    "DF must meet FA at F without a gap");
   const galleryArea = gallery.footprints.reduce((area, footprint) => area + Math.abs(signedArea(footprint)), 0);
   assert.ok(galleryArea < trapezoidArea * 0.75,
     "even counting overlapping gallery wings twice, the floor slabs must leave a broad central atrium");
@@ -173,8 +190,8 @@ assert.equal(NESTED_CITY.gallery.width, 4.6);
 assert.deepEqual(NESTED_CITY.gallery.floors, [4, 8, 12]);
 assert.equal(NESTED_CITY.gallery.footprints.length, 3,
   "upper galleries include the connected route plus both full-height side wings");
-assert.deepEqual(Object.keys(NESTED_CITY.corridor).sort(), ["floors", "footprint", "segments", "width"],
-  "no legacy T1/T2 structure data may remain in the corridor model");
+assert.deepEqual(Object.keys(NESTED_CITY.corridor).sort(), ["extensions", "floors", "footprint", "footprints", "segments", "width"],
+  "the corridor model contains its named path, full-length wall extensions, and continuous floor footprints");
 console.log("  ✓ 四層等寬連通走廊、全高書牆、側廊平台、中庭留白與閱讀家具");
 assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
 assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
@@ -407,11 +424,25 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
         `${segment.id} must be walkable at ${floor} m`);
     }
   }
+  for (const [index, extension] of corridor.extensions.entries()) {
+    const midpoint = {
+      x: (extension.from.x + extension.to.x) / 2,
+      z: (extension.from.z + extension.to.z) / 2,
+    };
+    assert.equal(extension.width, corridor.width);
+    assert.ok(isCityPointInsidePolygon(midpoint, corridor.footprints[index + 1]),
+      `${extension.id} must be included in the full-length corridor floors`);
+    for (const floor of corridor.floors) {
+      assert.equal(groundHeightAt(midpoint.x, midpoint.z, floor), floor,
+        `${extension.id} must be walkable at ${floor} m`);
+    }
+  }
   const middleOfEF = {
     x: (corridor.segments[1].from.x + corridor.segments[1].to.x) / 2,
     z: (corridor.segments[1].from.z + corridor.segments[1].to.z) / 2,
   };
-  assert.ok(!isCityPointInsidePolygon({ x: 0, z: 0 }, corridor.footprint), "most of the trapezoid stays open");
+  assert.ok(!corridor.footprints.some((footprint) => isCityPointInsidePolygon({ x: 0, z: 0 }, footprint)),
+    "the full-length corridor loop keeps the central atrium open");
   assert.equal(groundHeightAt(middleOfEF.x, middleOfEF.z, 0), 0,
     "the ground-level corridor remains at 0 m without snapping upward");
   assert.equal(groundHeightAt(0, 0, 8), 0,
@@ -421,11 +452,14 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   assert.match(nestedCitySource, /trapezoid-exterior-ABCD-open-CD/);
   assert.match(nestedCitySource, /NESTED_CITY\.trapezoid\.wallEdges/);
   assert.match(nestedCitySource, /NESTED_CITY\.corridor\.floors/);
-  assert.match(nestedCitySource, /NESTED_CITY\.corridor\.footprint/);
+  assert.match(nestedCitySource, /NESTED_CITY\.corridor\.footprints/);
+  assert.match(nestedCitySource, /NESTED_CITY\.corridor\.extensions/);
   assert.match(nestedCitySource, /NESTED_CITY\.gallery\.floors/);
   assert.match(nestedCitySource, /NESTED_CITY\.gallery\.footprints/);
   assert.match(nestedCitySource, /addSideBookshelves/);
   assert.match(nestedCitySource, /addGalleryGuardrails/);
+  assert.match(nestedCitySource, /addGallerySupportBeams/);
+  assert.match(nestedCitySource, /addGallerySupportColumns/);
   assert.match(nestedCitySource, /addPortalFrame/);
   assert.match(nestedCitySource, /addReadingTable/);
   assert.match(nestedCitySource, /addPlanter/);

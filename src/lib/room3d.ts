@@ -41,6 +41,15 @@ export interface CityCorridorSegment {
   from: CityPlanPoint;
   to: CityPlanPoint;
 }
+export interface CityCorridorExtension {
+  id: "BE" | "DF";
+  referenceFrom: CityTrapezoidPointId;
+  referenceTo: CityTrapezoidPointId;
+  width: number;
+  /** Centerline shifted inward by half the corridor width from its wall. */
+  from: CityPlanPoint;
+  to: CityPlanPoint;
+}
 export interface CityTrapezoidWallSegment {
   id: "AB" | "BC" | "AD";
   from: CityPlanPoint;
@@ -222,6 +231,39 @@ const trapezoidWalls: readonly CityTrapezoidWallSegment[] = [
   { id: "AD", from: trapezoidPoints.A, to: trapezoidPoints.D, inward: inwardDA },
 ];
 const trapezoidBoundaryPoints = [trapezoidPoints.A, trapezoidPoints.B, trapezoidPoints.C, trapezoidPoints.D] as const;
+const corridorExtensions: readonly CityCorridorExtension[] = [
+  {
+    id: "BE",
+    referenceFrom: "B",
+    referenceTo: "E",
+    width: NESTED_CITY_CORRIDOR_WIDTH,
+    from: addPlanPoints(trapezoidPoints.B, scalePlanPoint(inwardBC, halfCorridorWidth)),
+    to: addPlanPoints(corridorNamedPoints.E, scalePlanPoint(inwardBC, halfCorridorWidth)),
+  },
+  {
+    id: "DF",
+    referenceFrom: "D",
+    referenceTo: "F",
+    width: NESTED_CITY_CORRIDOR_WIDTH,
+    from: addPlanPoints(trapezoidPoints.D, scalePlanPoint(inwardDA, halfCorridorWidth)),
+    to: addPlanPoints(corridorNamedPoints.F, scalePlanPoint(inwardDA, halfCorridorWidth)),
+  },
+];
+function straightCorridorFootprint(segment: Pick<CityCorridorExtension, "from" | "to" | "width">): CityPlanPoint[] {
+  const delta = subtractPlanPoints(segment.to, segment.from);
+  const length = lengthPlanPoint(delta);
+  if (length <= 1e-9) return [];
+  const normal = { x: -delta.z / length, z: delta.x / length };
+  const halfWidth = segment.width / 2;
+  return clipPolygonToConvexPolygon([
+    addPlanPoints(segment.from, scalePlanPoint(normal, halfWidth)),
+    addPlanPoints(segment.to, scalePlanPoint(normal, halfWidth)),
+    addPlanPoints(segment.to, scalePlanPoint(normal, -halfWidth)),
+    addPlanPoints(segment.from, scalePlanPoint(normal, -halfWidth)),
+  ], trapezoidBoundaryPoints);
+}
+const corridorExtensionFootprints = corridorExtensions.map(straightCorridorFootprint);
+const corridorFootprints = [corridorFootprint, ...corridorExtensionFootprints] as const;
 const sideGalleryFootprints = trapezoidWalls
   .filter(({ id }) => id === "BC" || id === "AD")
   .map((wall) => {
@@ -253,7 +295,10 @@ export const NESTED_CITY = {
     width: NESTED_CITY_CORRIDOR_WIDTH,
     floors: [0, 4, 8, 12] as const,
     segments: corridorSegments,
+    extensions: corridorExtensions,
     footprint: corridorFootprint,
+    // BE and DF complete the two side-wall walks so the passage reads continuously from end to end.
+    footprints: corridorFootprints,
   },
   gallery: {
     width: NESTED_CITY_GALLERY_WIDTH,

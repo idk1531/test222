@@ -205,14 +205,17 @@ function addGalleryFloors(
 
   for (const level of NESTED_CITY.corridor.floors) {
     const top = level === 0 && !structureOnly ? 0.014 : level + 0.014;
-    addPlanPrism(
-      group,
-      NESTED_CITY.corridor.footprint,
-      top - 0.045,
-      0.045,
-      corridorMaterial,
-      `connected-corridor:${level}m:CE-EF-FA-AB`,
-    );
+    NESTED_CITY.corridor.footprints.forEach((footprint, index) => {
+      const run = index === 0 ? "CE-EF-FA-AB" : NESTED_CITY.corridor.extensions[index - 1].id;
+      addPlanPrism(
+        group,
+        footprint,
+        top - 0.045,
+        0.045,
+        corridorMaterial,
+        `connected-corridor:${level}m:${run}`,
+      );
+    });
   }
 }
 
@@ -425,6 +428,7 @@ function addGallerySupportBeams(
   material: THREE.Material,
 ) {
   const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
+  const bridge = NESTED_CITY.corridor.segments.find((segment) => segment.id === "EF");
   for (const floorY of NESTED_CITY.gallery.floors) {
     for (const wall of sideWalls) {
       const offset = NESTED_CITY.gallery.width - 0.34;
@@ -439,6 +443,53 @@ function addGallerySupportBeams(
         material,
         `gallery-edge-girder:${wall.id}:${floorY}m`,
       );
+    }
+
+    if (bridge) {
+      const dx = bridge.to.x - bridge.from.x;
+      const dz = bridge.to.z - bridge.from.z;
+      const length = Math.hypot(dx, dz);
+      const normal = { x: -dz / length, z: dx / length };
+      const offset = NESTED_CITY.gallery.width / 2 - 0.22;
+      for (const side of [-1, 1]) {
+        const from = offsetPoint(bridge.from, normal, offset * side);
+        const to = offsetPoint(bridge.to, normal, offset * side);
+        addBeamBetween(
+          group,
+          planPointToVector(from, floorY - 0.16),
+          planPointToVector(to, floorY - 0.16),
+          0.2,
+          0.26,
+          material,
+          `bridge-edge-girder:EF:${floorY}m:${side}`,
+        );
+      }
+    }
+  }
+}
+
+function addGallerySupportColumns(
+  group: THREE.Group,
+  walls: readonly CityTrapezoidWallSegment[],
+  material: THREE.Material,
+) {
+  const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
+  const edgeOffset = NESTED_CITY.gallery.width - 0.52;
+  for (const [levelIndex, floorY] of NESTED_CITY.gallery.floors.entries()) {
+    const bottomY = NESTED_CITY.levels[levelIndex];
+    const height = floorY - bottomY;
+    for (const wall of sideWalls) {
+      const side = { from: wall.from, to: wall.to };
+      for (const t of [0.24, 0.5, 0.76]) {
+        const point = offsetPoint(pointAlong(side, t), wall.inward, edgeOffset);
+        addBox(
+          group,
+          { width: 0.28, height, depth: 0.28 },
+          { x: point.x, y: bottomY + height / 2, z: point.z },
+          material,
+          `gallery-support-column:${wall.id}:${floorY}m:${t}`,
+        );
+      }
     }
   }
 }
@@ -696,6 +747,7 @@ export const NestedCityGeometry: React.FC<{
     addGalleryFloors(group, galleryMaterial, corridorMaterial, structureOnly);
     addSideBookshelves(group, NESTED_CITY.trapezoid.wallEdges, shelfPanelMaterial, timberMaterial, bookMaterials);
     addGallerySupportBeams(group, NESTED_CITY.trapezoid.wallEdges, darkMaterial);
+    addGallerySupportColumns(group, NESTED_CITY.trapezoid.wallEdges, darkMaterial);
     addGalleryGuardrails(group, NESTED_CITY.trapezoid.wallEdges, darkMaterial, glassMaterial);
 
     addPortalFrame(group, {
