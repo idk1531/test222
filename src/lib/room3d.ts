@@ -69,14 +69,197 @@ export interface CityFrame {
   bands?: readonly number[];
   openings?: readonly CityFrameOpening[];
 }
+export interface CityPlanPoint {
+  x: number;
+  z: number;
+}
+export type CityTrapezoidPointId = "A" | "B" | "C" | "D" | "E" | "F";
+export type CityCorridorId = "CE" | "EF" | "FA" | "AB";
+export interface CityCorridorSegment {
+  id: CityCorridorId;
+  referenceFrom: CityTrapezoidPointId;
+  referenceTo: CityTrapezoidPointId;
+  /** Centerline shifted inward so the full strip stays on the trapezoid's interior side. */
+  from: CityPlanPoint;
+  to: CityPlanPoint;
+}
+export interface CityCorridorFrame {
+  id: "T1" | "T2";
+  corridorId: CityCorridorId;
+  width: number;
+  bottom: number;
+  top: number;
+  material: CityMaterial;
+}
+export interface CityTrapezoidWallSegment {
+  id: "AB" | "BC" | "AD";
+  from: CityPlanPoint;
+  to: CityPlanPoint;
+}
+const NESTED_CITY_CORRIDOR_WIDTH = 2;
+const NESTED_CITY_FLOOR_HEIGHT = 4;
+const pointAlong = (from: CityPlanPoint, to: CityPlanPoint, t: number): CityPlanPoint => ({
+  x: from.x + (to.x - from.x) * t,
+  z: from.z + (to.z - from.z) * t,
+});
+const subtractPlanPoints = (a: CityPlanPoint, b: CityPlanPoint): CityPlanPoint => ({ x: a.x - b.x, z: a.z - b.z });
+const addPlanPoints = (a: CityPlanPoint, b: CityPlanPoint): CityPlanPoint => ({ x: a.x + b.x, z: a.z + b.z });
+const scalePlanPoint = (point: CityPlanPoint, scale: number): CityPlanPoint => ({ x: point.x * scale, z: point.z * scale });
+const crossPlanPoints = (a: CityPlanPoint, b: CityPlanPoint) => a.x * b.z - a.z * b.x;
+const lengthPlanPoint = (point: CityPlanPoint) => Math.hypot(point.x, point.z);
+
+function inwardNormal(from: CityPlanPoint, to: CityPlanPoint): CityPlanPoint {
+  const direction = subtractPlanPoints(to, from);
+  const length = lengthPlanPoint(direction);
+  return { x: -direction.z / length, z: direction.x / length };
+}
+
+function lineIntersection(
+  pointA: CityPlanPoint,
+  directionA: CityPlanPoint,
+  pointB: CityPlanPoint,
+  directionB: CityPlanPoint
+): CityPlanPoint {
+  const denominator = crossPlanPoints(directionA, directionB);
+  if (Math.abs(denominator) < 1e-10) return pointA;
+  const t = crossPlanPoints(subtractPlanPoints(pointB, pointA), directionB) / denominator;
+  return addPlanPoints(pointA, scalePlanPoint(directionA, t));
+}
+
+function offsetPolyline(points: readonly CityPlanPoint[], distance: number): CityPlanPoint[] {
+  const directions = points.slice(1).map((point, index) => {
+    const delta = subtractPlanPoints(point, points[index]);
+    const length = lengthPlanPoint(delta);
+    return scalePlanPoint(delta, 1 / length);
+  });
+  const normals = directions.map((direction) => ({ x: -direction.z, z: direction.x }));
+  const result = [addPlanPoints(points[0], scalePlanPoint(normals[0], distance))];
+  for (let index = 1; index < points.length - 1; index++) {
+    const previousOffset = addPlanPoints(points[index], scalePlanPoint(normals[index - 1], distance));
+    const nextOffset = addPlanPoints(points[index], scalePlanPoint(normals[index], distance));
+    result.push(lineIntersection(previousOffset, directions[index - 1], nextOffset, directions[index]));
+  }
+  result.push(addPlanPoints(points[points.length - 1], scalePlanPoint(normals[normals.length - 1], distance)));
+  return result;
+}
+
+function polygonSignedArea(points: readonly CityPlanPoint[]): number {
+  return points.reduce((area, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return area + point.x * next.z - next.x * point.z;
+  }, 0) / 2;
+}
+
+function clipPolygonToConvexPolygon(
+  subject: readonly CityPlanPoint[],
+  clip: readonly CityPlanPoint[]
+): CityPlanPoint[] {
+  const orientation = polygonSignedArea(clip) >= 0 ? 1 : -1;
+  let output = [...subject];
+  for (let index = 0; index < clip.length; index++) {
+    const edgeStart = clip[index];
+    const edgeEnd = clip[(index + 1) % clip.length];
+    const edge = subtractPlanPoints(edgeEnd, edgeStart);
+    const input = output;
+    output = [];
+    if (!input.length) break;
+    let previous = input[input.length - 1];
+    const isInside = (point: CityPlanPoint) =>
+      crossPlanPoints(edge, subtractPlanPoints(point, edgeStart)) * orientation >= -1e-8;
+    const intersectBoundary = (from: CityPlanPoint, to: CityPlanPoint): CityPlanPoint => {
+      const direction = subtractPlanPoints(to, from);
+      const denominator = crossPlanPoints(edge, direction);
+      if (Math.abs(denominator) < 1e-10) return from;
+      const t = crossPlanPoints(edge, subtractPlanPoints(edgeStart, from)) / denominator;
+      return addPlanPoints(from, scalePlanPoint(direction, t));
+    };
+    for (const current of input) {
+      const currentInside = isInside(current);
+      const previousInside = isInside(previous);
+      if (currentInside) {
+        if (!previousInside) output.push(intersectBoundary(previous, current));
+        output.push(current);
+      } else if (previousInside) {
+        output.push(intersectBoundary(previous, current));
+      }
+      previous = current;
+    }
+  }
+  return output.filter((point, index) => {
+    const previous = output[(index + output.length - 1) % output.length];
+    return Math.hypot(point.x - previous.x, point.z - previous.z) > 1e-7;
+  });
+}
+
+const trapezoidPoints = {
+  A: { x: -ROOM.width / 4, z: -ROOM.depth / 2 },
+  B: { x: ROOM.width / 4, z: -ROOM.depth / 2 },
+  C: { x: ROOM.width / 2, z: ROOM.depth / 2 },
+  D: { x: -ROOM.width / 2, z: ROOM.depth / 2 },
+} satisfies Record<"A" | "B" | "C" | "D", CityPlanPoint>;
+const corridorNamedPoints = {
+  ...trapezoidPoints,
+  E: pointAlong(trapezoidPoints.B, trapezoidPoints.C, 0.75),
+  F: pointAlong(trapezoidPoints.A, trapezoidPoints.D, 0.75),
+} satisfies Record<CityTrapezoidPointId, CityPlanPoint>;
+const inwardAB = inwardNormal(trapezoidPoints.A, trapezoidPoints.B);
+const inwardBC = inwardNormal(trapezoidPoints.B, trapezoidPoints.C);
+const inwardDA = inwardNormal(trapezoidPoints.D, trapezoidPoints.A);
+const halfCorridorWidth = NESTED_CITY_CORRIDOR_WIDTH / 2;
+const offsetAB = addPlanPoints(trapezoidPoints.A, scalePlanPoint(inwardAB, halfCorridorWidth));
+const offsetAD = addPlanPoints(trapezoidPoints.A, scalePlanPoint(inwardDA, halfCorridorWidth));
+const offsetBC = addPlanPoints(trapezoidPoints.B, scalePlanPoint(inwardBC, halfCorridorWidth));
+const corridorInnerPoints = {
+  A: lineIntersection(offsetAB, subtractPlanPoints(trapezoidPoints.B, trapezoidPoints.A), offsetAD, subtractPlanPoints(trapezoidPoints.D, trapezoidPoints.A)),
+  B: lineIntersection(offsetAB, subtractPlanPoints(trapezoidPoints.B, trapezoidPoints.A), offsetBC, subtractPlanPoints(trapezoidPoints.C, trapezoidPoints.B)),
+  C: addPlanPoints(trapezoidPoints.C, scalePlanPoint(inwardBC, halfCorridorWidth)),
+  E: addPlanPoints(corridorNamedPoints.E, scalePlanPoint(inwardBC, halfCorridorWidth)),
+  F: addPlanPoints(corridorNamedPoints.F, scalePlanPoint(inwardDA, halfCorridorWidth)),
+} satisfies Partial<Record<CityTrapezoidPointId, CityPlanPoint>>;
+const corridorCenterline = [
+  corridorInnerPoints.C!, corridorInnerPoints.E!, corridorInnerPoints.F!, corridorInnerPoints.A!, corridorInnerPoints.B!,
+];
+const corridorSegments: readonly CityCorridorSegment[] = [
+  { id: "CE", referenceFrom: "C", referenceTo: "E", from: corridorCenterline[0], to: corridorCenterline[1] },
+  { id: "EF", referenceFrom: "E", referenceTo: "F", from: corridorCenterline[1], to: corridorCenterline[2] },
+  { id: "FA", referenceFrom: "F", referenceTo: "A", from: corridorCenterline[2], to: corridorCenterline[3] },
+  { id: "AB", referenceFrom: "A", referenceTo: "B", from: corridorCenterline[3], to: corridorCenterline[4] },
+];
+const corridorOutlineRaw = (() => {
+  const halfWidth = NESTED_CITY_CORRIDOR_WIDTH / 2;
+  const directions = corridorCenterline.slice(1).map((point, index) => {
+    const delta = subtractPlanPoints(point, corridorCenterline[index]);
+    return scalePlanPoint(delta, 1 / lengthPlanPoint(delta));
+  });
+  const left = offsetPolyline(corridorCenterline, halfWidth);
+  const right = offsetPolyline(corridorCenterline, -halfWidth);
+  const firstCapOffset = scalePlanPoint(directions[0], -halfWidth);
+  const lastCapOffset = scalePlanPoint(directions[directions.length - 1], halfWidth);
+  return [
+    addPlanPoints(left[0], firstCapOffset),
+    ...left,
+    addPlanPoints(left[left.length - 1], lastCapOffset),
+    addPlanPoints(right[right.length - 1], lastCapOffset),
+    ...right.slice(0, -1).reverse(),
+    addPlanPoints(right[0], firstCapOffset),
+  ];
+})();
+const corridorFootprint = clipPolygonToConvexPolygon(corridorOutlineRaw, [
+  trapezoidPoints.A, trapezoidPoints.B, trapezoidPoints.C, trapezoidPoints.D,
+]);
+const trapezoidWalls: readonly CityTrapezoidWallSegment[] = [
+  { id: "AB", from: trapezoidPoints.A, to: trapezoidPoints.B },
+  { id: "BC", from: trapezoidPoints.B, to: trapezoidPoints.C },
+  { id: "AD", from: trapezoidPoints.A, to: trapezoidPoints.D },
+];
 type PrimaryFrameScheduleRow = Pick<CityFrame,
   "id" | "x" | "z" | "bottom" | "width" | "height" | "material" | "bands" | "openings"
 > & { depth: number };
 
 /**
- * Interpret the clarified X×Z×Y triplets as the nested-layer envelopes and keep them authoritative.
- * The repeated rail-section proportion is only a rendering assumption (10% of Z/Y), not a measured value
- * to claim from the drawing; this helper keeps that assumption consistent across every shrinking layer.
+ * Keep the clarified X×Z×Y triplets authoritative as frame envelopes. The agreed 2 m corridor width
+ * sets each primary frame member's plan-section width; its vertical beam height remains a rendering
+ * assumption (10% of frame height), not a measured value from the reference image.
  */
 function primaryFrameFromSchedule(row: PrimaryFrameScheduleRow): CityFrame {
   return {
@@ -84,7 +267,7 @@ function primaryFrameFromSchedule(row: PrimaryFrameScheduleRow): CityFrame {
     plane: "box",
     x: row.x,
     z: row.z,
-    thickness: row.depth / 10,
+    thickness: NESTED_CITY_CORRIDOR_WIDTH,
     beamHeight: row.height / 10,
     rotationY: 0,
   };
@@ -117,10 +300,33 @@ export interface CityPlatformRail {
  */
 export const NESTED_CITY = {
   levels: [0, 4, 8, 12] as const,
+  floorHeight: NESTED_CITY_FLOOR_HEIGHT,
+  trapezoid: {
+    // AB=24 m is the accepted modeling default; CD=48 m and depth=48 m match the room envelope.
+    points: corridorNamedPoints,
+    shortBase: 24,
+    longBase: 48,
+    depth: 48,
+    wallEdges: trapezoidWalls,
+    openEdge: "CD" as const,
+    wallBandLevels: [0, 4, 8, 12, 16] as const,
+  },
+  corridor: {
+    width: NESTED_CITY_CORRIDOR_WIDTH,
+    floors: [0, 4, 8, 12] as const,
+    segments: corridorSegments,
+    footprint: corridorFootprint,
+    frames: [
+      { id: "T1", corridorId: "EF", width: NESTED_CITY_CORRIDOR_WIDTH, bottom: 0, top: 8, material: "core" },
+      { id: "T2", corridorId: "FA", width: NESTED_CITY_CORRIDOR_WIDTH, bottom: 8, top: 12, material: "stone" },
+    ] satisfies readonly CityCorridorFrame[],
+  },
   // 20 × 20 m clear shaft through 2F–4F; narrow crossings are deliberately offset by level.
   atrium: { x: 0, z: 0, width: 20, depth: 20 },
   frames: [
     // Authoritative primary-layer envelopes from the schedule, in X × Z × Y order.
+    // W and part of S cross the new sloping trapezoid wall line at their specified X/Z extents; keep both
+    // schedules untrimmed until the owner resolves that geometric conflict rather than silently shrinking them.
     // The square 48 × 48 m outline belongs to the building envelope, not to these nested rectangles.
     primaryFrameFromSchedule({
       id: "outer-timber-shell", x: 0, z: 0, bottom: 0, width: 48, depth: 16, height: 16, material: "timber",
@@ -204,6 +410,37 @@ export const NESTED_CITY = {
   platformRailPostWidth: 0.07,
   glassRailThickness: 0.055,
 } as const;
+
+export interface CityCorridorFramePlan {
+  from: CityPlanPoint;
+  to: CityPlanPoint;
+  centerX: number;
+  centerZ: number;
+  length: number;
+  width: number;
+  rotationY: number;
+  bottom: number;
+  top: number;
+}
+
+/** Plan dimensions for the frame's floor/ceiling rectangles, shared by Three.js and geometry checks. */
+export function cityCorridorFramePlan(frame: CityCorridorFrame): CityCorridorFramePlan | null {
+  const segment = NESTED_CITY.corridor.segments.find(({ id }) => id === frame.corridorId);
+  if (!segment) return null;
+  const dx = segment.to.x - segment.from.x;
+  const dz = segment.to.z - segment.from.z;
+  return {
+    from: segment.from,
+    to: segment.to,
+    centerX: (segment.from.x + segment.to.x) / 2,
+    centerZ: (segment.from.z + segment.to.z) / 2,
+    length: Math.hypot(dx, dz),
+    width: frame.width,
+    rotationY: Math.atan2(dx, dz),
+    bottom: frame.bottom,
+    top: frame.top,
+  };
+}
 
 export type NestedCityView = "main" | "top" | "side";
 export const NESTED_CITY_CAMERA_VIEWS = {
