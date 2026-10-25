@@ -1,5 +1,5 @@
 import type { PlayerPose } from "./room3d";
-import { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } from "./roomDimensions";
+import { clampToTrapezoid, ROOM_DIMENSIONS } from "./roomDimensions";
 
 export type RoomRole = "owner" | "editor" | "reader" | "pending";
 export type GuestRole = Extract<RoomRole, "editor" | "reader">;
@@ -120,10 +120,11 @@ export function normalizeRemotePose(value: unknown): PlayerPose | null {
   if (["moving", "onGround", "seated", "visible"].some((key) => typeof candidate[key] !== "boolean")) return null;
   if (candidate.sprinting !== undefined && typeof candidate.sprinting !== "boolean") return null;
   if (candidate.floorY !== undefined && (typeof candidate.floorY !== "number" || !Number.isFinite(candidate.floorY))) return null;
+  const clampedPosition = clampToTrapezoid(candidate.x as number, candidate.z as number);
   const clamp = (number: number, min: number, max: number) => Math.max(min, Math.min(max, number));
   return {
-    x: clamp(candidate.x as number, -ROOM_DIMENSIONS.width / 2 + ROOM_EDGE_MARGIN, ROOM_DIMENSIONS.width / 2 - ROOM_EDGE_MARGIN),
-    z: clamp(candidate.z as number, -ROOM_DIMENSIONS.depth / 2 + ROOM_EDGE_MARGIN, ROOM_DIMENSIONS.depth / 2 - ROOM_EDGE_MARGIN),
+    x: clampedPosition.x,
+    z: clampedPosition.z,
     eyeY: clamp(candidate.eyeY as number, 0.3, 4),
     floorY: clamp(typeof candidate.floorY === "number" ? candidate.floorY : 0, 0, ROOM_DIMENSIONS.height - 1.8),
     jumpOffset: clamp(candidate.jumpOffset as number, 0, 3),
