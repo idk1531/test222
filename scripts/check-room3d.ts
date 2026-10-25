@@ -48,9 +48,9 @@ assert.deepEqual(NESTED_CITY.frames.map(({ width, depth, height }) => ({ width, 
 ], "三重長方形框架需嚴格採構件表 X×Z×Y 尺寸，逐層等比例縮小");
 assert.deepEqual(NESTED_CITY.frames.map(({ x, z, bottom }) => ({ x, z, bottom })), [
   { x: 0, z: 0, bottom: 0 },
-  { x: 0, z: 0, bottom: 2 },
-  { x: 0, z: 0, bottom: 4 },
-]);
+  { x: 4, z: 4, bottom: 2 },
+  { x: -4, z: -4, bottom: 4 },
+], "三層使用明確有限的水平錯位，並保持各自 Y 底標高");
 assert.ok(NESTED_CITY.frames.every((frame) => Math.abs(frame.rotationY) < 1e-12), "三層框架必須共用 X/Z 軸，不得彼此旋轉");
 for (let index = 1; index < NESTED_CITY.frames.length; index++) {
   const parent = NESTED_CITY.frames[index - 1];
@@ -416,15 +416,13 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   assert.equal(coreFrame.plane, "box");
   assert.deepEqual(NESTED_CITY.frames.map(({ width, depth, height, x, z, bottom }) => ({ width, depth, height, x, z, bottom })), [
     { width: 48, depth: 16, height: 16, x: 0, z: 0, bottom: 0 },
-    { width: 36, depth: 12, height: 12, x: 0, z: 0, bottom: 2 },
-    { width: 24, depth: 8, height: 8, x: 0, z: 0, bottom: 4 },
+    { width: 36, depth: 12, height: 12, x: 4, z: 4, bottom: 2 },
+    { width: 24, depth: 8, height: 8, x: -4, z: -4, bottom: 4 },
   ]);
   assert.ok(NESTED_CITY.frames.every((frame) => Math.abs(frame.rotationY) < 1e-12),
-    "三層長方形框架必須共中心、平行對齊，不得旋轉或錯移");
-  const outerMinX = outerFrame.x - outerFrame.width / 2;
-  const outerMaxX = outerFrame.x + outerFrame.width / 2;
-  const outerMinZ = outerFrame.z - outerFrame.depth! / 2;
-  const outerMaxZ = outerFrame.z + outerFrame.depth! / 2;
+    "三層長方形框架保留指定的中心錯位但一律不得旋轉");
+  assert.deepEqual(NESTED_CITY.frames.map(({ bottom, height }) => bottom + height / 2), [8, 8, 8],
+    "三層等比例縮尺必須以同一個 Y=8 中心對齊");
   const localPlanCorners = (frame: typeof outerFrame, x = 0, z = 0, width = frame.width, depth = frame.depth!) => {
     const cos = Math.cos(frame.rotationY);
     const sin = Math.sin(frame.rotationY);
@@ -443,13 +441,22 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     return Math.abs(localX) <= frame.width / 2 - inset + 1e-9 &&
       Math.abs(localZ) <= frame.depth! / 2 - inset + 1e-9;
   };
+  const buildingMinX = -ROOM.width / 2;
+  const buildingMaxX = ROOM.width / 2;
+  const buildingMinZ = -ROOM.depth / 2;
+  const buildingMaxZ = ROOM.depth / 2;
   for (const corner of localPlanCorners(middleFrame)) {
-    assert.ok(corner.x > outerMinX && corner.x < outerMaxX && corner.z > outerMinZ && corner.z < outerMaxZ,
-      "36×12 長方形中框需落在 48×16 外框內且保持同向");
+    assert.ok(corner.x >= buildingMinX && corner.x <= buildingMaxX &&
+      corner.z >= buildingMinZ && corner.z <= buildingMaxZ,
+    "偏移後 36×12 中框仍須完整落在 48×48 建築外包內");
   }
+  assert.equal(middleFrame.z + middleFrame.depth! / 2 - (outerFrame.z + outerFrame.depth! / 2), 2,
+    "照指定中心，中框只在 +Z 方向超出外框矩形 2 m，不得擴大整體建築外包");
   for (const corner of localPlanCorners(coreFrame)) {
-    assert.ok(pointInFramePlan(middleFrame, corner.x, corner.z, middleFrame.thickness / 2),
-      "24×8 長方形內核需落在 36×12 中框淨空範圍內");
+    assert.ok(corner.x >= buildingMinX && corner.x <= buildingMaxX &&
+      corner.z >= buildingMinZ && corner.z <= buildingMaxZ &&
+      pointInFramePlan(outerFrame, corner.x, corner.z),
+    "偏移後 24×8 內核仍須位於建築外包及外框範圍內；不假設它完全置中於中框");
   }
   assert.equal(middleFrame.bottom + middleFrame.height, 14);
   assert.equal(coreFrame.bottom + coreFrame.height, 12);
@@ -458,6 +465,26 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   "內核需落在中框高度範圍內，對應 2F–4F 挑空");
   for (const frame of NESTED_CITY.frames) {
     const members = cityFrameMembers(frame);
+    const memberBounds = {
+      minX: Math.min(...members.map((member) => member.x - member.width / 2)),
+      maxX: Math.max(...members.map((member) => member.x + member.width / 2)),
+      minZ: Math.min(...members.map((member) => member.z - member.depth / 2)),
+      maxZ: Math.max(...members.map((member) => member.z + member.depth / 2)),
+      minY: Math.min(...members.map((member) => member.bottom)),
+      maxY: Math.max(...members.map((member) => member.top)),
+    };
+    assert.deepEqual(memberBounds, {
+      minX: -frame.width / 2,
+      maxX: frame.width / 2,
+      minZ: -frame.depth! / 2,
+      maxZ: frame.depth! / 2,
+      minY: frame.bottom,
+      maxY: frame.bottom + frame.height,
+    }, `${frame.id} 實際梁柱網格外包必須等於尺寸表，不可只改規格資料`);
+    const referenceSectionRatio = NESTED_CITY.frames[0].thickness / NESTED_CITY.frames[0].depth!;
+    assert.ok(Math.abs(frame.thickness / frame.depth! - referenceSectionRatio) < 1e-12 &&
+      Math.abs(frame.beamHeight / frame.height - referenceSectionRatio) < 1e-12,
+    `${frame.id} 未標定的梁柱截面只能採一致比例，不得破壞逐層縮尺`);
     const posts = members.filter((member) => member.bottom === frame.bottom &&
       member.top === frame.bottom + frame.height &&
       Math.abs(member.width - frame.thickness) < 1e-9 &&
@@ -466,30 +493,45 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     for (const member of members) {
       assert.ok(member.bottom >= -1e-9 && member.top <= ROOM.height + 1e-9, `${frame.id} 構件須位於 0–16 m 剖面內`);
       for (const corner of localPlanCorners(frame, member.x, member.z, member.width, member.depth)) {
-        assert.ok(corner.x >= outerMinX - 1e-6 && corner.x <= outerMaxX + 1e-6 &&
-          corner.z >= outerMinZ - 1e-6 && corner.z <= outerMaxZ + 1e-6,
-        `${frame.id} 的實際梁柱不得超出外框平面包絡`);
+        assert.ok(corner.x >= buildingMinX - 1e-6 && corner.x <= buildingMaxX + 1e-6 &&
+          corner.z >= buildingMinZ - 1e-6 && corner.z <= buildingMaxZ + 1e-6,
+        `${frame.id} 的實際梁柱不得超出 48×48 建築外包`);
       }
     }
   }
-  const coreWestTopBeamY = coreFrame.bottom + coreFrame.height - coreFrame.beamHeight;
-  const coreWestTopX = -(coreFrame.width / 2 - coreFrame.thickness / 2);
-  const coreWestTopSegments = cityFrameMembers(coreFrame).filter((member) =>
-    Math.abs(member.x - coreWestTopX) < 1e-9 &&
-    Math.abs(member.width - coreFrame.thickness) < 1e-9 &&
-    Math.abs(member.bottom - coreWestTopBeamY) < 1e-9 &&
-    Math.abs(member.top - (coreFrame.bottom + coreFrame.height)) < 1e-9
-  );
-  assert.equal(coreWestTopSegments.length, 2, "內核西側頂梁需在 3F→4F 樓梯穿越處實際斷開");
-  for (const segment of coreWestTopSegments) {
-    const start = segment.z - segment.depth / 2;
-    const end = segment.z + segment.depth / 2;
-    assert.ok(end <= coreFrame.openings![0].start + 1e-6 || start >= coreFrame.openings![0].end - 1e-6,
-      "內核頂梁的分段端點不得侵入樓梯淨空");
-  }
-  for (const frame of NESTED_CITY.frames) {
+  assert.deepEqual(coreFrame.openings ?? [], [], "位於 C 框 +Z 外側的上層樓梯不應再切開內核梁柱");
+  const upperStair = NESTED_CITY.stairs[2];
+  assert.ok(upperStair.start.z - upperStair.width / 2 > coreFrame.z + coreFrame.depth! / 2,
+    "3F→4F 踏階須完整走在偏移內核 +Z 邊界之外，保留 30 cm 構件淨距");
+  const frameMemberOverlapCount = (frameA: typeof outerFrame, frameB: typeof outerFrame) => {
+    const membersA = cityFrameMembers(frameA);
+    const membersB = cityFrameMembers(frameB);
+    let count = 0;
+    for (const a of membersA) {
+      const aMinX = frameA.x + a.x - a.width / 2;
+      const aMaxX = frameA.x + a.x + a.width / 2;
+      const aMinZ = frameA.z + a.z - a.depth / 2;
+      const aMaxZ = frameA.z + a.z + a.depth / 2;
+      for (const b of membersB) {
+        const overlapX = Math.min(aMaxX, frameB.x + b.x + b.width / 2) - Math.max(aMinX, frameB.x + b.x - b.width / 2);
+        const overlapZ = Math.min(aMaxZ, frameB.z + b.z + b.depth / 2) - Math.max(aMinZ, frameB.z + b.z - b.depth / 2);
+        const overlapY = Math.min(a.top, b.top) - Math.max(a.bottom, b.bottom);
+        if (overlapX > 1e-6 && overlapZ > 1e-6 && overlapY > 1e-6) count++;
+      }
+    }
+    return count;
+  };
+  assert.deepEqual([
+    frameMemberOverlapCount(outerFrame, middleFrame),
+    frameMemberOverlapCount(outerFrame, coreFrame),
+    frameMemberOverlapCount(middleFrame, coreFrame),
+  ], [6, 12, 4], "指定錯位的實際梁柱交疊數需保持可追蹤，對應圖中的交錯節點");
+  const level2Stair = NESTED_CITY.stairs[1];
+  for (const frame of [outerFrame, middleFrame]) {
     const opening = frame.openings?.find(({ edge }) => edge === "south");
-    assert.ok(opening, `${frame.id} 需為上樓梯保留南側橫梁淨空`);
+    assert.ok(opening, `${frame.id} 需為 2F→3F 樓梯保留南側橫梁淨空`);
+    assert.equal((opening.start + opening.end) / 2, level2Stair.start.x - frame.x,
+      `${frame.id} 的局部開口必須轉換到指定中心後，與世界 X=${level2Stair.start.x} 樓梯對齊`);
     const bandHeight = frame.beamHeight * 0.58;
     const bandBottom = 8 - bandHeight / 2;
     const southEdgeZ = frame.depth! / 2 - frame.thickness / 2;
@@ -499,12 +541,22 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
       Math.abs(member.bottom - bandBottom) < 1e-9 &&
       Math.abs(member.top - (bandBottom + bandHeight)) < 1e-9
     );
-    assert.equal(bandSegments.length, 2, `${frame.id} 的 Y=8 南側環梁需依樓梯通道分成兩段`);
+    assert.equal(bandSegments.length, 2, `${frame.id} 的 Y=8 南側環梁需在樓梯通道分成兩段`);
     for (const segment of bandSegments) {
       const start = segment.x - segment.width / 2;
       const end = segment.x + segment.width / 2;
       assert.ok(end <= opening.start + 1e-6 || start >= opening.end - 1e-6,
         `${frame.id} 的南側環梁不得侵入樓梯淨空`);
+    }
+    for (const y of [4, 12]) {
+      const otherBandBottom = y - bandHeight / 2;
+      const intactBandSegments = cityFrameMembers(frame).filter((member) =>
+        Math.abs(member.z - southEdgeZ) < 1e-9 &&
+        Math.abs(member.depth - frame.thickness) < 1e-9 &&
+        Math.abs(member.bottom - otherBandBottom) < 1e-9 &&
+        Math.abs(member.top - (otherBandBottom + bandHeight)) < 1e-9
+      );
+      assert.equal(intactBandSegments.length, 1, `${frame.id} 的 Y=${y} 南側環梁不得因樓梯開口被切斷`);
     }
   }
   assert.ok(cityFrameMembers(outerFrame).length >= 20 && cityFrameMembers(middleFrame).length >= 20 &&

@@ -69,6 +69,27 @@ export interface CityFrame {
   bands?: readonly number[];
   openings?: readonly CityFrameOpening[];
 }
+type PrimaryFrameScheduleRow = Pick<CityFrame,
+  "id" | "x" | "z" | "bottom" | "width" | "height" | "material" | "bands" | "openings"
+> & { depth: number };
+
+/**
+ * Interpret the clarified X×Z×Y triplets as the nested-layer envelopes and keep them authoritative.
+ * The repeated rail-section proportion is only a rendering assumption (10% of Z/Y), not a measured value
+ * to claim from the drawing; this helper keeps that assumption consistent across every shrinking layer.
+ */
+function primaryFrameFromSchedule(row: PrimaryFrameScheduleRow): CityFrame {
+  return {
+    ...row,
+    plane: "box",
+    x: row.x,
+    z: row.z,
+    thickness: row.depth / 10,
+    beamHeight: row.height / 10,
+    rotationY: 0,
+  };
+}
+
 export interface CityFrameMember {
   x: number;
   z: number;
@@ -99,29 +120,21 @@ export const NESTED_CITY = {
   // 20 × 20 m clear shaft through 2F–4F; narrow crossings are deliberately offset by level.
   atrium: { x: 0, z: 0, width: 20, depth: 20 },
   frames: [
-    // Table dimensions are X × Z × Y: each unrotated rectangle is a proportional inset of the previous one.
-    { id: "outer-timber-shell", plane: "box", x: 0, z: 0, bottom: 0, width: 48, depth: 16, height: 16, thickness: 1.6, beamHeight: 1.6, rotationY: 0, material: "timber", bands: [4, 8, 12], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }] },
-    { id: "middle-stone-frame", plane: "box", x: 0, z: 0, bottom: 2, width: 36, depth: 12, height: 12, thickness: 1.2, beamHeight: 1.2, rotationY: 0, material: "stone", bands: [2, 6, 10], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }] },
-    {
-      id: "inner-core-frame",
-      plane: "box",
-      x: 0,
-      z: 0,
-      bottom: 4,
-      width: 24,
-      depth: 8,
-      height: 8,
-      thickness: 0.8,
-      beamHeight: 0.8,
-      rotationY: 0,
-      material: "core",
+    // Authoritative primary-layer envelopes from the schedule, in X × Z × Y order.
+    // The square 48 × 48 m outline belongs to the building envelope, not to these nested rectangles.
+    primaryFrameFromSchedule({
+      id: "outer-timber-shell", x: 0, z: 0, bottom: 0, width: 48, depth: 16, height: 16, material: "timber",
+      bands: [4, 8, 12], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }],
+    }),
+    primaryFrameFromSchedule({
+      id: "middle-stone-frame", x: 4, z: 4, bottom: 2, width: 36, depth: 12, height: 12, material: "stone",
+      // Local interval 2.3–4.7 maps to world X=6.3–8.7, aligned with the X=7.5 stair.
+      bands: [2, 6, 10], openings: [{ edge: "south", start: 2.3, end: 4.7, bottom: 7.2, top: 8.8 }],
+    }),
+    primaryFrameFromSchedule({
+      id: "inner-core-frame", x: -4, z: -4, bottom: 4, width: 24, depth: 8, height: 8, material: "core",
       bands: [4],
-      // Cut only the stair-clearance intervals through the top-west beam and Y=8 south band.
-      openings: [
-        { edge: "west", start: 0.2, end: 2.2, bottom: 11.1, top: 12.2 },
-        { edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 },
-      ],
-    },
+    }),
   ] satisfies readonly CityFrame[],
   // Extra furnished-room volumes are shown only in the existing walk-through mode, not in structure inspection.
   featureFrames: [
