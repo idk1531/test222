@@ -421,6 +421,8 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   ]);
   assert.ok(NESTED_CITY.frames.every((frame) => Math.abs(frame.rotationY) < 1e-12),
     "三層長方形框架必須共中心、平行對齊，不得旋轉或錯移");
+  assert.deepEqual(NESTED_CITY.frames.map(({ bottom, height }) => bottom + height / 2), [8, 8, 8],
+    "三層等比例縮尺必須以同一個 Y=8 中心對齊");
   const outerMinX = outerFrame.x - outerFrame.width / 2;
   const outerMaxX = outerFrame.x + outerFrame.width / 2;
   const outerMinZ = outerFrame.z - outerFrame.depth! / 2;
@@ -458,6 +460,25 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   "內核需落在中框高度範圍內，對應 2F–4F 挑空");
   for (const frame of NESTED_CITY.frames) {
     const members = cityFrameMembers(frame);
+    const memberBounds = {
+      minX: Math.min(...members.map((member) => member.x - member.width / 2)),
+      maxX: Math.max(...members.map((member) => member.x + member.width / 2)),
+      minZ: Math.min(...members.map((member) => member.z - member.depth / 2)),
+      maxZ: Math.max(...members.map((member) => member.z + member.depth / 2)),
+      minY: Math.min(...members.map((member) => member.bottom)),
+      maxY: Math.max(...members.map((member) => member.top)),
+    };
+    assert.deepEqual(memberBounds, {
+      minX: -frame.width / 2,
+      maxX: frame.width / 2,
+      minZ: -frame.depth! / 2,
+      maxZ: frame.depth! / 2,
+      minY: frame.bottom,
+      maxY: frame.bottom + frame.height,
+    }, `${frame.id} 實際梁柱網格外包必須等於尺寸表，不可只改規格資料`);
+    assert.ok(Math.abs(frame.thickness / frame.depth! - 0.1) < 1e-12 &&
+      Math.abs(frame.beamHeight / frame.height - 0.1) < 1e-12,
+    `${frame.id} 未標定的梁柱截面須按同一可見比例縮放`);
     const posts = members.filter((member) => member.bottom === frame.bottom &&
       member.top === frame.bottom + frame.height &&
       Math.abs(member.width - frame.thickness) < 1e-9 &&
