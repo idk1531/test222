@@ -3,6 +3,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import {
+  cityCorridorFramePlan,
   cityFrameMembers,
   cityStairHeightAt,
   nestedCityPlatformRails,
@@ -17,6 +18,8 @@ import { attachPhotoMap } from "@/lib/roomTextures";
 import type { StudySceneApi } from "./StudyScene";
 
 const SLAB_THICKNESS = 0.3;
+const TRAPEZOID_WALL_BAND_HEIGHT = 0.55; // Rendering-only; the reference does not specify a wall-beam height.
+const CORRIDOR_FRAME_MEMBER_SECTION = 0.4; // Rendering-only; the frame/deck plan width remains the specified 2 m.
 const STAIR_TREAD_THICKNESS = 0.12;
 const BRIDGE_POST_WIDTH = 0.085;
 const PLATFORM_RAIL_WIDTH = NESTED_CITY.platformRailPostWidth;
@@ -115,6 +118,159 @@ function addBeamBetween(
   mesh.position.copy(from).add(to).multiplyScalar(0.5);
   mesh.quaternion.setFromUnitVectors(LOCAL_Z, direction.normalize());
   group.add(mesh);
+}
+
+function addPolygonSlab(
+  group: THREE.Group,
+  footprint: readonly { x: number; z: number }[],
+  topY: number,
+  material: THREE.Material,
+  name: string
+) {
+  if (footprint.length < 3) return;
+  const shape = new THREE.Shape();
+  shape.moveTo(footprint[0].x, -footprint[0].z);
+  for (const point of footprint.slice(1)) shape.lineTo(point.x, -point.z);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: SLAB_THICKNESS, bevelEnabled: false });
+  geometry.rotateX(-Math.PI / 2);
+  geometry.computeVertexNormals();
+  const slab = new THREE.Mesh(geometry, material);
+  slab.name = name;
+  slab.position.y = topY - SLAB_THICKNESS;
+  slab.castShadow = true;
+  slab.receiveShadow = true;
+  slab.userData.kind = "nestedCityTrapezoidCorridorFloor";
+  group.add(slab);
+}
+
+function addTrapezoidWallFrame(group: THREE.Group, material: THREE.Material) {
+  const frameWidth = NESTED_CITY.corridor.width;
+  const bandHeight = TRAPEZOID_WALL_BAND_HEIGHT;
+  const frameGroup = new THREE.Group();
+  frameGroup.name = "nested-city-trapezoid-wall-frame";
+  group.add(frameGroup);
+
+  const { A, B, C, D } = NESTED_CITY.trapezoid.points;
+  for (const point of [A, B, C, D]) {
+    frameGroup.add(makeBox(
+      frameWidth,
+      ROOM.height,
+      frameWidth,
+      material,
+      point.x,
+      ROOM.height / 2,
+      point.z
+    ));
+  }
+  for (const wall of NESTED_CITY.trapezoid.wallEdges) {
+    for (const level of NESTED_CITY.trapezoid.wallBandLevels) {
+      const centerY = level === ROOM.height ? level - bandHeight / 2 : level + bandHeight / 2;
+      addBeamBetween(
+        frameGroup,
+        new THREE.Vector3(wall.from.x, centerY, wall.from.z),
+        new THREE.Vector3(wall.to.x, centerY, wall.to.z),
+        frameWidth,
+        bandHeight,
+        material
+      );
+    }
+  }
+}
+
+function addCorridorFrame(
+  group: THREE.Group,
+  frame: (typeof NESTED_CITY.corridor.frames)[number],
+  material: THREE.Material
+) {
+  const plan = cityCorridorFramePlan(frame);
+  if (!plan || plan.length <= 1e-4) return;
+  const { from, to } = plan;
+  const directionX = Math.sin(plan.rotationY);
+  const directionZ = Math.cos(plan.rotationY);
+  const sideX = -directionZ;
+  const sideZ = directionX;
+  const member = CORRIDOR_FRAME_MEMBER_SECTION;
+  const sideOffset = frame.width / 2 - member / 2;
+  const lowerY = frame.bottom + member / 2;
+  const upperY = frame.top - member / 2;
+  const frameGroup = new THREE.Group();
+  frameGroup.name = `nested-city-corridor-frame:${frame.id}`;
+  frameGroup.userData.corridorId = frame.corridorId;
+  group.add(frameGroup);
+
+  for (const side of [-1, 1]) {
+    const offsetX = sideX * sideOffset * side;
+    const offsetZ = sideZ * sideOffset * side;
+    const startPoint = new THREE.Vector3(from.x + offsetX, 0, from.z + offsetZ);
+    const endPoint = new THREE.Vector3(to.x + offsetX, 0, to.z + offsetZ);
+    for (const y of [lowerY, upperY]) {
+      addBeamBetween(
+        frameGroup,
+        new THREE.Vector3(startPoint.x, y, startPoint.z),
+        new THREE.Vector3(endPoint.x, y, endPoint.z),
+        member,
+        member,
+        material
+      );
+    }
+  }
+
+  for (const endpoint of [from, to]) {
+    const near = new THREE.Vector3(
+      endpoint.x - sideX * sideOffset,
+      0,
+      endpoint.z - sideZ * sideOffset
+    );
+    const far = new THREE.Vector3(
+      endpoint.x + sideX * sideOffset,
+      0,
+      endpoint.z + sideZ * sideOffset
+    );
+    for (const y of [lowerY, upperY]) {
+      addBeamBetween(
+        frameGroup,
+        new THREE.Vector3(near.x, y, near.z),
+        new THREE.Vector3(far.x, y, far.z),
+        member,
+        member,
+        material
+      );
+    }
+    for (const offset of [-sideOffset, sideOffset]) {
+      frameGroup.add(makeBox(
+        member,
+        frame.top - frame.bottom - member * 2,
+        member,
+        material,
+        endpoint.x + sideX * offset,
+        (frame.bottom + frame.top) / 2,
+        endpoint.z + sideZ * offset
+      ));
+    }
+  }
+}
+
+function addTrapezoidCorridorStructure(
+  group: THREE.Group,
+  deckMaterials: readonly THREE.Material[],
+  frameMaterials: Record<CityMaterial, THREE.Material>,
+  wallMaterial: THREE.Material
+) {
+  addTrapezoidWallFrame(group, wallMaterial);
+  NESTED_CITY.corridor.floors.forEach((level, index) => {
+    const material = deckMaterials[index] ?? deckMaterials[deckMaterials.length - 1];
+    addPolygonSlab(
+      group,
+      NESTED_CITY.corridor.footprint,
+      level,
+      material,
+      `nested-city-trapezoid-corridor-floor:${level}`
+    );
+  });
+  for (const frame of NESTED_CITY.corridor.frames) {
+    addCorridorFrame(group, frame, frameMaterials[frame.material]);
+  }
 }
 
 function addStair(
@@ -497,7 +653,8 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       textureDisposers.push(attachPhotoMap(core, "microcement", { repeat: [3, 2], tint: "#958d87", anisotropy }));
     }
 
-    // Structure inspection deliberately renders only the three dimensioned primary frames.
+    // The fixed-color inspection shows the dimensioned primary frames plus the accepted trapezoid model;
+    // the furnished walk-through continues to use its existing platform/stair layout below.
     const visibleFrames = structureOnly ? NESTED_CITY.frames : [...NESTED_CITY.frames, ...NESTED_CITY.featureFrames];
     for (const frame of visibleFrames) {
       const material = frame.material === "timber" ? timber : frame.material === "stone" ? stone : core;
@@ -530,38 +687,39 @@ export const NestedCityGeometry: React.FC<{ api: StudySceneApi; whiteModel?: boo
       group.add(makeBox(0.055, 0.62, 0.06, metal, 0.14, 1.5, doorZ - 0.07, false));
     }
 
-    for (const column of NESTED_CITY.columns) {
-      group.add(makeBox(column.width, column.top - column.bottom, column.depth, stone, column.x, (column.top + column.bottom) / 2, column.z));
-    }
+    if (!structureOnly) {
+      for (const column of NESTED_CITY.columns) {
+        group.add(makeBox(column.width, column.top - column.bottom, column.depth, stone, column.x, (column.top + column.bottom) / 2, column.z));
+      }
 
-    for (const platform of NESTED_CITY.platforms) {
-      const y = NESTED_CITY.levels[platform.level];
-      const slab = makeBox(
-        platform.width,
-        SLAB_THICKNESS,
-        platform.depth,
-        platformMaterials[platform.material],
-        platform.x,
-        y - SLAB_THICKNESS / 2,
-        platform.z
-      );
-      slab.name = `nested-city-platform:${platform.id}`;
-      group.add(slab);
-    }
+      for (const platform of NESTED_CITY.platforms) {
+        const y = NESTED_CITY.levels[platform.level];
+        const slab = makeBox(
+          platform.width,
+          SLAB_THICKNESS,
+          platform.depth,
+          platformMaterials[platform.material],
+          platform.x,
+          y - SLAB_THICKNESS / 2,
+          platform.z
+        );
+        slab.name = `nested-city-platform:${platform.id}`;
+        group.add(slab);
+      }
 
-    for (const stair of NESTED_CITY.stairs) {
-      addStair(group, stair, materials, rail, tread);
-    }
-    for (const bridgeRail of NESTED_CITY.bridgeRails) {
-      addBridgeRail(group, bridgeRail, railStone, metal, glass);
-    }
-    for (const platformRail of nestedCityPlatformRails()) {
-      addPlatformGuardrail(group, platformRail, railStone, metal, glass);
+      for (const stair of NESTED_CITY.stairs) {
+        addStair(group, stair, materials, rail, tread);
+      }
+      for (const bridgeRail of NESTED_CITY.bridgeRails) {
+        addBridgeRail(group, bridgeRail, railStone, metal, glass);
+      }
+      for (const platformRail of nestedCityPlatformRails()) {
+        addPlatformGuardrail(group, platformRail, railStone, metal, glass);
+      }
     }
 
     if (structureOnly) {
-      // A ground-only base makes the structural model readable without adding walls or room décor.
-      group.add(makeBox(ROOM.width, 0.3, ROOM.depth, deckStone, 0, -0.15, 0, false));
+      addTrapezoidCorridorStructure(group, [deckTimber, deckStone, deckCore, deckStone], materials, timber);
       const hemi = new THREE.HemisphereLight("#f5f7fb", "#85817a", 2.1);
       const key = new THREE.DirectionalLight("#fff4e6", 2.6);
       key.position.set(42, 64, 38);

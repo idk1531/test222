@@ -5,7 +5,7 @@ import * as THREE from "three";
 import {
   CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
   MARBLE_ROUGH, MATCH_VIEW, MAX_WALKABLE_STEP, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
-  cityFrameMembers, cityStairHeightAt, colliderOverlapsCircle, nestedCityPlatformRails, nestedCityInspectionDistance,
+  cityCorridorFramePlan, cityFrameMembers, cityStairHeightAt, colliderOverlapsCircle, nestedCityPlatformRails, nestedCityInspectionDistance,
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
@@ -37,6 +37,104 @@ assert.deepEqual(nestedCityFloorLabel(8), { full: "3F · 8 m", compact: "3F" });
 assert.deepEqual(nestedCityFloorLabel(12), { full: "4F · 12 m", compact: "4F" });
 assert.deepEqual(nestedCityFloorLabel(2), { full: "階梯", compact: "階梯" });
 assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compact: "未知" });
+
+// Trapezoid envelope and connected 2 m corridor chain (coordinates are X/Z in metres).
+{
+  const { trapezoid, corridor } = NESTED_CITY;
+  const { A, B, C, D, E, F } = trapezoid.points;
+  assert.deepEqual([A, B, C, D, E, F], [
+    { x: -12, z: -24 }, { x: 12, z: -24 }, { x: 24, z: 24 },
+    { x: -24, z: 24 }, { x: 21, z: 12 }, { x: -21, z: 12 },
+  ], "AB=24 m is the selected modeling default; E/F are exactly 3/4 along B→C and A→D");
+  assert.equal(trapezoid.shortBase, 24);
+  assert.equal(trapezoid.longBase, 48);
+  assert.equal(trapezoid.depth, 48);
+  assert.equal(trapezoid.openEdge, "CD");
+  assert.deepEqual(trapezoid.wallEdges.map(({ id }) => id), ["AB", "BC", "AD"],
+    "the CD boundary stays open and must not be rendered as a wall/frame beam");
+  assert.deepEqual(trapezoid.wallBandLevels, [0, 4, 8, 12, 16]);
+  assert.deepEqual(corridor.floors, [0, 4, 8, 12], "the connected corridor footprint is present on all four floor planes");
+  assert.equal(corridor.width, 2);
+  assert.equal(NESTED_CITY.floorHeight, 4);
+  assert.deepEqual(corridor.segments.map(({ id, referenceFrom, referenceTo }) => ({ id, referenceFrom, referenceTo })), [
+    { id: "CE", referenceFrom: "C", referenceTo: "E" },
+    { id: "EF", referenceFrom: "E", referenceTo: "F" },
+    { id: "FA", referenceFrom: "F", referenceTo: "A" },
+    { id: "AB", referenceFrom: "A", referenceTo: "B" },
+  ], "the route is the connected chain C→E→F→A→B, with no CD corridor");
+  for (const segment of corridor.segments) {
+    const referenceFrom = trapezoid.points[segment.referenceFrom];
+    const referenceTo = trapezoid.points[segment.referenceTo];
+    const actual = { x: segment.to.x - segment.from.x, z: segment.to.z - segment.from.z };
+    const reference = { x: referenceTo.x - referenceFrom.x, z: referenceTo.z - referenceFrom.z };
+    assert.ok(Math.hypot(actual.x, actual.z) > 0);
+    assert.ok(Math.abs(actual.x * reference.z - actual.z * reference.x) < 1e-6,
+      `${segment.id} corridor floor projection must remain parallel to its named run`);
+  }
+
+  const trapezoidVertices = [A, B, C, D];
+  const signedArea = (points: readonly { x: number; z: number }[]) => points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + point.x * next.z - next.x * point.z;
+  }, 0) / 2;
+  const trapezoidArea = (trapezoid.shortBase + trapezoid.longBase) * trapezoid.depth / 2;
+  const corridorArea = Math.abs(signedArea(corridor.footprint));
+  assert.equal(trapezoidArea, 1728);
+  assert.ok(corridorArea > 0 && corridorArea < trapezoidArea * 0.2,
+    "the narrow connected corridors must leave the majority of the trapezoid open to view");
+  const orientation = Math.sign(signedArea(trapezoidVertices));
+  for (const point of corridor.footprint) {
+    for (let index = 0; index < trapezoidVertices.length; index++) {
+      const start = trapezoidVertices[index];
+      const end = trapezoidVertices[(index + 1) % trapezoidVertices.length];
+      const edge = { x: end.x - start.x, z: end.z - start.z };
+      const delta = { x: point.x - start.x, z: point.z - start.z };
+      assert.ok((edge.x * delta.z - edge.z * delta.x) * orientation >= -1e-6,
+        "corridor slabs must be clipped to the trapezoid footprint");
+    }
+  }
+  const corridorShape = new THREE.Shape();
+  corridorShape.moveTo(corridor.footprint[0].x, -corridor.footprint[0].z);
+  for (const point of corridor.footprint.slice(1)) corridorShape.lineTo(point.x, -point.z);
+  corridorShape.closePath();
+  const corridorGeometry = new THREE.ExtrudeGeometry(corridorShape, { depth: 0.3, bevelEnabled: false });
+  corridorGeometry.rotateX(-Math.PI / 2);
+  corridorGeometry.computeBoundingBox();
+  assert.ok(corridorGeometry.attributes.position.count > 0 && corridorGeometry.boundingBox,
+    "the connected corridor outline must triangulate to actual Three.js slab geometry");
+  assert.ok(corridorGeometry.boundingBox!.min.x >= -ROOM.width / 2 - 1e-6 &&
+    corridorGeometry.boundingBox!.max.x <= ROOM.width / 2 + 1e-6 &&
+    corridorGeometry.boundingBox!.min.z >= -ROOM.depth / 2 - 1e-6 &&
+    corridorGeometry.boundingBox!.max.z <= ROOM.depth / 2 + 1e-6,
+  "corridor slab geometry must stay within the 48×48 m envelope");
+  corridorGeometry.dispose();
+
+  const [t1, t2] = corridor.frames;
+  assert.deepEqual(corridor.frames.map(({ id, corridorId, width, bottom, top }) => ({ id, corridorId, width, bottom, top })), [
+    { id: "T1", corridorId: "EF", width: 2, bottom: 0, top: 8 },
+    { id: "T2", corridorId: "FA", width: 2, bottom: 8, top: 12 },
+  ]);
+  for (const frame of corridor.frames) {
+    const segment = corridor.segments.find(({ id }) => id === frame.corridorId);
+    assert.ok(segment, `${frame.id} must refer to a rendered corridor segment`);
+    assert.equal(frame.width, corridor.width, `${frame.id} floor/ceiling rectangle width matches the corridor`);
+    assert.ok(Number.isInteger((frame.top - frame.bottom) / NESTED_CITY.floorHeight),
+      `${frame.id} height must be an integer multiple of floor height h`);
+    const direction = { x: segment!.to.x - segment!.from.x, z: segment!.to.z - segment!.from.z };
+    const plan = cityCorridorFramePlan(frame);
+    assert.ok(plan);
+    assert.ok(Math.abs(plan.length - Math.hypot(direction.x, direction.z)) < 1e-9 && plan.width === corridor.width,
+      `${frame.id} floor/ceiling rectangle must retain the corridor's length and width`);
+    const projectedRectangleAxis = { x: Math.sin(plan.rotationY), z: Math.cos(plan.rotationY) };
+    assert.ok(Math.abs(direction.x * projectedRectangleAxis.z - direction.z * projectedRectangleAxis.x) < 1e-9,
+      `${frame.id} floor/ceiling projection must have the same long-axis orientation as ${frame.corridorId}`);
+  }
+  assert.ok(t1.bottom < NESTED_CITY.levels[1] && t1.top > NESTED_CITY.levels[1],
+    "T1 spans 1h below and 1h above the 2F corridor");
+  assert.equal(t2.top, t1.top + NESTED_CITY.floorHeight,
+    "T2 ceiling is at least one floor height above the T1 ceiling");
+}
+
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 1).length, 5, "2F 由兩側廊、錯位跨橋和南北連接段組成");
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 2).length, 4, "3F 以錯位側廊、跨橋和北連接段維持大挑空");
 assert.equal(NESTED_CITY.platforms.filter((platform) => platform.level === 3).length, 4, "4F 由錯位觀景平台、短橋和小露台組成，而非鋪滿整層");
@@ -405,7 +503,7 @@ assert.ok(shelfPlankY(4, 5) > SHELF.ledge.top + 0.1);
 // 書脊面在牆與室內之間，且朝 +X
 assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
 
-// ---- 嵌套之城白模：三重長方形框架同向縮尺、中央挑空、4F 環廊、開放踏階與淨高 ----
+// ---- 嵌套之城白模：梯形走廊與 T1/T2；保留三重長方框架、中央挑空、樓梯與淨高 ----
 {
   const [outerFrame, middleFrame, coreFrame] = NESTED_CITY.frames;
   assert.equal(outerFrame.id, "outer-timber-shell");
@@ -481,10 +579,10 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
       minY: frame.bottom,
       maxY: frame.bottom + frame.height,
     }, `${frame.id} 實際梁柱網格外包必須等於尺寸表，不可只改規格資料`);
-    const referenceSectionRatio = NESTED_CITY.frames[0].thickness / NESTED_CITY.frames[0].depth!;
-    assert.ok(Math.abs(frame.thickness / frame.depth! - referenceSectionRatio) < 1e-12 &&
-      Math.abs(frame.beamHeight / frame.height - referenceSectionRatio) < 1e-12,
-    `${frame.id} 未標定的梁柱截面只能採一致比例，不得破壞逐層縮尺`);
+    assert.equal(frame.thickness, NESTED_CITY.corridor.width,
+      `${frame.id} 平面構件寬度須沿用 2 m 走廊寬，外包尺寸不變`);
+    assert.ok(Math.abs(frame.beamHeight / frame.height - 0.1) < 1e-12,
+      `${frame.id} 未標定的垂直梁高只作一致呈現假設，不可冒稱圖面量值`);
     const posts = members.filter((member) => member.bottom === frame.bottom &&
       member.top === frame.bottom + frame.height &&
       Math.abs(member.width - frame.thickness) < 1e-9 &&
@@ -525,7 +623,7 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     frameMemberOverlapCount(outerFrame, middleFrame),
     frameMemberOverlapCount(outerFrame, coreFrame),
     frameMemberOverlapCount(middleFrame, coreFrame),
-  ], [6, 12, 4], "指定錯位的實際梁柱交疊數需保持可追蹤，對應圖中的交錯節點");
+  ], [6, 12, 11], "指定錯位且採 2 m 構件寬的實際梁柱交疊數需保持可追蹤，對應圖中的交錯節點");
   const level2Stair = NESTED_CITY.stairs[1];
   for (const frame of [outerFrame, middleFrame]) {
     const opening = frame.openings?.find(({ edge }) => edge === "south");
@@ -680,7 +778,8 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   const deskRect = DESK_FOOTPRINT[0];
   const deskCenter = { x: DESK.cx, z: (deskRect.minZ + deskRect.maxZ) / 2 };
   const lowerCollision = resolveCollision(deskCenter.x, deskCenter.z);
-  const upperWalkPoint = { x: 0, z: 0 };
+  // The specified 2 m S-frame member reaches z=0; sample just inside the open atrium for this desk-only projection check.
+  const upperWalkPoint = { x: 0, z: 0.5 };
   const upperClearance = resolveCollision(upperWalkPoint.x, upperWalkPoint.z, PLAYER_RADIUS, false, false, undefined, undefined, 4);
   assert.notDeepEqual(lowerCollision, deskCenter, "地面仍要撞到桌體");
   assert.deepEqual(upperClearance, upperWalkPoint, "上層角色不應被地面桌櫃的投影碰撞阻擋");
@@ -932,4 +1031,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (nested-city 3-frame structure / 4 levels / central void / platform connectivity / stair treads, head clearance and collisions / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (trapezoid footprint / connected corridors / T1-T2 projections / nested W-S-C frames / 4 levels / central void / legacy platform connectivity / stairs and collisions / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
