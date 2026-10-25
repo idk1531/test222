@@ -39,245 +39,207 @@ assert.deepEqual(nestedCityFloorLabel(12), { full: "4F · 12 m", compact: "4F" }
 assert.deepEqual(nestedCityFloorLabel(2), { full: "樓層間", compact: "樓層間" });
 assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compact: "未知" });
 
-// Trapezoid envelope and connected 2 m corridor chain (coordinates are X/Z in metres).
+// Trapezoid envelope and complete four-sided corridor rings (coordinates are X/Z in metres).
 {
   const { trapezoid, corridor, gallery } = NESTED_CITY;
-  const { A, B, C, D, E, F } = trapezoid.points;
-  assert.deepEqual([A, B, C, D, E, F], [
-    { x: -12, z: -24 }, { x: 12, z: -24 }, { x: 24, z: 24 },
-    { x: -24, z: 24 }, { x: 21, z: 12 }, { x: -21, z: 12 },
-  ], "AB=24 m is the selected modeling default; E/F are exactly 3/4 along B→C and A→D");
+  const { A, B, C, D } = trapezoid.points;
+  const trapezoidVertices = [A, B, C, D];
+  assert.deepEqual([A, B, C, D], [
+    { x: -12, z: -24 }, { x: 12, z: -24 }, { x: 24, z: 24 }, { x: -24, z: 24 },
+  ]);
   assert.equal(trapezoid.shortBase, 24);
   assert.equal(trapezoid.longBase, 48);
   assert.equal(trapezoid.depth, 48);
   assert.equal(trapezoid.openEdge, "CD");
   assert.deepEqual(trapezoid.wallEdges.map(({ id }) => id), ["AB", "BC", "AD"],
-    "the CD boundary stays open and must not be rendered as a wall/frame beam");
+    "CD remains an open exterior edge, not a building wall");
+  assert.deepEqual(trapezoid.corridorEdges.map(({ id }) => id), ["AB", "BC", "CD", "DA"],
+    "the corridor nevertheless follows all four sides, including the open CD edge");
   assert.deepEqual(trapezoid.wallBandLevels, [0, 4, 8, 12, 16]);
   assert.equal(trapezoid.walkableFootprint.length, 4);
-  assert.ok(trapezoid.walkableFootprint.every((point) => isCityPointInsidePolygon(point, [A, B, C, D])),
+  assert.ok(trapezoid.walkableFootprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
     "the playable floor/camera polygon must be inset inside the exterior trapezoid");
   for (const wall of trapezoid.wallEdges) {
     const wallBand = cityTrapezoidWallBandFootprint(wall, ROOM.wall);
-    assert.ok(wallBand.length >= 4 && wallBand.every((point) => isCityPointInsidePolygon(point, [A, B, C, D])),
+    assert.ok(wallBand.length >= 4 && wallBand.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
       `${wall.id} exterior wall thickness must be directed inward and clipped to ABCD`);
   }
-  for (const corner of [A, B, C, D]) {
+  for (const corner of trapezoidVertices) {
     const post = cityTrapezoidCornerFootprint(corner, ROOM.wall);
-    assert.ok(post.length >= 3 && post.every((point) => isCityPointInsidePolygon(point, [A, B, C, D])),
+    assert.ok(post.length >= 3 && post.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
       "the corner-post footprint must not extend beyond the actual outer wall");
   }
-  assert.deepEqual(corridor.floors, [0, 4, 8, 12], "the connected corridor footprint is present on all four floor planes");
+
+  assert.deepEqual(corridor.floors, [0, 4, 8, 12]);
   assert.equal(corridor.width, 2);
   assert.equal(NESTED_CITY.floorHeight, 4);
-  assert.deepEqual(corridor.segments.map(({ id, referenceFrom, referenceTo }) => ({ id, referenceFrom, referenceTo })), [
-    { id: "CE", referenceFrom: "C", referenceTo: "E" },
-    { id: "EF", referenceFrom: "E", referenceTo: "F" },
-    { id: "FA", referenceFrom: "F", referenceTo: "A" },
-    { id: "AB", referenceFrom: "A", referenceTo: "B" },
-  ], "the route is the connected chain C→E→F→A→B, with no CD corridor");
-  for (const segment of corridor.segments) {
-    const referenceFrom = trapezoid.points[segment.referenceFrom];
-    const referenceTo = trapezoid.points[segment.referenceTo];
-    const actual = { x: segment.to.x - segment.from.x, z: segment.to.z - segment.from.z };
-    const reference = { x: referenceTo.x - referenceFrom.x, z: referenceTo.z - referenceFrom.z };
-    assert.ok(Math.hypot(actual.x, actual.z) > 0);
-    assert.ok(Math.abs(actual.x * reference.z - actual.z * reference.x) < 1e-6,
-      `${segment.id} corridor floor projection must remain parallel to its named run`);
-    if (segment.id !== "EF") {
-      const referenceLength = Math.hypot(reference.x, reference.z);
-      const distanceFromWall = (point: { x: number; z: number }) =>
-        Math.abs(reference.x * (point.z - referenceFrom.z) - reference.z * (point.x - referenceFrom.x)) / referenceLength;
-      assert.ok(Math.abs(distanceFromWall(segment.from) - corridor.width / 2) < 1e-6 &&
-        Math.abs(distanceFromWall(segment.to) - corridor.width / 2) < 1e-6,
-      `${segment.id} must sit against its named wall with the corridor's outer edge touching it`);
-    }
-  }
+  assert.deepEqual(corridor.perimeterEdges.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
+  assert.deepEqual(corridor.segments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
+  assert.ok(corridor.segments.every(({ width }) => width === corridor.width));
+  assert.deepEqual(corridor.floorLayouts.map(({ level, floorNumber, parity, sideWall, sideClearance }) => ({
+    level, floorNumber, parity, sideWall, sideClearance,
+  })), [
+    { level: 0, floorNumber: 1, parity: "odd", sideWall: "AD", sideClearance: 0 },
+    { level: 4, floorNumber: 2, parity: "even", sideWall: "BC", sideClearance: corridor.width },
+    { level: 8, floorNumber: 3, parity: "odd", sideWall: "AD", sideClearance: 0 },
+    { level: 12, floorNumber: 4, parity: "even", sideWall: "BC", sideClearance: corridor.width },
+  ], "every floor has the four-sided ring; even floors keep the existing 2 m edge clearance");
+  assert.deepEqual(gallery.floorLayouts.map(({ level, parity }) => ({ level, parity })), [
+    { level: 4, parity: "even" }, { level: 8, parity: "odd" }, { level: 12, parity: "even" },
+  ]);
+  assert.equal(gallery.width, 4.6);
 
-  const trapezoidVertices = [A, B, C, D];
   const signedArea = (points: readonly { x: number; z: number }[]) => points.reduce((sum, point, index) => {
     const next = points[(index + 1) % points.length];
     return sum + point.x * next.z - next.x * point.z;
   }, 0) / 2;
   const trapezoidArea = (trapezoid.shortBase + trapezoid.longBase) * trapezoid.depth / 2;
-  const corridorArea = Math.abs(signedArea(corridor.footprint));
   const oversizedSquare = clipCityPolygonToTrapezoid([
     { x: -30, z: -30 }, { x: 30, z: -30 }, { x: 30, z: 30 }, { x: -30, z: 30 },
   ]);
   assert.ok(Math.abs(Math.abs(signedArea(oversizedSquare)) - trapezoidArea) < 1e-8,
     "polygon clipping must return the real trapezoid, not merely a 48×48 bounding box");
   assert.equal(trapezoidArea, 1728);
-  assert.ok(corridorArea > 0 && corridorArea < trapezoidArea * 0.2,
-    "the specified connected corridor chain must leave the majority of the trapezoid open to view");
-  assert.deepEqual(corridor.extensions.map(({ id, referenceFrom, referenceTo }) => ({ id, referenceFrom, referenceTo })), [
-    { id: "BE", referenceFrom: "B", referenceTo: "E" },
-    { id: "DF", referenceFrom: "D", referenceTo: "F" },
-  ], "BE/DF remain reusable wall-following references, not corridors copied to every floor");
-  assert.ok(corridor.extensions.every((extension) => extension.width === corridor.width));
-  assert.deepEqual(corridor.extensions[0].to, corridor.segments[0].to,
-    "BE must meet CE at E without a gap");
-  assert.deepEqual(corridor.extensions[1].to, corridor.segments[2].from,
-    "DF must meet FA at F without a gap");
-  assert.deepEqual(corridor.floorLayouts.map(({ level, floorNumber, parity, sideWall, sideClearance, bridgeId }) => ({
-    level, floorNumber, parity, sideWall, sideClearance, bridgeId,
-  })), [
-    { level: 0, floorNumber: 1, parity: "odd", sideWall: "AD", sideClearance: 0, bridgeId: "EF" },
-    { level: 4, floorNumber: 2, parity: "even", sideWall: "BC", sideClearance: corridor.width, bridgeId: "AB" },
-    { level: 8, floorNumber: 3, parity: "odd", sideWall: "AD", sideClearance: 0, bridgeId: "EF" },
-    { level: 12, floorNumber: 4, parity: "even", sideWall: "BC", sideClearance: corridor.width, bridgeId: "AB" },
-  ], "only one side corridor is active per floor; even-floor corridor starts one full width from the wall");
-  assert.deepEqual(gallery.floorLayouts.map(({ level, parity }) => ({ level, parity })), [
-    { level: 4, parity: "even" }, { level: 8, parity: "odd" }, { level: 12, parity: "even" },
-  ]);
+
+  const edgeDistance = (point: { x: number; z: number }, edge: typeof trapezoid.corridorEdges[number]) =>
+    (point.x - edge.from.x) * edge.inward.x + (point.z - edge.from.z) * edge.inward.z;
+  const assertIsoscelesTrapezoid = (segments: typeof corridor.segments, name: string) => {
+    const [bottom, right, top, left] = segments;
+    const bottomVector = { x: bottom.to.x - bottom.from.x, z: bottom.to.z - bottom.from.z };
+    const topVector = { x: top.to.x - top.from.x, z: top.to.z - top.from.z };
+    const baseCross = bottomVector.x * topVector.z - bottomVector.z * topVector.x;
+    const length = (segment: typeof bottom) => Math.hypot(segment.to.x - segment.from.x, segment.to.z - segment.from.z);
+    assert.ok(Math.abs(baseCross) < 1e-6, `${name} parallel bases must remain parallel`);
+    assert.ok(Math.abs(length(right) - length(left)) < 1e-6,
+      `${name} slanted sides must be equal in length`);
+  };
   for (const layout of corridor.floorLayouts) {
-    assert.equal(layout.corridorFootprints.length, 2,
-      `${layout.floorNumber}F must have one active side corridor and one bridge, not both wall corridors`);
-    assert.equal(layout.galleryFootprints.length, 2,
-      `${layout.floorNumber}F gallery deck must match its selected side and bridge`);
-    for (const footprint of [...layout.corridorFootprints, ...layout.galleryFootprints]) {
-      assert.ok(footprint.length >= 3 && footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
-        `${layout.floorNumber}F floor geometry must be clipped to ABCD`);
-      assert.ok(!isCityPointInsidePolygon({ x: 0, z: 0 }, footprint),
-        `${layout.floorNumber}F must leave the central atrium open`);
-    }
-    const layoutArea = layout.galleryFootprints.reduce((area, footprint) => area + Math.abs(signedArea(footprint)), 0);
-    assert.ok(layoutArea < trapezoidArea * 0.5,
-      `${layout.floorNumber}F side gallery and bridge must not fill the atrium`);
+    assertIsoscelesTrapezoid(layout.corridorSegments, `${layout.floorNumber}F corridor`);
+    assertIsoscelesTrapezoid(layout.gallerySegments, `${layout.floorNumber}F gallery`);
+    assert.equal(layout.corridorSegments.length, 4,
+      `${layout.floorNumber}F corridor must have all four trapezoid runs`);
+    assert.equal(layout.corridorFootprints.length, 4,
+      `${layout.floorNumber}F corridor must render four connected floor slabs`);
+    assert.equal(layout.gallerySegments.length, 4,
+      `${layout.floorNumber}F gallery ring must have all four trapezoid runs`);
+    assert.equal(layout.galleryFootprints.length, 4,
+      `${layout.floorNumber}F gallery deck must also follow all four sides`);
+    assert.deepEqual(layout.corridorSegments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
+    assert.deepEqual(layout.gallerySegments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
+    const requiredClearance = layout.sideClearance;
 
-    const activeWall = trapezoid.wallEdges.find(({ id }) => id === layout.sideWall)!;
-    const inactiveWall = trapezoid.wallEdges.find(({ id }) => id !== "AB" && id !== layout.sideWall)!;
-    const pointAtWallOffset = (wall: typeof activeWall, distance: number) => ({
-      x: (wall.from.x + wall.to.x) / 2 + wall.inward.x * distance,
-      z: (wall.from.z + wall.to.z) / 2 + wall.inward.z * distance,
-    });
-    const corridorCenter = pointAtWallOffset(activeWall, layout.sideClearance + corridor.width / 2);
-    const galleryCenter = pointAtWallOffset(activeWall, layout.sideClearance + gallery.width / 2);
-    const inactiveGalleryPoint = pointAtWallOffset(inactiveWall, gallery.width / 2);
-    assert.ok(isCityPointInsidePolygon(corridorCenter, layout.corridorFootprints[0]),
-      `${layout.floorNumber}F corridor must be placed at its configured wall clearance`);
-    assert.ok(isCityPointInsidePolygon(galleryCenter, layout.galleryFootprints[0]),
-      `${layout.floorNumber}F gallery must follow only active wall ${layout.sideWall}`);
-    assert.ok(!layout.galleryFootprints.some((footprint) => isCityPointInsidePolygon(inactiveGalleryPoint, footprint)),
-      `${layout.floorNumber}F must leave the opposite wall gallery open`);
-    if (layout.sideClearance > 0) {
-      const adjacentWall = trapezoid.wallEdges.find(({ id }) => id === "AB")!;
-      const distanceFromAdjacentWall = (point: { x: number; z: number }) => {
-        const dx = adjacentWall.to.x - adjacentWall.from.x;
-        const dz = adjacentWall.to.z - adjacentWall.from.z;
-        return Math.abs(dx * (point.z - adjacentWall.from.z) - dz * (point.x - adjacentWall.from.x)) /
-          Math.hypot(dx, dz);
-      };
-      assert.ok([...layout.corridorFootprints, ...layout.galleryFootprints].every((footprint) =>
-        footprint.every((point) => distanceFromAdjacentWall(point) >= layout.sideClearance - 1e-6)),
-      `${layout.floorNumber}F side run and bridge decks must also keep 2 m clearance from the adjacent AB wall`);
-      const clearancePoint = pointAtWallOffset(activeWall, layout.sideClearance / 2);
-      const justBeforeCorridor = pointAtWallOffset(activeWall, layout.sideClearance - 0.01);
-      const justInsideCorridor = pointAtWallOffset(activeWall, layout.sideClearance + 0.01);
-      assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
-        isCityPointInsidePolygon(clearancePoint, footprint)),
-      `${layout.floorNumber}F must have a full 2 m open gap between the wall and corridor`);
-      assert.notEqual(groundHeightAt(clearancePoint.x, clearancePoint.z, layout.level), layout.level,
-        `${layout.floorNumber}F wall-side gap must not be treated as walkable floor`);
-      assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
-        isCityPointInsidePolygon(justBeforeCorridor, footprint)),
-      `${layout.floorNumber}F platform must not begin before the configured wall clearance`);
-      assert.ok(isCityPointInsidePolygon(justInsideCorridor, layout.corridorFootprints[0]),
-        `${layout.floorNumber}F corridor must start at the wall clearance`);
+    for (const [index, footprint] of layout.corridorFootprints.entries()) {
+      assert.equal(footprint.length, 4);
+      assert.ok(footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
+        `${layout.floorNumber}F ${layout.corridorSegments[index].id} corridor must stay inside ABCD`);
+      assert.ok(footprint.every((point) => trapezoid.corridorEdges.every((edge) =>
+        edgeDistance(point, edge) >= requiredClearance - 1e-6)),
+      `${layout.floorNumber}F corridor ring must keep its configured clearance from all four edges`);
+      const center = footprint.reduce((sum, point) => ({
+        x: sum.x + point.x / footprint.length,
+        z: sum.z + point.z / footprint.length,
+      }), { x: 0, z: 0 });
+      assert.ok(isCityPointInsidePolygon(center, footprint),
+        `${layout.floorNumber}F ${layout.corridorSegments[index].id} slab must contain its centre`);
+      assert.ok(isCityPointInsidePolygon({
+        x: (layout.corridorSegments[index].from.x + layout.corridorSegments[index].to.x) / 2,
+        z: (layout.corridorSegments[index].from.z + layout.corridorSegments[index].to.z) / 2,
+      }, footprint), `${layout.floorNumber}F ${layout.corridorSegments[index].id} run must be walkable`);
+      if (layout.level > 0) {
+        assert.equal(groundHeightAt(center.x, center.z, layout.level), layout.level,
+          `${layout.floorNumber}F corridor must be walkable on its own level`);
+      }
+      const shape = new THREE.Shape();
+      shape.moveTo(footprint[0].x, -footprint[0].z);
+      for (const point of footprint.slice(1)) shape.lineTo(point.x, -point.z);
+      shape.closePath();
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.3, bevelEnabled: false });
+      geometry.rotateX(-Math.PI / 2);
+      geometry.computeBoundingBox();
+      assert.ok(geometry.attributes.position.count > 0 && geometry.boundingBox,
+        `${layout.floorNumber}F ${layout.corridorSegments[index].id} must triangulate to slab geometry`);
+      assert.ok(geometry.boundingBox!.min.x >= -ROOM.width / 2 - 1e-6 &&
+        geometry.boundingBox!.max.x <= ROOM.width / 2 + 1e-6 &&
+        geometry.boundingBox!.min.z >= -ROOM.depth / 2 - 1e-6 &&
+        geometry.boundingBox!.max.z <= ROOM.depth / 2 + 1e-6,
+      "each corridor slab must stay within the 48×48 m envelope");
+      geometry.dispose();
     }
 
-    const bridge = layout.bridgeSegment;
-    const galleryBridge = layout.galleryBridgeSegment;
-    assert.equal(bridge.id, layout.bridgeId);
-    assert.equal(bridge.width, corridor.width);
-    assert.equal(galleryBridge.width, gallery.width);
-    const bridgeMidpoint = { x: (bridge.from.x + bridge.to.x) / 2, z: (bridge.from.z + bridge.to.z) / 2 };
-    const galleryBridgeMidpoint = {
-      x: (galleryBridge.from.x + galleryBridge.to.x) / 2,
-      z: (galleryBridge.from.z + galleryBridge.to.z) / 2,
-    };
-    assert.ok(isCityPointInsidePolygon(bridgeMidpoint, layout.corridorFootprints[1]),
-      `${layout.floorNumber}F must render its ${layout.bridgeId} bridge`);
-    assert.ok(isCityPointInsidePolygon(bridge.to, layout.corridorFootprints[0]),
-      `${layout.floorNumber}F bridge endpoint must connect to the active side corridor`);
-    assert.ok(isCityPointInsidePolygon(galleryBridgeMidpoint, layout.galleryFootprints[1]),
-      `${layout.floorNumber}F must render the widened ${layout.bridgeId} gallery bridge`);
-    assert.ok(isCityPointInsidePolygon(galleryBridge.to, layout.galleryFootprints[0]),
-      `${layout.floorNumber}F gallery bridge must connect to the active side gallery`);
-    if (layout.bridgeId === "AB") {
-      const baseWall = trapezoid.wallEdges.find(({ id }) => id === "AB")!;
-      const distanceFromBaseWall = (point: { x: number; z: number }) => {
-        const dx = baseWall.to.x - baseWall.from.x;
-        const dz = baseWall.to.z - baseWall.from.z;
-        return Math.abs(dx * (point.z - baseWall.from.z) - dz * (point.x - baseWall.from.x)) /
-          Math.hypot(dx, dz);
-      };
-      assert.ok(Math.abs(distanceFromBaseWall(bridge.from) - (layout.sideClearance + corridor.width / 2)) < 1e-6 &&
-        Math.abs(distanceFromBaseWall(bridge.to) - (layout.sideClearance + corridor.width / 2)) < 1e-6,
-      `${layout.floorNumber}F bridge centreline must also clear the AB wall by half-width plus the 2 m gap`);
-      assert.ok(Math.abs(distanceFromBaseWall(galleryBridge.from) - (layout.sideClearance + gallery.width / 2)) < 1e-6 &&
-        Math.abs(distanceFromBaseWall(galleryBridge.to) - (layout.sideClearance + gallery.width / 2)) < 1e-6,
-      `${layout.floorNumber}F gallery bridge must align its near edge with the same 2 m wall gap`);
-      const bridgeWallGap = pointAtWallOffset(baseWall, layout.sideClearance - 0.01);
-      const bridgeJustInside = pointAtWallOffset(baseWall, layout.sideClearance + 0.01);
-      assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
-        isCityPointInsidePolygon(bridgeWallGap, footprint)),
-      `${layout.floorNumber}F AB bridge must not remain against the wall`);
-      assert.notEqual(groundHeightAt(bridgeWallGap.x, bridgeWallGap.z, layout.level), layout.level,
-        `${layout.floorNumber}F bridge wall gap must not be walkable`);
-      assert.ok(isCityPointInsidePolygon(bridgeJustInside, layout.corridorFootprints[1]),
-        `${layout.floorNumber}F AB corridor bridge must begin after the full wall clearance`);
+    for (const [index, footprint] of layout.galleryFootprints.entries()) {
+      assert.equal(footprint.length, 4);
+      assert.ok(footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
+        `${layout.floorNumber}F ${layout.gallerySegments[index].id} gallery must stay inside ABCD`);
+      assert.ok(footprint.every((point) => trapezoid.corridorEdges.every((edge) =>
+        edgeDistance(point, edge) >= requiredClearance - 1e-6)),
+      `${layout.floorNumber}F gallery ring must maintain the same wall clearance`);
+      const segment = layout.gallerySegments[index];
+      const midpoint = { x: (segment.from.x + segment.to.x) / 2, z: (segment.from.z + segment.to.z) / 2 };
+      assert.ok(isCityPointInsidePolygon(midpoint, footprint),
+        `${layout.floorNumber}F ${segment.id} gallery run must be continuous`);
     }
-    assert.equal(groundHeightAt(galleryCenter.x, galleryCenter.z, layout.level), layout.level,
-      `${layout.floorNumber}F active gallery must be walkable`);
-  }
-  const orientation = Math.sign(signedArea(trapezoidVertices));
-  for (const point of corridor.footprint) {
-    for (let index = 0; index < trapezoidVertices.length; index++) {
-      const start = trapezoidVertices[index];
-      const end = trapezoidVertices[(index + 1) % trapezoidVertices.length];
-      const edge = { x: end.x - start.x, z: end.z - start.z };
-      const delta = { x: point.x - start.x, z: point.z - start.z };
-      assert.ok((edge.x * delta.z - edge.z * delta.x) * orientation >= -1e-6,
-        "corridor slabs must be clipped to the trapezoid footprint");
-    }
-  }
-  const corridorShape = new THREE.Shape();
-  corridorShape.moveTo(corridor.footprint[0].x, -corridor.footprint[0].z);
-  for (const point of corridor.footprint.slice(1)) corridorShape.lineTo(point.x, -point.z);
-  corridorShape.closePath();
-  const corridorGeometry = new THREE.ExtrudeGeometry(corridorShape, { depth: 0.3, bevelEnabled: false });
-  corridorGeometry.rotateX(-Math.PI / 2);
-  corridorGeometry.computeBoundingBox();
-  assert.ok(corridorGeometry.attributes.position.count > 0 && corridorGeometry.boundingBox,
-    "the connected corridor outline must triangulate to actual Three.js slab geometry");
-  assert.ok(corridorGeometry.boundingBox!.min.x >= -ROOM.width / 2 - 1e-6 &&
-    corridorGeometry.boundingBox!.max.x <= ROOM.width / 2 + 1e-6 &&
-    corridorGeometry.boundingBox!.min.z >= -ROOM.depth / 2 - 1e-6 &&
-    corridorGeometry.boundingBox!.max.z <= ROOM.depth / 2 + 1e-6,
-  "corridor slab geometry must stay within the 48×48 m envelope");
-  corridorGeometry.dispose();
 
-  assert.equal(Object.hasOwn(corridor, "frames"), false, "legacy cross-floor T1/T2 structures are removed");
-  assert.ok(corridor.segments.every((segment) => segment.width === corridor.width),
-    "all four wall-following corridor runs must have the same 2 m width");
-  assert.deepEqual(corridor.segments.map(({ width }) => width), [2, 2, 2, 2]);
-  for (let index = 0; index < corridor.segments.length - 1; index++) {
-    assert.deepEqual(corridor.segments[index].to, corridor.segments[index + 1].from,
-      `${corridor.segments[index].id} must join ${corridor.segments[index + 1].id} without a gap`);
+    for (let index = 0; index < 4; index++) {
+      const next = (index + 1) % 4;
+      assert.deepEqual(layout.corridorFootprints[index][1], layout.corridorFootprints[next][0],
+        `${layout.floorNumber}F corridor outer corners must join without gaps`);
+      assert.deepEqual(layout.corridorFootprints[index][2], layout.corridorFootprints[next][3],
+        `${layout.floorNumber}F corridor inner corners must join without gaps`);
+      assert.deepEqual(layout.corridorSegments[index].to, layout.corridorSegments[next].from,
+        `${layout.floorNumber}F corridor centerlines must close into a trapezoid`);
+      assert.deepEqual(layout.galleryFootprints[index][1], layout.galleryFootprints[next][0],
+        `${layout.floorNumber}F gallery outer corners must join without gaps`);
+      assert.deepEqual(layout.galleryFootprints[index][2], layout.galleryFootprints[next][3],
+        `${layout.floorNumber}F gallery inner corners must join without gaps`);
+    }
+
+    const ringArea = layout.galleryFootprints.reduce((sum, footprint) => sum + Math.abs(signedArea(footprint)), 0);
+    assert.ok(ringArea > 0 && ringArea < trapezoidArea * 0.6,
+      `${layout.floorNumber}F four-sided gallery ring must preserve the central atrium`);
+    assert.ok(!layout.galleryFootprints.some((footprint) => isCityPointInsidePolygon({ x: 0, z: 0 }, footprint)),
+      `${layout.floorNumber}F must leave the central atrium open`);
+    if (layout.level > 0) {
+      assert.equal(groundHeightAt(0, 0, layout.level), 0,
+        `${layout.floorNumber}F central atrium must not create an invisible floor`);
+      for (const segment of layout.gallerySegments) {
+        const midpoint = { x: (segment.from.x + segment.to.x) / 2, z: (segment.from.z + segment.to.z) / 2 };
+        assert.equal(groundHeightAt(midpoint.x, midpoint.z, layout.level), layout.level,
+          `${layout.floorNumber}F ${segment.id} gallery surface must be walkable`);
+      }
+    }
+
+    if (requiredClearance > 0) {
+      for (const edge of trapezoid.corridorEdges) {
+        const wallMidpoint = {
+          x: (edge.from.x + edge.to.x) / 2,
+          z: (edge.from.z + edge.to.z) / 2,
+        };
+        const wallGap = {
+          x: wallMidpoint.x + edge.inward.x * requiredClearance / 2,
+          z: wallMidpoint.z + edge.inward.z * requiredClearance / 2,
+        };
+        const justInside = {
+          x: wallMidpoint.x + edge.inward.x * (requiredClearance + 0.01),
+          z: wallMidpoint.z + edge.inward.z * (requiredClearance + 0.01),
+        };
+        assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
+          isCityPointInsidePolygon(wallGap, footprint)),
+        `${layout.floorNumber}F ${edge.id} must keep a 2 m open gap before the corridor ring`);
+        assert.notEqual(groundHeightAt(wallGap.x, wallGap.z, layout.level), layout.level,
+          `${layout.floorNumber}F ${edge.id} wall gap must not be walkable`);
+        assert.ok(isCityPointInsidePolygon(justInside, layout.corridorFootprints.find((_, index) =>
+          layout.corridorSegments[index].id === edge.id)!),
+        `${layout.floorNumber}F ${edge.id} corridor must begin after its full clearance`);
+      }
+    }
   }
+
+  assert.deepEqual(Object.keys(NESTED_CITY).sort(), ["corridor", "floorHeight", "gallery", "levels", "trapezoid"]);
+  assert.deepEqual(Object.keys(NESTED_CITY.corridor).sort(), ["floorLayouts", "floors", "perimeterEdges", "segments", "width"]);
+  assert.deepEqual(Object.keys(NESTED_CITY.gallery).sort(), ["floorLayouts", "floors", "width"]);
 }
+console.log("  ✓ 每層四邊閉合等腰梯形走廊、偶數層四邊 2 m 淨距、挑空中庭留白");
 
-assert.deepEqual(Object.keys(NESTED_CITY).sort(), ["corridor", "floorHeight", "gallery", "levels", "trapezoid"],
-  "the shared building model must contain the trapezoid, corridors, upper-gallery footprints, and floor levels");
-assert.deepEqual(Object.keys(NESTED_CITY.gallery).sort(), ["floorLayouts", "floors", "width"],
-  "upper gallery floors must use the selected side and bridge for each parity");
-assert.equal(NESTED_CITY.gallery.width, 4.6);
-assert.deepEqual(NESTED_CITY.gallery.floors, [4, 8, 12]);
-assert.equal(NESTED_CITY.gallery.floorLayouts.length, 3);
-assert.deepEqual(Object.keys(NESTED_CITY.corridor).sort(), ["extensions", "floorLayouts", "floors", "footprint", "segments", "width"],
-  "the corridor model keeps reusable route references and per-floor active footprints");
-assert.deepEqual(NESTED_CITY.corridor.floorLayouts.map(({ parity }) => parity), ["odd", "even", "odd", "even"]);
-console.log("  ✓ 奇偶層選擇性走廊、偶數層 2 m 牆距、側廊與中庭留白");
 assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
 assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
 
@@ -488,48 +450,49 @@ assert.ok(shelfPlankY(4, 5) > SHELF.ledge.top + 0.1);
 // 書脊面在牆與室內之間，且朝 +X
 assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
 
-// ---- 多層梯形圖書館：奇偶層採不同側廊，偶數層與牆保留 2 m 淨距 ----
+// ---- 多層梯形圖書館：每層四邊完整閉合，偶數層距四邊保留 2 m ----
 {
   const { corridor, gallery } = NESTED_CITY;
   assert.deepEqual(corridor.floors, [0, 4, 8, 12]);
   assert.equal(corridor.width, 2);
   assert.equal(NESTED_CITY.floorHeight, 4);
-  assert.deepEqual(corridor.segments.map(({ id }) => id), ["CE", "EF", "FA", "AB"]);
+  assert.deepEqual(corridor.segments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
   assert.ok(corridor.floors.every((floor) => NESTED_CITY.levels.includes(floor as (typeof NESTED_CITY.levels)[number])));
   assert.ok(corridor.segments.every(({ width }) => width === corridor.width));
+  assert.deepEqual(gallery.floorLayouts.map(({ level }) => level), [4, 8, 12]);
 
-  for (const segment of corridor.segments) {
-    const midpoint = {
-      x: (segment.from.x + segment.to.x) / 2,
-      z: (segment.from.z + segment.to.z) / 2,
-    };
-    assert.ok(isCityPointInsidePolygon(midpoint, corridor.footprint), `${segment.id} must remain in the reusable route`);
-  }
-  assert.ok(corridor.extensions.every(({ width }) => width === corridor.width),
-    "the BE/DF wall references retain the same 2 m corridor width");
   for (const layout of corridor.floorLayouts) {
-    for (const [index, footprint] of layout.corridorFootprints.entries()) {
-      assert.ok(footprint.length >= 3, `${layout.floorNumber}F corridor slab ${index} must have an area`);
-      const center = footprint.reduce((sum, vertex) => ({
-        x: sum.x + vertex.x / footprint.length,
-        z: sum.z + vertex.z / footprint.length,
-      }), { x: 0, z: 0 });
-      assert.ok(isCityPointInsidePolygon(center, footprint),
-        `${layout.floorNumber}F corridor slab ${index} must contain its centre`);
-      assert.equal(groundHeightAt(center.x, center.z, layout.level), layout.level,
-        `${layout.floorNumber}F ${layout.parity} corridor must be walkable on its own level`);
+    assert.equal(layout.corridorFootprints.length, 4,
+      `${layout.floorNumber}F must have a complete four-sided corridor`);
+    assert.equal(layout.galleryFootprints.length, 4,
+      `${layout.floorNumber}F must have a complete four-sided gallery ring`);
+    for (const [index, segment] of layout.corridorSegments.entries()) {
+      const midpoint = { x: (segment.from.x + segment.to.x) / 2, z: (segment.from.z + segment.to.z) / 2 };
+      assert.ok(isCityPointInsidePolygon(midpoint, layout.corridorFootprints[index]),
+        `${layout.floorNumber}F ${segment.id} corridor centerline must lie on its slab`);
+      if (layout.level > 0) {
+        assert.equal(groundHeightAt(midpoint.x, midpoint.z, layout.level), layout.level,
+          `${layout.floorNumber}F ${segment.id} corridor must be walkable`);
+      }
+    }
+    for (const [index, segment] of layout.gallerySegments.entries()) {
+      const midpoint = { x: (segment.from.x + segment.to.x) / 2, z: (segment.from.z + segment.to.z) / 2 };
+      assert.ok(isCityPointInsidePolygon(midpoint, layout.galleryFootprints[index]),
+        `${layout.floorNumber}F ${segment.id} gallery centerline must lie on its deck`);
     }
   }
   assert.equal(groundHeightAt(0, 0, 8), 0,
-    "an open area outside the active upper corridors must not create an invisible floor");
+    "the central atrium remains open despite the four-sided gallery rings");
 
   const nestedCitySource = fs.readFileSync(path.join(process.cwd(), "src/components/NestedCityGeometry.tsx"), "utf8");
   assert.match(nestedCitySource, /trapezoid-exterior-ABCD-open-CD/);
   assert.match(nestedCitySource, /NESTED_CITY\.trapezoid\.wallEdges/);
   assert.match(nestedCitySource, /NESTED_CITY\.corridor\.floorLayouts/);
   assert.match(nestedCitySource, /NESTED_CITY\.gallery\.floorLayouts/);
-  assert.doesNotMatch(nestedCitySource, /NESTED_CITY\.corridor\.extensions/,
-    "wall references must not be rendered as both long corridors on every floor");
+  assert.match(nestedCitySource, /layout\.corridorFootprints/,
+    "each floor renderer must build the four perimeter corridor slabs");
+  assert.match(nestedCitySource, /layout\.galleryInnerEdges/);
+  assert.match(nestedCitySource, /layout\.galleryOuterEdges/);
   assert.match(nestedCitySource, /addSideBookshelves/);
   assert.match(nestedCitySource, /addGalleryGuardrails/);
   assert.match(nestedCitySource, /addGallerySupportBeams/);
@@ -816,4 +779,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (trapezoid library / parity-specific corridors / even-floor 2 m wall clearance / selective galleries and bridges / full-height bookshelves / open atrium / reading furniture / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (trapezoid library / complete four-sided isosceles corridor rings on every floor / even-floor 2 m perimeter clearance / four-sided galleries / full-height bookshelves / open atrium / reading furniture / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
