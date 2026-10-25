@@ -60,6 +60,7 @@ export interface CityCorridorFloorLayout {
   sideClearance: number;
   bridgeId: "AB" | "EF";
   bridgeSegment: CityCorridorSegment;
+  galleryBridgeSegment: CityCorridorSegment;
   corridorFootprints: readonly (readonly CityPlanPoint[])[];
   galleryFootprints: readonly (readonly CityPlanPoint[])[];
 }
@@ -274,15 +275,55 @@ function straightCorridorFootprint(segment: Pick<CityCorridorSegment, "from" | "
     addPlanPoints(segment.from, scalePlanPoint(normal, -halfWidth)),
   ], trapezoidBoundaryPoints);
 }
-function wallBandFootprint(wall: CityTrapezoidWallSegment, width: number, clearance = 0): CityPlanPoint[] {
+function clipPolygonToWallClearance(
+  subject: readonly CityPlanPoint[],
+  wall: CityTrapezoidWallSegment,
+  clearance: number,
+): CityPlanPoint[] {
+  if (subject.length < 3) return [];
+  const signedDistance = (point: CityPlanPoint) =>
+    (point.x - wall.from.x) * wall.inward.x + (point.z - wall.from.z) * wall.inward.z - clearance;
+  const output: CityPlanPoint[] = [];
+  let previous = subject[subject.length - 1];
+  let previousDistance = signedDistance(previous);
+  for (const current of subject) {
+    const currentDistance = signedDistance(current);
+    const previousInside = previousDistance >= -1e-8;
+    const currentInside = currentDistance >= -1e-8;
+    if (currentInside !== previousInside) {
+      const t = previousDistance / (previousDistance - currentDistance);
+      output.push({
+        x: previous.x + (current.x - previous.x) * t,
+        z: previous.z + (current.z - previous.z) * t,
+      });
+    }
+    if (currentInside) output.push(current);
+    previous = current;
+    previousDistance = currentDistance;
+  }
+  if (output.length === 0) return [];
+  return output.filter((point, index) => {
+    const prior = output[(index + output.length - 1) % output.length];
+    return Math.hypot(point.x - prior.x, point.z - prior.z) > 1e-7;
+  });
+}
+function wallBandFootprint(
+  wall: CityTrapezoidWallSegment,
+  width: number,
+  clearance = 0,
+  adjacentWallClearance?: { wall: CityTrapezoidWallSegment; distance: number },
+): CityPlanPoint[] {
   const nearOffset = scalePlanPoint(wall.inward, clearance);
   const farOffset = scalePlanPoint(wall.inward, clearance + width);
-  return clipPolygonToConvexPolygon([
+  const clipped = clipPolygonToConvexPolygon([
     addPlanPoints(wall.from, nearOffset),
     addPlanPoints(wall.to, nearOffset),
     addPlanPoints(wall.to, farOffset),
     addPlanPoints(wall.from, farOffset),
   ], trapezoidBoundaryPoints);
+  return adjacentWallClearance
+    ? clipPolygonToWallClearance(clipped, adjacentWallClearance.wall, adjacentWallClearance.distance)
+    : clipped;
 }
 const corridorBridgeSegments = {
   AB: corridorSegments.find(({ id }) => id === "AB")!,
@@ -292,23 +333,49 @@ const sideWalls = {
   BC: trapezoidWalls.find(({ id }) => id === "BC")!,
   AD: trapezoidWalls.find(({ id }) => id === "AD")!,
 } as const;
+function offsetABBridgeSegment(
+  baseBridge: CityCorridorSegment,
+  wallClearance: number,
+  stripWidth: number,
+): CityCorridorSegment {
+  const centerOffset = wallClearance + stripWidth / 2;
+  const baseCenterOffset = NESTED_CITY_CORRIDOR_WIDTH / 2;
+  const bridgeDirection = subtractPlanPoints(baseBridge.to, baseBridge.from);
+  const bridgeLinePoint = addPlanPoints(
+    baseBridge.from,
+    scalePlanPoint(inwardAB, centerOffset - baseCenterOffset),
+  );
+  const startOnAD = addPlanPoints(trapezoidPoints.A, scalePlanPoint(inwardDA, centerOffset));
+  const endOnBC = addPlanPoints(trapezoidPoints.B, scalePlanPoint(inwardBC, centerOffset));
+  return {
+    ...baseBridge,
+    width: stripWidth,
+    from: lineIntersection(bridgeLinePoint, bridgeDirection, startOnAD,
+      subtractPlanPoints(trapezoidPoints.D, trapezoidPoints.A)),
+    to: lineIntersection(bridgeLinePoint, bridgeDirection, endOnBC,
+      subtractPlanPoints(trapezoidPoints.C, trapezoidPoints.B)),
+  };
+}
+
 const corridorLevels = [0, 4, 8, 12] as const;
 const galleryLevels = [4, 8, 12] as const;
-// Each floor uses one side wall plus one bridge; even floors start one corridor-width inside the wall.
+// Each floor uses one side wall plus one bridge; the entire even-floor corridor stays one width off its walls.
 const corridorFloorLayouts: readonly CityCorridorFloorLayout[] = corridorLevels.map((level) => {
   const floorNumber = level / NESTED_CITY_FLOOR_HEIGHT + 1;
   const parity = floorNumber % 2 === 0 ? "even" : "odd";
   const sideWall = parity === "odd" ? "AD" : "BC";
   const sideClearance = parity === "even" ? NESTED_CITY_CORRIDOR_WIDTH : 0;
+  const adjacentWallClearance = sideClearance > 0
+    ? { wall: trapezoidWalls.find(({ id }) => id === "AB")!, distance: sideClearance }
+    : undefined;
   const bridgeId = parity === "odd" ? "EF" : "AB";
   const baseBridge = corridorBridgeSegments[bridgeId];
-  // Move the bridge endpoint with its side corridor so the even-floor offset stays connected.
-  const bridgeSegment: CityCorridorSegment = sideClearance > 0
-    ? {
-      ...baseBridge,
-      to: addPlanPoints(baseBridge.to, scalePlanPoint(sideWalls[sideWall].inward, sideClearance)),
-    }
+  const bridgeSegment = bridgeId === "AB" && sideClearance > 0
+    ? offsetABBridgeSegment(baseBridge, sideClearance, NESTED_CITY_CORRIDOR_WIDTH)
     : baseBridge;
+  const galleryBridgeSegment = bridgeId === "AB" && sideClearance > 0
+    ? offsetABBridgeSegment(baseBridge, sideClearance, NESTED_CITY_GALLERY_WIDTH)
+    : { ...baseBridge, width: NESTED_CITY_GALLERY_WIDTH };
   return {
     level,
     floorNumber,
@@ -317,13 +384,14 @@ const corridorFloorLayouts: readonly CityCorridorFloorLayout[] = corridorLevels.
     sideClearance,
     bridgeId,
     bridgeSegment,
+    galleryBridgeSegment,
     corridorFootprints: [
-      wallBandFootprint(sideWalls[sideWall], NESTED_CITY_CORRIDOR_WIDTH, sideClearance),
+      wallBandFootprint(sideWalls[sideWall], NESTED_CITY_CORRIDOR_WIDTH, sideClearance, adjacentWallClearance),
       straightCorridorFootprint(bridgeSegment),
     ],
     galleryFootprints: [
-      wallBandFootprint(sideWalls[sideWall], NESTED_CITY_GALLERY_WIDTH, sideClearance),
-      straightCorridorFootprint({ ...bridgeSegment, width: NESTED_CITY_GALLERY_WIDTH }),
+      wallBandFootprint(sideWalls[sideWall], NESTED_CITY_GALLERY_WIDTH, sideClearance, adjacentWallClearance),
+      straightCorridorFootprint(galleryBridgeSegment),
     ],
   };
 });

@@ -160,6 +160,16 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
     assert.ok(!layout.galleryFootprints.some((footprint) => isCityPointInsidePolygon(inactiveGalleryPoint, footprint)),
       `${layout.floorNumber}F must leave the opposite wall gallery open`);
     if (layout.sideClearance > 0) {
+      const adjacentWall = trapezoid.wallEdges.find(({ id }) => id === "AB")!;
+      const distanceFromAdjacentWall = (point: { x: number; z: number }) => {
+        const dx = adjacentWall.to.x - adjacentWall.from.x;
+        const dz = adjacentWall.to.z - adjacentWall.from.z;
+        return Math.abs(dx * (point.z - adjacentWall.from.z) - dz * (point.x - adjacentWall.from.x)) /
+          Math.hypot(dx, dz);
+      };
+      assert.ok([...layout.corridorFootprints, ...layout.galleryFootprints].every((footprint) =>
+        footprint.every((point) => distanceFromAdjacentWall(point) >= layout.sideClearance - 1e-6)),
+      `${layout.floorNumber}F side run and bridge decks must also keep 2 m clearance from the adjacent AB wall`);
       const clearancePoint = pointAtWallOffset(activeWall, layout.sideClearance / 2);
       const justBeforeCorridor = pointAtWallOffset(activeWall, layout.sideClearance - 0.01);
       const justInsideCorridor = pointAtWallOffset(activeWall, layout.sideClearance + 0.01);
@@ -176,12 +186,47 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
     }
 
     const bridge = layout.bridgeSegment;
+    const galleryBridge = layout.galleryBridgeSegment;
     assert.equal(bridge.id, layout.bridgeId);
+    assert.equal(bridge.width, corridor.width);
+    assert.equal(galleryBridge.width, gallery.width);
     const bridgeMidpoint = { x: (bridge.from.x + bridge.to.x) / 2, z: (bridge.from.z + bridge.to.z) / 2 };
+    const galleryBridgeMidpoint = {
+      x: (galleryBridge.from.x + galleryBridge.to.x) / 2,
+      z: (galleryBridge.from.z + galleryBridge.to.z) / 2,
+    };
     assert.ok(isCityPointInsidePolygon(bridgeMidpoint, layout.corridorFootprints[1]),
       `${layout.floorNumber}F must render its ${layout.bridgeId} bridge`);
     assert.ok(isCityPointInsidePolygon(bridge.to, layout.corridorFootprints[0]),
       `${layout.floorNumber}F bridge endpoint must connect to the active side corridor`);
+    assert.ok(isCityPointInsidePolygon(galleryBridgeMidpoint, layout.galleryFootprints[1]),
+      `${layout.floorNumber}F must render the widened ${layout.bridgeId} gallery bridge`);
+    assert.ok(isCityPointInsidePolygon(galleryBridge.to, layout.galleryFootprints[0]),
+      `${layout.floorNumber}F gallery bridge must connect to the active side gallery`);
+    if (layout.bridgeId === "AB") {
+      const baseWall = trapezoid.wallEdges.find(({ id }) => id === "AB")!;
+      const distanceFromBaseWall = (point: { x: number; z: number }) => {
+        const dx = baseWall.to.x - baseWall.from.x;
+        const dz = baseWall.to.z - baseWall.from.z;
+        return Math.abs(dx * (point.z - baseWall.from.z) - dz * (point.x - baseWall.from.x)) /
+          Math.hypot(dx, dz);
+      };
+      assert.ok(Math.abs(distanceFromBaseWall(bridge.from) - (layout.sideClearance + corridor.width / 2)) < 1e-6 &&
+        Math.abs(distanceFromBaseWall(bridge.to) - (layout.sideClearance + corridor.width / 2)) < 1e-6,
+      `${layout.floorNumber}F bridge centreline must also clear the AB wall by half-width plus the 2 m gap`);
+      assert.ok(Math.abs(distanceFromBaseWall(galleryBridge.from) - (layout.sideClearance + gallery.width / 2)) < 1e-6 &&
+        Math.abs(distanceFromBaseWall(galleryBridge.to) - (layout.sideClearance + gallery.width / 2)) < 1e-6,
+      `${layout.floorNumber}F gallery bridge must align its near edge with the same 2 m wall gap`);
+      const bridgeWallGap = pointAtWallOffset(baseWall, layout.sideClearance - 0.01);
+      const bridgeJustInside = pointAtWallOffset(baseWall, layout.sideClearance + 0.01);
+      assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
+        isCityPointInsidePolygon(bridgeWallGap, footprint)),
+      `${layout.floorNumber}F AB bridge must not remain against the wall`);
+      assert.notEqual(groundHeightAt(bridgeWallGap.x, bridgeWallGap.z, layout.level), layout.level,
+        `${layout.floorNumber}F bridge wall gap must not be walkable`);
+      assert.ok(isCityPointInsidePolygon(bridgeJustInside, layout.corridorFootprints[1]),
+        `${layout.floorNumber}F AB corridor bridge must begin after the full wall clearance`);
+    }
     assert.equal(groundHeightAt(galleryCenter.x, galleryCenter.z, layout.level), layout.level,
       `${layout.floorNumber}F active gallery must be walkable`);
   }
