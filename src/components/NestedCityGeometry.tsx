@@ -141,6 +141,28 @@ function offsetPoint(point: CityPlanPoint, direction: CityPlanPoint, distance: n
   return { x: point.x + direction.x * distance, z: point.z + direction.z * distance };
 }
 
+function clipSegmentToWallClearance(
+  segment: Segment3D,
+  wall: CityTrapezoidWallSegment | undefined,
+  clearance: number,
+): Segment3D | null {
+  if (!wall || clearance <= 0) return segment;
+  const signedDistance = (point: CityPlanPoint) =>
+    (point.x - wall.from.x) * wall.inward.x + (point.z - wall.from.z) * wall.inward.z - clearance;
+  const fromDistance = signedDistance(segment.from);
+  const toDistance = signedDistance(segment.to);
+  if (fromDistance < -1e-8 && toDistance < -1e-8) return null;
+  if (fromDistance < -1e-8) {
+    const t = fromDistance / (fromDistance - toDistance);
+    return { from: pointAlong(segment, t), to: segment.to };
+  }
+  if (toDistance < -1e-8) {
+    const t = fromDistance / (fromDistance - toDistance);
+    return { from: segment.from, to: pointAlong(segment, t) };
+  }
+  return segment;
+}
+
 function addTrapezoidShell(group: THREE.Group, material: THREE.Material) {
   const { A, B, C, D } = NESTED_CITY.trapezoid.points;
   const shell = new THREE.Group();
@@ -400,19 +422,22 @@ function addGalleryGuardrails(
     if (!wall) continue;
 
     const sideEdgeOffset = layout.sideClearance + NESTED_CITY.gallery.width - 0.22;
-    const sideEdge = {
+    const adjacentWall = layout.sideClearance > 0 ? walls.find(({ id }) => id === "AB") : undefined;
+    const sideEdge = clipSegmentToWallClearance({
       from: offsetPoint(wall.from, wall.inward, sideEdgeOffset),
       to: offsetPoint(wall.to, wall.inward, sideEdgeOffset),
-    };
-    addGuardrail(group, sideEdge, floorY, darkMaterial, glassMaterial,
-      `gallery-rail:${layout.parity}:${wall.id}:${floorY}m`);
+    }, adjacentWall, layout.sideClearance);
+    if (sideEdge) {
+      addGuardrail(group, sideEdge, floorY, darkMaterial, glassMaterial,
+        `gallery-rail:${layout.parity}:${wall.id}:${floorY}m`);
+    }
 
-    const bridge = layout.bridgeSegment;
+    const bridge = layout.galleryBridgeSegment;
     const dx = bridge.to.x - bridge.from.x;
     const dz = bridge.to.z - bridge.from.z;
     const length = Math.hypot(dx, dz);
     const normal = { x: -dz / length, z: dx / length };
-    const sides = layout.bridgeId === "EF" ? [-1, 1] : [1];
+    const sides = layout.bridgeId === "EF" || layout.sideClearance > 0 ? [-1, 1] : [1];
     for (const side of sides) {
       const edge = {
         from: offsetPoint(bridge.from, normal, bridgeOffset * side),
@@ -436,24 +461,29 @@ function addGallerySupportBeams(
     if (!wall) continue;
 
     const sideOffset = layout.sideClearance + NESTED_CITY.gallery.width - 0.34;
-    const sideFrom = offsetPoint(wall.from, wall.inward, sideOffset);
-    const sideTo = offsetPoint(wall.to, wall.inward, sideOffset);
-    addBeamBetween(
-      group,
-      planPointToVector(sideFrom, floorY - 0.16),
-      planPointToVector(sideTo, floorY - 0.16),
-      0.2,
-      0.26,
-      material,
-      `gallery-edge-girder:${layout.parity}:${wall.id}:${floorY}m`,
-    );
+    const adjacentWall = layout.sideClearance > 0 ? walls.find(({ id }) => id === "AB") : undefined;
+    const sideSegment = clipSegmentToWallClearance({
+      from: offsetPoint(wall.from, wall.inward, sideOffset),
+      to: offsetPoint(wall.to, wall.inward, sideOffset),
+    }, adjacentWall, layout.sideClearance);
+    if (sideSegment) {
+      addBeamBetween(
+        group,
+        planPointToVector(sideSegment.from, floorY - 0.16),
+        planPointToVector(sideSegment.to, floorY - 0.16),
+        0.2,
+        0.26,
+        material,
+        `gallery-edge-girder:${layout.parity}:${wall.id}:${floorY}m`,
+      );
+    }
 
-    const bridge = layout.bridgeSegment;
+    const bridge = layout.galleryBridgeSegment;
     const dx = bridge.to.x - bridge.from.x;
     const dz = bridge.to.z - bridge.from.z;
     const length = Math.hypot(dx, dz);
     const normal = { x: -dz / length, z: dx / length };
-    const sides = layout.bridgeId === "EF" ? [-1, 1] : [1];
+    const sides = layout.bridgeId === "EF" || layout.sideClearance > 0 ? [-1, 1] : [1];
     for (const side of sides) {
       const from = offsetPoint(bridge.from, normal, bridgeOffset * side);
       const to = offsetPoint(bridge.to, normal, bridgeOffset * side);
