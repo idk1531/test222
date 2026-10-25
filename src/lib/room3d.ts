@@ -41,17 +41,14 @@ export interface CityCorridorSegment {
   from: CityPlanPoint;
   to: CityPlanPoint;
 }
-export interface CityCorridorFloorLayout {
-  level: number;
-  floorNumber: number;
-  parity: "odd" | "even";
-  sideWall: "AD" | "BC";
-  /** Clear gap from the active side wall to the near edge of its corridor/gallery strip. */
-  sideOffset: number;
-  bridgeId: "AB" | "EF";
-  bridgeSegment: CityCorridorSegment;
-  corridorFootprints: readonly (readonly CityPlanPoint[])[];
-  galleryFootprints: readonly (readonly CityPlanPoint[])[];
+export interface CityCorridorExtension {
+  id: "BE" | "DF";
+  referenceFrom: CityTrapezoidPointId;
+  referenceTo: CityTrapezoidPointId;
+  width: number;
+  /** Centerline shifted inward by half the corridor width from its wall. */
+  from: CityPlanPoint;
+  to: CityPlanPoint;
 }
 export interface CityTrapezoidWallSegment {
   id: "AB" | "BC" | "AD";
@@ -227,13 +224,32 @@ function connectedGalleryFootprint(width: number): CityPlanPoint[] {
   ]);
 }
 const corridorFootprint = connectedGalleryFootprint(NESTED_CITY_CORRIDOR_WIDTH);
+const galleryFootprint = connectedGalleryFootprint(NESTED_CITY_GALLERY_WIDTH);
 const trapezoidWalls: readonly CityTrapezoidWallSegment[] = [
   { id: "AB", from: trapezoidPoints.A, to: trapezoidPoints.B, inward: inwardAB },
   { id: "BC", from: trapezoidPoints.B, to: trapezoidPoints.C, inward: inwardBC },
   { id: "AD", from: trapezoidPoints.A, to: trapezoidPoints.D, inward: inwardDA },
 ];
 const trapezoidBoundaryPoints = [trapezoidPoints.A, trapezoidPoints.B, trapezoidPoints.C, trapezoidPoints.D] as const;
-function straightCorridorFootprint(segment: Pick<CityCorridorSegment, "from" | "to" | "width">): CityPlanPoint[] {
+const corridorExtensions: readonly CityCorridorExtension[] = [
+  {
+    id: "BE",
+    referenceFrom: "B",
+    referenceTo: "E",
+    width: NESTED_CITY_CORRIDOR_WIDTH,
+    from: addPlanPoints(trapezoidPoints.B, scalePlanPoint(inwardBC, halfCorridorWidth)),
+    to: addPlanPoints(corridorNamedPoints.E, scalePlanPoint(inwardBC, halfCorridorWidth)),
+  },
+  {
+    id: "DF",
+    referenceFrom: "D",
+    referenceTo: "F",
+    width: NESTED_CITY_CORRIDOR_WIDTH,
+    from: addPlanPoints(trapezoidPoints.D, scalePlanPoint(inwardDA, halfCorridorWidth)),
+    to: addPlanPoints(corridorNamedPoints.F, scalePlanPoint(inwardDA, halfCorridorWidth)),
+  },
+];
+function straightCorridorFootprint(segment: Pick<CityCorridorExtension, "from" | "to" | "width">): CityPlanPoint[] {
   const delta = subtractPlanPoints(segment.to, segment.from);
   const length = lengthPlanPoint(delta);
   if (length <= 1e-9) return [];
@@ -246,66 +262,23 @@ function straightCorridorFootprint(segment: Pick<CityCorridorSegment, "from" | "
     addPlanPoints(segment.from, scalePlanPoint(normal, -halfWidth)),
   ], trapezoidBoundaryPoints);
 }
-function wallBandFootprint(
-  wall: CityTrapezoidWallSegment,
-  width: number,
-  offsetFromWall = 0,
-): CityPlanPoint[] {
-  const nearOffset = scalePlanPoint(wall.inward, offsetFromWall);
-  const farOffset = scalePlanPoint(wall.inward, offsetFromWall + width);
-  return clipPolygonToConvexPolygon([
-    addPlanPoints(wall.from, nearOffset),
-    addPlanPoints(wall.to, nearOffset),
-    addPlanPoints(wall.to, farOffset),
-    addPlanPoints(wall.from, farOffset),
-  ], trapezoidBoundaryPoints);
-}
-const corridorBridgeSegments = {
-  AB: corridorSegments.find(({ id }) => id === "AB")!,
-  EF: corridorSegments.find(({ id }) => id === "EF")!,
-} as const;
-const sideWalls = {
-  BC: trapezoidWalls.find(({ id }) => id === "BC")!,
-  AD: trapezoidWalls.find(({ id }) => id === "AD")!,
-} as const;
-const corridorLevels = [0, 4, 8, 12] as const;
-const galleryLevels = [4, 8, 12] as const;
-const corridorFloorLayouts: readonly CityCorridorFloorLayout[] = corridorLevels.map((level) => {
-  const floorNumber = level / NESTED_CITY_FLOOR_HEIGHT + 1;
-  const parity = floorNumber % 2 === 0 ? "even" : "odd";
-  const sideWall = parity === "odd" ? "AD" : "BC";
-  const sideOffset = parity === "even" ? NESTED_CITY_CORRIDOR_WIDTH : 0;
-  const bridgeId = parity === "odd" ? "EF" : "AB";
-  const baseBridge = corridorBridgeSegments[bridgeId];
-  // On offset floors, move the bridge endpoint onto the active side corridor instead of leaving a gap.
-  const bridgeSegment: CityCorridorSegment = sideOffset > 0
-    ? {
-      ...baseBridge,
-      to: addPlanPoints(baseBridge.to, scalePlanPoint(sideWalls[sideWall].inward, sideOffset)),
-    }
-    : baseBridge;
-  return {
-    level,
-    floorNumber,
-    parity,
-    sideWall,
-    sideOffset,
-    bridgeId,
-    bridgeSegment,
-    corridorFootprints: [
-      wallBandFootprint(sideWalls[sideWall], NESTED_CITY_CORRIDOR_WIDTH, sideOffset),
-      straightCorridorFootprint(bridgeSegment),
-    ],
-    galleryFootprints: [
-      wallBandFootprint(sideWalls[sideWall], NESTED_CITY_GALLERY_WIDTH, sideOffset),
-      straightCorridorFootprint({ ...bridgeSegment, width: NESTED_CITY_GALLERY_WIDTH }),
-    ],
-  };
-});
-const galleryFloorLayouts = corridorFloorLayouts.filter(({ level }) => level > 0);
+const corridorExtensionFootprints = corridorExtensions.map(straightCorridorFootprint);
+const corridorFootprints = [corridorFootprint, ...corridorExtensionFootprints] as const;
+const sideGalleryFootprints = trapezoidWalls
+  .filter(({ id }) => id === "BC" || id === "AD")
+  .map((wall) => {
+    const offset = scalePlanPoint(wall.inward, NESTED_CITY_GALLERY_WIDTH);
+    return clipPolygonToConvexPolygon([
+      wall.from,
+      wall.to,
+      addPlanPoints(wall.to, offset),
+      addPlanPoints(wall.from, offset),
+    ], trapezoidBoundaryPoints);
+  });
+const galleryFootprints = [galleryFootprint, ...sideGalleryFootprints] as const;
 const trapezoidWalkableFootprint = TRAPEZOID_WALKABLE_FOOTPRINT;
 export const NESTED_CITY = {
-  levels: corridorLevels,
+  levels: [0, 4, 8, 12] as const,
   floorHeight: NESTED_CITY_FLOOR_HEIGHT,
   trapezoid: {
     // ABCD is the complete building envelope; CD remains open.
@@ -320,15 +293,17 @@ export const NESTED_CITY = {
   },
   corridor: {
     width: NESTED_CITY_CORRIDOR_WIDTH,
-    floors: corridorLevels,
+    floors: [0, 4, 8, 12] as const,
     segments: corridorSegments,
+    extensions: corridorExtensions,
     footprint: corridorFootprint,
-    floorLayouts: corridorFloorLayouts,
+    // BE and DF complete the two side-wall walks so the passage reads continuously from end to end.
+    footprints: corridorFootprints,
   },
   gallery: {
     width: NESTED_CITY_GALLERY_WIDTH,
-    floors: galleryLevels,
-    floorLayouts: galleryFloorLayouts,
+    floors: [4, 8, 12] as const,
+    footprints: galleryFootprints,
   },
 } as const;
 
@@ -1169,18 +1144,17 @@ export function resolveCollision(
 export const MAX_WALKABLE_STEP = 0.62;
 
 /**
- * Return the nearest reachable surface from the active floor plan. Odd and even floors use
- * alternating corridor footprints, so an absent upper corridor can never create a phantom floor.
+ * Return the walkable level nearest the player's current height. Upper floors exist only on the
+ * connected perimeter-gallery footprint, leaving the central atrium open.
  */
 export function groundHeightAt(x: number, z: number, referenceY = 0): number {
   const point = { x, z };
+  const onUpperGallery = NESTED_CITY.gallery.footprints.some((footprint) =>
+    isPointInSimplePolygon(point, footprint, 1e-6),
+  );
   const floorCandidates = [
     0,
-    ...NESTED_CITY.gallery.floorLayouts.flatMap(({ level, galleryFootprints }) =>
-      level <= referenceY + MAX_WALKABLE_STEP && galleryFootprints.some((footprint) =>
-        isPointInSimplePolygon(point, footprint, 1e-6),
-      ) ? [level] : [],
-    ),
+    ...(onUpperGallery ? NESTED_CITY.gallery.floors : []),
   ];
   return floorCandidates.reduce((best, height) =>
     Math.abs(height - referenceY) < Math.abs(best - referenceY) ? height : best
