@@ -26,7 +26,7 @@ await writeFile(smoothingModulePath, ts.transpileModule(smoothingSource, { compi
 const protocol = await import(pathToFileURL(modulePath).href);
 const { LatestValueSendQueue } = await import(pathToFileURL(queueModulePath).href);
 const { RemotePoseInterpolator } = await import(pathToFileURL(smoothingModulePath).href);
-const { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } = await import(pathToFileURL(dimensionsModulePath).href);
+const { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN, clampToTrapezoid, isPointInsideTrapezoid } = await import(pathToFileURL(dimensionsModulePath).href);
 
 after(async () => {
   await rm(temporaryDirectory, { recursive: true, force: true });
@@ -144,8 +144,12 @@ test("pose messages validate finite coordinates and clamp untrusted positions", 
   }));
   assert.equal(parsed.type, "pose");
   assert.equal(parsed.sequence, 12);
-  assert.equal(parsed.pose.x, ROOM_DIMENSIONS.width / 2 - ROOM_EDGE_MARGIN);
-  assert.equal(parsed.pose.z, -ROOM_DIMENSIONS.depth / 2 + ROOM_EDGE_MARGIN);
+  assert.deepEqual(
+    { x: parsed.pose.x, z: parsed.pose.z },
+    clampToTrapezoid(500, -500),
+    "untrusted coordinates must be projected into the inset trapezoid rather than clamped to a square",
+  );
+  assert.ok(isPointInsideTrapezoid({ x: parsed.pose.x, z: parsed.pose.z }, ROOM_EDGE_MARGIN));
   assert.equal(parsed.pose.floorY, 8);
   assert.equal(parsed.pose.jumpOffset, 3);
   assert.equal(parsed.pose.holding, true);

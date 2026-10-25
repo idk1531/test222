@@ -16,6 +16,7 @@ import {
   FIDELITY,
   LOOK,
   MARBLE_ROUGH,
+  NESTED_CITY,
   PALETTE,
   ROOM,
   SHELF,
@@ -499,8 +500,22 @@ export const RoomGeometry: React.FC<{
     photo(deskMat, "marble", { repeat: TEXTURES.repeat.desk, tint: LOOK.deskTint });
     photo(plankMat, "walnut", { repeat: TEXTURES.repeat.shelf, tint: LOOK.shelfWoodTint });
 
-    // ---- 地面：大尺度開放挑空；上層樓板與結構由 NestedCityGeometry 管理 ----
-    group.add(box(W + 0.48, 0.1, D + 0.48, floorMat, 0, -0.05, 0, { cast: false }));
+    // Ground slab follows the actual ABCD exterior footprint; no square floor is drawn outside the building.
+    const { A, B, C, D: southWest } = NESTED_CITY.trapezoid.points;
+    const floorShape = new THREE.Shape();
+    floorShape.moveTo(A.x, -A.z);
+    for (const point of [B, C, southWest]) floorShape.lineTo(point.x, -point.z);
+    floorShape.closePath();
+    const floorGeometry = new THREE.ExtrudeGeometry(floorShape, { depth: 0.1, bevelEnabled: false });
+    floorGeometry.rotateX(-Math.PI / 2);
+    floorGeometry.computeVertexNormals();
+    const floor = new THREE.Mesh(floorGeometry, floorMat);
+    floor.name = "trapezoid-ground-floor-ABCD";
+    floor.position.y = -0.1;
+    floor.castShadow = false;
+    floor.receiveShadow = true;
+    group.add(floor);
+    disposers.push(() => floorGeometry.dispose());
 
     // 層板燈帶沿用既有暖光材質，供真實書架幾何使用。
     const ledMat = new THREE.MeshBasicMaterial({ color: LOOK.ledSoft, toneMapped: false });
@@ -512,17 +527,24 @@ export const RoomGeometry: React.FC<{
     const winL = WINDOW.cx - WINDOW.width / 2;
     const winR = WINDOW.cx + WINDOW.width / 2;
     const winH = WINDOW.top - WINDOW.sill;
-    group.add(box(winL + W / 2 + T, H, T, wallMat, (-W / 2 - T + winL) / 2, H / 2, wallZ - T / 2));
-    group.add(box(W / 2 + T - winR, H, T, wallMat, (winR + W / 2 + T) / 2, H / 2, wallZ - T / 2));
-    group.add(box(WINDOW.width, WINDOW.sill, T, wallMat, WINDOW.cx, WINDOW.sill / 2, wallZ - T / 2));
-    group.add(box(WINDOW.width, H - WINDOW.top, T, wallMat, WINDOW.cx, (H + WINDOW.top) / 2, wallZ - T / 2));
+    const northWallInnerFaceZ = wallZ + T / 2;
+    const leftPierWidth = winL - A.x;
+    const rightPierWidth = B.x - winR;
+    if (leftPierWidth > 0) {
+      group.add(box(leftPierWidth, H, T, wallMat, (A.x + winL) / 2, H / 2, northWallInnerFaceZ));
+    }
+    if (rightPierWidth > 0) {
+      group.add(box(rightPierWidth, H, T, wallMat, (winR + B.x) / 2, H / 2, northWallInnerFaceZ));
+    }
+    group.add(box(WINDOW.width, WINDOW.sill, T, wallMat, WINDOW.cx, WINDOW.sill / 2, northWallInnerFaceZ));
+    group.add(box(WINDOW.width, H - WINDOW.top, T, wallMat, WINDOW.cx, (H + WINDOW.top) / 2, northWallInnerFaceZ));
 
     // ---- 窗框／單中挺／大理石窗台／玻璃 ----
     const f = WINDOW.frame;
     const winY0 = WINDOW.sill;
     const winY1 = WINDOW.top;
     const winMidY = (winY0 + winY1) / 2;
-    const winZ = wallZ - T / 2;
+    const winZ = northWallInnerFaceZ;
     group.add(box(f, winH, WINDOW.depth, frameMat, winL + f / 2, winY0 + winH / 2, winZ));
     group.add(box(f, winH, WINDOW.depth, frameMat, winR - f / 2, winY0 + winH / 2, winZ));
     group.add(box(WINDOW.width, f, WINDOW.depth, frameMat, WINDOW.cx, winY1 - f / 2, winZ));

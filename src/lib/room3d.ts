@@ -11,7 +11,14 @@ import {
   type StudyBookLayout,
   type StudyCategory,
 } from "./study";
-import { ROOM_DIMENSIONS, ROOM_EDGE_MARGIN } from "./roomDimensions";
+import {
+  clampToTrapezoid,
+  isPointInsideTrapezoid,
+  ROOM_DIMENSIONS,
+  ROOM_EDGE_MARGIN,
+  TRAPEZOID_POINTS,
+  TRAPEZOID_WALKABLE_FOOTPRINT,
+} from "./roomDimensions";
 
 export { ROOM_AREA_SCALE } from "./roomDimensions";
 
@@ -95,6 +102,7 @@ export interface CityTrapezoidWallSegment {
   id: "AB" | "BC" | "AD";
   from: CityPlanPoint;
   to: CityPlanPoint;
+  inward: CityPlanPoint;
 }
 const NESTED_CITY_CORRIDOR_WIDTH = 2;
 const NESTED_CITY_FLOOR_HEIGHT = 4;
@@ -191,12 +199,16 @@ function clipPolygonToConvexPolygon(
   });
 }
 
-const trapezoidPoints = {
-  A: { x: -ROOM.width / 4, z: -ROOM.depth / 2 },
-  B: { x: ROOM.width / 4, z: -ROOM.depth / 2 },
-  C: { x: ROOM.width / 2, z: ROOM.depth / 2 },
-  D: { x: -ROOM.width / 2, z: ROOM.depth / 2 },
-} satisfies Record<"A" | "B" | "C" | "D", CityPlanPoint>;
+function isPointInConvexPolygon(point: CityPlanPoint, polygon: readonly CityPlanPoint[], epsilon = 1e-8): boolean {
+  if (polygon.length < 3) return false;
+  const orientation = polygonSignedArea(polygon) >= 0 ? 1 : -1;
+  return polygon.every((start, index) => {
+    const end = polygon[(index + 1) % polygon.length];
+    return crossPlanPoints(subtractPlanPoints(end, start), subtractPlanPoints(point, start)) * orientation >= -epsilon;
+  });
+}
+
+const trapezoidPoints = TRAPEZOID_POINTS;
 const corridorNamedPoints = {
   ...trapezoidPoints,
   E: pointAlong(trapezoidPoints.B, trapezoidPoints.C, 0.75),
@@ -248,10 +260,12 @@ const corridorFootprint = clipPolygonToConvexPolygon(corridorOutlineRaw, [
   trapezoidPoints.A, trapezoidPoints.B, trapezoidPoints.C, trapezoidPoints.D,
 ]);
 const trapezoidWalls: readonly CityTrapezoidWallSegment[] = [
-  { id: "AB", from: trapezoidPoints.A, to: trapezoidPoints.B },
-  { id: "BC", from: trapezoidPoints.B, to: trapezoidPoints.C },
-  { id: "AD", from: trapezoidPoints.A, to: trapezoidPoints.D },
+  { id: "AB", from: trapezoidPoints.A, to: trapezoidPoints.B, inward: inwardAB },
+  { id: "BC", from: trapezoidPoints.B, to: trapezoidPoints.C, inward: inwardBC },
+  { id: "AD", from: trapezoidPoints.A, to: trapezoidPoints.D, inward: inwardDA },
 ];
+const trapezoidBoundaryPoints = [trapezoidPoints.A, trapezoidPoints.B, trapezoidPoints.C, trapezoidPoints.D] as const;
+const trapezoidWalkableFootprint = TRAPEZOID_WALKABLE_FOOTPRINT;
 type PrimaryFrameScheduleRow = Pick<CityFrame,
   "id" | "x" | "z" | "bottom" | "width" | "height" | "material" | "bands" | "openings"
 > & { depth: number };
@@ -285,12 +299,9 @@ export interface CityPlatformRail {
   id: string;
   platformId: string;
   level: CityPlatform["level"];
-  axis: "x" | "z";
-  edge: "west" | "east" | "north" | "south";
-  fixed: number;
-  inward: -1 | 1;
-  start: number;
-  end: number;
+  from: CityPlanPoint;
+  to: CityPlanPoint;
+  inward: CityPlanPoint;
 }
 
 /**
@@ -310,6 +321,7 @@ export const NESTED_CITY = {
     wallEdges: trapezoidWalls,
     openEdge: "CD" as const,
     wallBandLevels: [0, 4, 8, 12, 16] as const,
+    walkableFootprint: trapezoidWalkableFootprint,
   },
   corridor: {
     width: NESTED_CITY_CORRIDOR_WIDTH,
@@ -324,29 +336,32 @@ export const NESTED_CITY = {
   // 20 × 20 m clear shaft through 2F–4F; narrow crossings are deliberately offset by level.
   atrium: { x: 0, z: 0, width: 20, depth: 20 },
   frames: [
-    // Authoritative primary-layer envelopes from the schedule, in X × Z × Y order.
-    // W and part of S cross the new sloping trapezoid wall line at their specified X/Z extents; keep both
-    // schedules untrimmed until the owner resolves that geometric conflict rather than silently shrinking them.
-    // The square 48 × 48 m outline belongs to the building envelope, not to these nested rectangles.
+    // W/S/C keep their accepted centers and vertical schedule, while their X/Z envelopes are fitted
+    // inside the trapezoid with at least 0.5 m clearance from every rendered member. Their 3D scale ratios remain
+    // proportional (W→S = 3/4; S→C = 2/3); the external boundary is now the trapezoid, not these frames.
     primaryFrameFromSchedule({
-      id: "outer-timber-shell", x: 0, z: 0, bottom: 0, width: 48, depth: 16, height: 16, material: "timber",
+      id: "outer-timber-frame", x: 0, z: 0, bottom: 0, width: 30, depth: 16, height: 16, material: "timber",
       bands: [4, 8, 12], openings: [{ edge: "south", start: 6.3, end: 8.7, bottom: 7.2, top: 8.8 }],
     }),
     primaryFrameFromSchedule({
-      id: "middle-stone-frame", x: 4, z: 4, bottom: 2, width: 36, depth: 12, height: 12, material: "stone",
-      // Local interval 2.3–4.7 maps to world X=6.3–8.7, aligned with the X=7.5 stair.
-      bands: [2, 6, 10], openings: [{ edge: "south", start: 2.3, end: 4.7, bottom: 7.2, top: 8.8 }],
+      id: "middle-stone-frame", x: 4, z: 4, bottom: 2, width: 22.5, depth: 12, height: 12, material: "stone",
+      // The south opening aligns with the X=7.5 stair; the west band opening lets the 3F→4F stair pass at Y=12.
+      bands: [2, 6, 10], openings: [
+        { edge: "south", start: 2.3, end: 4.7, bottom: 7.2, top: 8.8 },
+        { edge: "west", start: -4.1, end: -1.6, bottom: 11.4, top: 12.6 },
+      ],
     }),
     primaryFrameFromSchedule({
-      id: "inner-core-frame", x: -4, z: -4, bottom: 4, width: 24, depth: 8, height: 8, material: "core",
+      id: "inner-core-frame", x: -4, z: -4, bottom: 4, width: 15, depth: 8, height: 8, material: "core",
       bands: [4],
     }),
   ] satisfies readonly CityFrame[],
   // Extra furnished-room volumes are shown only in the existing walk-through mode, not in structure inspection.
   featureFrames: [
-    { id: "main-library-platform-frame", plane: "box", x: 4, z: 8, bottom: 4, width: 30, depth: 16, height: 4, thickness: 0.52, beamHeight: 0.48, rotationY: 0, material: "timber" },
-    { id: "bridge-corridor-frame", plane: "box", x: 10, z: 10, bottom: 8, width: 20, depth: 4, height: 3, thickness: 0.26, beamHeight: 0.24, rotationY: 0, material: "core" },
-    { id: "library-zone-frame", plane: "box", x: 4, z: 12, bottom: 0, width: 38, depth: 3, height: 8, thickness: 0.24, beamHeight: 0.28, rotationY: 0, material: "timber" },
+    // Legacy library volumes retained as local modules but refitted so their complete beam envelopes stay inside ABCD.
+    { id: "main-library-platform-frame", plane: "box", x: 4, z: 8, bottom: 4, width: 26, depth: 16, height: 4, thickness: 0.52, beamHeight: 0.48, rotationY: 0, material: "timber" },
+    { id: "bridge-corridor-frame", plane: "box", x: 10, z: 10, bottom: 8, width: 18, depth: 4, height: 3, thickness: 0.26, beamHeight: 0.24, rotationY: 0, material: "core" },
+    { id: "library-zone-frame", plane: "box", x: 4, z: 12, bottom: 0, width: 30, depth: 3, height: 8, thickness: 0.24, beamHeight: 0.28, rotationY: 0, material: "timber" },
   ] satisfies readonly CityFrame[],
   platforms: [
     // 2F: offset side galleries plus a narrow crossing and two 27 m connectors (about 44% coverage).
@@ -376,7 +391,7 @@ export const NESTED_CITY = {
   bridgeRails: [
     { id: "level-1-crossing-rail-near", level: 1, x: 0, z: -3.15, width: 21, depth: 0.1 },
     { id: "level-1-crossing-rail-far", level: 1, x: 0, z: -0.85, width: 21, depth: 0.1 },
-    { id: "level-1-north-connector-rail-near", level: 1, x: 0, z: -18.45, width: 27, depth: 0.1 },
+    { id: "level-1-north-connector-rail-near", level: 1, x: 0, z: -18.45, width: 26.5, depth: 0.1 },
     { id: "level-1-north-connector-rail-far", level: 1, x: 0, z: -15.55, width: 27, depth: 0.1 },
     // Two 2.4 m stair mouths: ground-to-2F at x=0 and 2F-to-3F at x=7.5.
     { id: "level-1-south-connector-rail-near-west", level: 1, x: -7.35, z: 15.55, width: 12.3, depth: 0.1 },
@@ -392,9 +407,10 @@ export const NESTED_CITY = {
     { id: "level-3-crossing-rail-far", level: 3, x: 0, z: -4.05, width: 24, depth: 0.1 },
   ] as const,
   columns: [
-    { id: "platform-support-west", x: -18, z: 0, width: 0.78, depth: 0.78, bottom: 0, top: 12.2, material: "stone" },
-    { id: "platform-support-east-lower", x: 18, z: -8, width: 0.78, depth: 0.78, bottom: 0, top: 8.2, material: "stone" },
-    { id: "platform-support-east-upper", x: 18, z: -4, width: 0.72, depth: 0.72, bottom: 8, top: 12.2, material: "stone" },
+    // Relocated 1.1 m inward so even the full column footprints stay inside the narrowed north half.
+    { id: "platform-support-west", x: -16.4, z: 0, width: 0.78, depth: 0.78, bottom: 0, top: 12.2, material: "stone" },
+    { id: "platform-support-east-lower", x: 14.5, z: -8, width: 0.78, depth: 0.78, bottom: 0, top: 8.2, material: "stone" },
+    { id: "platform-support-east-upper", x: 15.5, z: -4, width: 0.72, depth: 0.72, bottom: 8, top: 12.2, material: "stone" },
     { id: "platform-support-north-2f", x: 0, z: -17.2, width: 0.72, depth: 0.72, bottom: 0, top: 4.2, material: "stone" },
     { id: "platform-support-north-3f", x: 0, z: -15, width: 0.72, depth: 0.72, bottom: 4, top: 8.2, material: "stone" },
   ] as const,
@@ -410,6 +426,63 @@ export const NESTED_CITY = {
   platformRailPostWidth: 0.07,
   glassRailThickness: 0.055,
 } as const;
+
+const trapezoidBoundary = trapezoidBoundaryPoints;
+
+/** Test a plan point against a convex polygon in X/Z coordinates. */
+export function isCityPointInsidePolygon(point: CityPlanPoint, polygon: readonly CityPlanPoint[], epsilon = 1e-8): boolean {
+  return isPointInConvexPolygon(point, polygon, epsilon);
+}
+
+/** Test the building envelope with an optional perpendicular wall clearance. */
+export function isCityPointInsideTrapezoid(point: CityPlanPoint, clearance = 0): boolean {
+  return isPointInsideTrapezoid(point, clearance);
+}
+
+/** Clip a plan polygon to the accepted ABCD building perimeter; the opening CD remains a boundary edge. */
+export function clipCityPolygonToTrapezoid(points: readonly CityPlanPoint[]): CityPlanPoint[] {
+  if (points.length < 3) return [];
+  return clipPolygonToConvexPolygon(points, trapezoidBoundary);
+}
+
+/** Exact plan footprint used by the structural inspection's clipped balcony/gallery slabs. */
+export function cityPlatformFootprint(platform: CityPlatform): CityPlanPoint[] {
+  const halfWidth = platform.width / 2;
+  const halfDepth = platform.depth / 2;
+  return clipCityPolygonToTrapezoid([
+    { x: platform.x - halfWidth, z: platform.z - halfDepth },
+    { x: platform.x + halfWidth, z: platform.z - halfDepth },
+    { x: platform.x + halfWidth, z: platform.z + halfDepth },
+    { x: platform.x - halfWidth, z: platform.z + halfDepth },
+  ]);
+}
+
+/** A thin perimeter-wall strip with its outside face on ABCD and all thickness directed inward. */
+export function cityTrapezoidWallBandFootprint(
+  wall: CityTrapezoidWallSegment,
+  thickness: number
+): CityPlanPoint[] {
+  if (!(thickness > 0)) return [];
+  const offset = scalePlanPoint(wall.inward, thickness);
+  return clipCityPolygonToTrapezoid([
+    wall.from,
+    wall.to,
+    addPlanPoints(wall.to, offset),
+    addPlanPoints(wall.from, offset),
+  ]);
+}
+
+/** Corner posts are clipped at the footprint so the external face can never protrude beyond the wall. */
+export function cityTrapezoidCornerFootprint(point: CityPlanPoint, width: number): CityPlanPoint[] {
+  if (!(width > 0)) return [];
+  const halfWidth = width / 2;
+  return clipCityPolygonToTrapezoid([
+    { x: point.x - halfWidth, z: point.z - halfWidth },
+    { x: point.x + halfWidth, z: point.z - halfWidth },
+    { x: point.x + halfWidth, z: point.z + halfWidth },
+    { x: point.x - halfWidth, z: point.z + halfWidth },
+  ]);
+}
 
 export interface CityCorridorFramePlan {
   from: CityPlanPoint;
@@ -634,7 +707,7 @@ export function cityStairHeightAt(stair: CityStair, progress: number): number {
 export function nestedCityPlatformRails(): CityPlatformRail[] {
   const epsilon = 1e-4;
   const minimumRailLength = 0.4;
-  const intervalsMinus = (intervals: Array<{ start: number; end: number }>, cutStart: number, cutEnd: number) => {
+  const subtractInterval = (intervals: Array<{ start: number; end: number }>, cutStart: number, cutEnd: number) => {
     const next: Array<{ start: number; end: number }> = [];
     for (const interval of intervals) {
       if (cutEnd <= interval.start + epsilon || cutStart >= interval.end - epsilon) {
@@ -646,90 +719,106 @@ export function nestedCityPlatformRails(): CityPlatformRail[] {
     }
     return next;
   };
+  const projectOnEdge = (point: CityPlanPoint, origin: CityPlanPoint, unit: CityPlanPoint) =>
+    (point.x - origin.x) * unit.x + (point.z - origin.z) * unit.z;
+  const pointLineDistance = (point: CityPlanPoint, origin: CityPlanPoint, unit: CityPlanPoint) =>
+    Math.abs((point.x - origin.x) * unit.z - (point.z - origin.z) * unit.x);
   const stairEnds = NESTED_CITY.stairs.flatMap((stair) => [
     { y: stair.start.y, point: stair.start, width: stair.width },
     { y: stair.end.y, point: stair.end, width: stair.width },
   ]);
+  const platformFootprints = new Map(NESTED_CITY.platforms.map((platform) => [platform.id, cityPlatformFootprint(platform)]));
   const rails: CityPlatformRail[] = [];
 
   for (const platform of NESTED_CITY.platforms) {
     if (platform.id.includes("bridge")) continue;
-    const bounds = {
-      minX: platform.x - platform.width / 2,
-      maxX: platform.x + platform.width / 2,
-      minZ: platform.z - platform.depth / 2,
-      maxZ: platform.z + platform.depth / 2,
-    };
-    const edges = [
-      { axis: "z" as const, edge: "west" as const, fixed: bounds.minX, inward: 1 as const, start: bounds.minZ, end: bounds.maxZ },
-      { axis: "z" as const, edge: "east" as const, fixed: bounds.maxX, inward: -1 as const, start: bounds.minZ, end: bounds.maxZ },
-      { axis: "x" as const, edge: "north" as const, fixed: bounds.minZ, inward: 1 as const, start: bounds.minX, end: bounds.maxX },
-      { axis: "x" as const, edge: "south" as const, fixed: bounds.maxZ, inward: -1 as const, start: bounds.minX, end: bounds.maxX },
-    ];
+    const footprint = platformFootprints.get(platform.id) ?? [];
+    if (footprint.length < 3) continue;
+    const floorY = NESTED_CITY.levels[platform.level];
+    const orientation = polygonSignedArea(footprint) >= 0 ? 1 : -1;
 
-    for (const edge of edges) {
-      let intervals = [{ start: edge.start, end: edge.end }];
+    for (let edgeIndex = 0; edgeIndex < footprint.length; edgeIndex++) {
+      const edgeStart = footprint[edgeIndex];
+      const edgeEnd = footprint[(edgeIndex + 1) % footprint.length];
+      const delta = subtractPlanPoints(edgeEnd, edgeStart);
+      const length = lengthPlanPoint(delta);
+      if (length < minimumRailLength) continue;
+      const unit = scalePlanPoint(delta, 1 / length);
+      const edgeIsExterior = trapezoidBoundary.some((wallStart, wallIndex) => {
+        const wallEnd = trapezoidBoundary[(wallIndex + 1) % trapezoidBoundary.length];
+        const wallDelta = subtractPlanPoints(wallEnd, wallStart);
+        const wallLength = lengthPlanPoint(wallDelta);
+        const wallUnit = scalePlanPoint(wallDelta, 1 / wallLength);
+        return Math.abs(crossPlanPoints(unit, wallUnit)) <= epsilon &&
+          pointLineDistance(edgeStart, wallStart, wallUnit) <= epsilon &&
+          pointLineDistance(edgeEnd, wallStart, wallUnit) <= epsilon;
+      });
+      // The exterior wall is the guard on the three built sides; CD stays an open edge.
+      if (edgeIsExterior) continue;
+
+      let intervals = [{ start: 0, end: length }];
       for (const neighbor of NESTED_CITY.platforms) {
         if (neighbor.id === platform.id || neighbor.level !== platform.level) continue;
-        const neighborBounds = {
-          minX: neighbor.x - neighbor.width / 2,
-          maxX: neighbor.x + neighbor.width / 2,
-          minZ: neighbor.z - neighbor.depth / 2,
-          maxZ: neighbor.z + neighbor.depth / 2,
-        };
-        const sharesBoundary = edge.axis === "z"
-          ? Math.abs(edge.fixed - neighborBounds.minX) <= epsilon || Math.abs(edge.fixed - neighborBounds.maxX) <= epsilon
-          : Math.abs(edge.fixed - neighborBounds.minZ) <= epsilon || Math.abs(edge.fixed - neighborBounds.maxZ) <= epsilon;
-        if (!sharesBoundary) continue;
-        const overlapStart = edge.axis === "z"
-          ? Math.max(edge.start, neighborBounds.minZ)
-          : Math.max(edge.start, neighborBounds.minX);
-        const overlapEnd = edge.axis === "z"
-          ? Math.min(edge.end, neighborBounds.maxZ)
-          : Math.min(edge.end, neighborBounds.maxX);
-        if (overlapEnd - overlapStart > epsilon) intervals = intervalsMinus(intervals, overlapStart, overlapEnd);
-      }
-
-      const floorY = NESTED_CITY.levels[platform.level];
-      for (const endpoint of stairEnds) {
-        if (Math.abs(endpoint.y - floorY) > epsilon) continue;
-        const distanceToEdge = edge.axis === "z" ? Math.abs(endpoint.point.x - edge.fixed) : Math.abs(endpoint.point.z - edge.fixed);
-        if (distanceToEdge > endpoint.width / 2 + 0.05) continue;
-        const along = edge.axis === "z" ? endpoint.point.z : endpoint.point.x;
-        intervals = intervalsMinus(intervals, along - endpoint.width / 2, along + endpoint.width / 2);
-      }
-      // A flight that runs parallel to a platform edge needs a continuous open stairwell, not just end gaps.
-      for (const stair of NESTED_CITY.stairs) {
-        if (Math.abs(stair.start.y - floorY) > epsilon && Math.abs(stair.end.y - floorY) > epsilon) continue;
-        const dx = Math.abs(stair.end.x - stair.start.x);
-        const dz = Math.abs(stair.end.z - stair.start.z);
-        if (edge.axis === "z" && dx <= epsilon && Math.abs(stair.start.x - edge.fixed) <= stair.width / 2 + 0.05) {
-          intervals = intervalsMinus(
-            intervals,
-            Math.min(stair.start.z, stair.end.z) - stair.width / 2,
-            Math.max(stair.start.z, stair.end.z) + stair.width / 2
-          );
-        } else if (edge.axis === "x" && dz <= epsilon && Math.abs(stair.start.z - edge.fixed) <= stair.width / 2 + 0.05) {
-          intervals = intervalsMinus(
-            intervals,
-            Math.min(stair.start.x, stair.end.x) - stair.width / 2,
-            Math.max(stair.start.x, stair.end.x) + stair.width / 2
-          );
+        const neighborFootprint = platformFootprints.get(neighbor.id) ?? [];
+        for (let neighborIndex = 0; neighborIndex < neighborFootprint.length; neighborIndex++) {
+          const neighborStart = neighborFootprint[neighborIndex];
+          const neighborEnd = neighborFootprint[(neighborIndex + 1) % neighborFootprint.length];
+          const neighborDelta = subtractPlanPoints(neighborEnd, neighborStart);
+          const neighborLength = lengthPlanPoint(neighborDelta);
+          if (neighborLength < epsilon) continue;
+          const neighborUnit = scalePlanPoint(neighborDelta, 1 / neighborLength);
+          if (Math.abs(crossPlanPoints(unit, neighborUnit)) > epsilon ||
+            pointLineDistance(neighborStart, edgeStart, unit) > epsilon ||
+            pointLineDistance(neighborEnd, edgeStart, unit) > epsilon) continue;
+          const overlapStart = Math.max(0, Math.min(
+            projectOnEdge(neighborStart, edgeStart, unit),
+            projectOnEdge(neighborEnd, edgeStart, unit)
+          ));
+          const overlapEnd = Math.min(length, Math.max(
+            projectOnEdge(neighborStart, edgeStart, unit),
+            projectOnEdge(neighborEnd, edgeStart, unit)
+          ));
+          if (overlapEnd - overlapStart > epsilon) intervals = subtractInterval(intervals, overlapStart, overlapEnd);
         }
       }
 
-      intervals.forEach((interval, index) => {
+      for (const endpoint of stairEnds) {
+        if (Math.abs(endpoint.y - floorY) > epsilon ||
+          pointLineDistance(endpoint.point, edgeStart, unit) > endpoint.width / 2 + 0.05) continue;
+        const along = projectOnEdge(endpoint.point, edgeStart, unit);
+        intervals = subtractInterval(intervals, along - endpoint.width / 2, along + endpoint.width / 2);
+      }
+      for (const stair of NESTED_CITY.stairs) {
+        const minY = Math.min(stair.start.y, stair.end.y);
+        const maxY = Math.max(stair.start.y, stair.end.y);
+        if (floorY < minY - epsilon || floorY > maxY + epsilon) continue;
+        const stairDirection = subtractPlanPoints(stair.end, stair.start);
+        const stairLength = lengthPlanPoint(stairDirection);
+        if (stairLength < epsilon) continue;
+        const stairUnit = scalePlanPoint(stairDirection, 1 / stairLength);
+        if (Math.abs(crossPlanPoints(unit, stairUnit)) > epsilon ||
+          pointLineDistance(stair.start, edgeStart, unit) > stair.width / 2 + 0.05) continue;
+        const stairStart = projectOnEdge(stair.start, edgeStart, unit);
+        const stairEnd = projectOnEdge(stair.end, edgeStart, unit);
+        intervals = subtractInterval(
+          intervals,
+          Math.min(stairStart, stairEnd) - stair.width / 2,
+          Math.max(stairStart, stairEnd) + stair.width / 2
+        );
+      }
+
+      intervals.forEach((interval, intervalIndex) => {
         if (interval.end - interval.start < minimumRailLength) return;
+        const from = addPlanPoints(edgeStart, scalePlanPoint(unit, interval.start));
+        const to = addPlanPoints(edgeStart, scalePlanPoint(unit, interval.end));
+        const inward = { x: -unit.z * orientation, z: unit.x * orientation };
         rails.push({
-          id: `${platform.id}:${edge.edge}:${index}`,
+          id: `${platform.id}:edge-${edgeIndex}:${intervalIndex}`,
           platformId: platform.id,
           level: platform.level,
-          axis: edge.axis,
-          edge: edge.edge,
-          fixed: edge.fixed,
-          inward: edge.inward,
-          start: interval.start,
-          end: interval.end,
+          from,
+          to,
+          inward,
         });
       });
     }
@@ -756,12 +845,12 @@ export function nestedCityFloorLabel(floorY: number): NestedCityFloorLabel {
   return { full: "階梯", compact: "階梯" };
 }
 
-// 大面積玻璃窗（北牆 z = −depth/2），以落地採光取代單層小房間窗洞。
-// 墩寬、窗高與窗寬是概念模型假設；保留既有桌面、書本與工作視角的公尺尺度。
-const WINDOW_WEST_PIER = 0.35;
-const WINDOW_EAST_PIER = 1.2;
-const WINDOW_LEFT = -ROOM.width / 2 + WINDOW_WEST_PIER;
-const WINDOW_RIGHT = ROOM.width / 2 - WINDOW_EAST_PIER;
+// AB is the 24 m north edge of the trapezoid. Keep 0.8 m end piers inside that exterior wall.
+// The glazing and sill widths are concept-model assumptions, not measurements from the reference image.
+const WINDOW_WEST_PIER = 0.8;
+const WINDOW_EAST_PIER = 0.8;
+const WINDOW_LEFT = trapezoidPoints.A.x + WINDOW_WEST_PIER;
+const WINDOW_RIGHT = trapezoidPoints.B.x - WINDOW_EAST_PIER;
 export const WINDOW = {
   cx: (WINDOW_LEFT + WINDOW_RIGHT) / 2,
   width: WINDOW_RIGHT - WINDOW_LEFT,
@@ -846,21 +935,21 @@ export const LOOK = {
 };
 
 // 懸浮薄層板書牆（v8.3：西牆 wallSign=-1；-1＝西牆、+1＝東牆，保留可切換）
-// xBack 為背牆面 X；板材自背牆往室內長 depth；層板沿 Z 長 width。
+// xBack 為背板面 X；板材自背板往 +X 延伸，層板沿 Z 長 width。
 const SHELF_CENTER_Z = 0;
-// Leave a 1.25 m end reveal for the outer-shell corner portals after the room grows to 48 × 48 m.
-const SHELF_WIDTH = ROOM.depth - 2.5;
+// Keep a long, usable wall of books while moving it away from the sloped exterior wall.
+const SHELF_WIDTH = 28;
 export const SHELF = {
   wallSign: FIDELITY.shelfWallSign,
-  // 書牆沿西牆延伸；兩端各留約 1.25 m，避開外框角柱並保留立面收邊。
+  // 室內西側自由書牆位於 x=-5，z 範圍 -14..14，在梯形北端收窄處仍完整落在外牆內。
   z: SHELF_CENTER_Z,
-  width: SHELF_WIDTH, // 方形外框下沿 Z 軸 45.5 m
+  width: SHELF_WIDTH,
   height: 2.46, // 最上層板「頂面」Y（附圖量測）
   depth: 0.28, // 層板深
   plank: 0.035, // 板厚
   pitch: 0.335, // 層板間距（v8.5：附圖 5 排，原 4 排 0.40）
   minRows: 5, // 至少 5 排懸浮層板（資料列不足時以空板＋裝飾書補滿）
-  xBack: (ROOM.width / 2 - 0.16) * FIDELITY.shelfWallSign, // 西側書牆背板 X（−23.84 m）
+  xBack: 5 * FIDELITY.shelfWallSign, // 西側自由書牆背板 X（−5 m）
   baseY: 0,
   bookDepth: 0.19, // 書本深度（X 向）
   bookGap: 0.006,
@@ -1279,13 +1368,8 @@ export function spineLabelTextBounds(layout: Pick<
   };
 }
 
-export function clampRoomPosition(x: number, z: number): { x: number; z: number } {
-  const mx = ROOM.width / 2 - CAMERA.wallMargin;
-  const mz = ROOM.depth / 2 - CAMERA.wallMargin;
-  return {
-    x: Math.min(mx, Math.max(-mx, x)),
-    z: Math.min(mz, Math.max(-mz, z)),
-  };
+export function clampRoomPosition(x: number, z: number, clearance = ROOM_EDGE_MARGIN): { x: number; z: number } {
+  return clampToTrapezoid(x, z, clearance);
 }
 
 export function clampPitchRad(pitch: number, seated = false): number {
@@ -1524,17 +1608,30 @@ const bridgeRailColliders: Aabb[] = NESTED_CITY.bridgeRails.map((rail) => {
 });
 const platformRailColliders: Aabb[] = nestedCityPlatformRails().map((rail) => {
   const floorY = NESTED_CITY.levels[rail.level];
-  const halfThickness = NESTED_CITY.glassRailThickness / 2;
-  const fixed = rail.fixed + rail.inward * halfThickness;
+  const dx = rail.to.x - rail.from.x;
+  const dz = rail.to.z - rail.from.z;
+  const length = Math.hypot(dx, dz);
+  const rotationY = Math.atan2(dx, dz);
+  const centerX = (rail.from.x + rail.to.x) / 2 + rail.inward.x * NESTED_CITY.glassRailThickness / 2;
+  const centerZ = (rail.from.z + rail.to.z) / 2 + rail.inward.z * NESTED_CITY.glassRailThickness / 2;
+  const halfX = Math.abs(Math.cos(rotationY)) * NESTED_CITY.glassRailThickness / 2 + Math.abs(Math.sin(rotationY)) * length / 2;
+  const halfZ = Math.abs(Math.sin(rotationY)) * NESTED_CITY.glassRailThickness / 2 + Math.abs(Math.cos(rotationY)) * length / 2;
   return {
-    minX: rail.axis === "x" ? rail.start : fixed - halfThickness,
-    maxX: rail.axis === "x" ? rail.end : fixed + halfThickness,
-    minZ: rail.axis === "z" ? rail.start : fixed - halfThickness,
-    maxZ: rail.axis === "z" ? rail.end : fixed + halfThickness,
+    minX: centerX - halfX,
+    maxX: centerX + halfX,
+    minZ: centerZ - halfZ,
+    maxZ: centerZ + halfZ,
     kind: "railing",
     bottom: floorY + 0.08,
     top: floorY + NESTED_CITY.railHeight,
     standable: false,
+    oriented: {
+      centerX,
+      centerZ,
+      width: NESTED_CITY.glassRailThickness,
+      depth: length,
+      rotationY,
+    },
   };
 });
 const stairRailColliders: Aabb[] = NESTED_CITY.stairs.flatMap((stair) => {
@@ -1720,11 +1817,9 @@ export function groundHeightAt(x: number, z: number, referenceY = 0): number {
     );
   }
 
+  const point = { x, z };
   const floorCandidates = [0, ...NESTED_CITY.platforms
-    .filter((platform) =>
-      x >= platform.x - platform.width / 2 && x <= platform.x + platform.width / 2 &&
-      z >= platform.z - platform.depth / 2 && z <= platform.z + platform.depth / 2
-    )
+    .filter((platform) => isPointInConvexPolygon(point, cityPlatformFootprint(platform), 1e-6))
     .map((platform) => NESTED_CITY.levels[platform.level])];
   return floorCandidates.reduce((best, height) =>
     Math.abs(height - referenceY) < Math.abs(best - referenceY) ? height : best
@@ -2044,12 +2139,7 @@ export function thirdPersonDistance(width: number, height: number): number {
 }
 
 function thirdPersonBlocked(x: number, y: number, z: number): boolean {
-  if (
-    x < -ROOM.width / 2 + THIRD_PERSON.wallMargin ||
-    x > ROOM.width / 2 - THIRD_PERSON.wallMargin ||
-    z < -ROOM.depth / 2 + THIRD_PERSON.wallMargin ||
-    z > ROOM.depth / 2 - THIRD_PERSON.wallMargin
-  ) return true;
+  if (!isCityPointInsideTrapezoid({ x, z }, THIRD_PERSON.wallMargin)) return true;
   return COLLIDERS.some((collider) =>
     y > (collider.bottom ?? 0) - 0.1 && y < collider.top + 0.12 &&
     colliderOverlapsCircle(collider, x, z, 0.18)
@@ -2079,19 +2169,12 @@ export function resolveThirdPersonCamera(
     const shoulder = shoulderAt(d);
     const bx = back.x * Math.cos(angle) + back.z * Math.sin(angle);
     const bz = -back.x * Math.sin(angle) + back.z * Math.cos(angle);
-    return {
-      x: THREE.MathUtils.clamp(
-        pose.x + bx * d + right.x * shoulder,
-        -ROOM.width / 2 + THIRD_PERSON.wallMargin,
-        ROOM.width / 2 - THIRD_PERSON.wallMargin
-      ),
-      y,
-      z: THREE.MathUtils.clamp(
-        pose.z + bz * d + right.z * shoulder,
-        -ROOM.depth / 2 + THIRD_PERSON.wallMargin,
-        ROOM.depth / 2 - THIRD_PERSON.wallMargin
-      ),
-    };
+    const candidate = clampRoomPosition(
+      pose.x + bx * d + right.x * shoulder,
+      pose.z + bz * d + right.z * shoulder,
+      THIRD_PERSON.wallMargin
+    );
+    return { ...candidate, y };
   };
   const minimumVisibleDistance = Math.min(1.02, Math.max(0.5, distance * 0.4));
   const isUsableCameraPosition = (candidate: { x: number; y: number; z: number }) =>

@@ -465,7 +465,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               aria-label="嵌套之城結構驗收視角"
             >
               <span className="mr-1 flex items-center gap-1 px-1.5 text-[11px] font-bold text-slate-700 sm:text-xs">
-                <Layers aria-hidden="true" className="h-4 w-4" />梯形走廊結構檢視
+                <Layers aria-hidden="true" className="h-4 w-4" />整棟梯形外牆模型
               </span>
               {([
                 ["main", "主視角"],
@@ -557,9 +557,10 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
               type="button"
               onClick={() => selectStructureView("main")}
               className="touch-target flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold text-stone-700 hover:bg-stone-200/70"
-              title="開啟梯形走廊固定驗收視角"
+              aria-label="開啟整棟梯形外牆模型（CD 開口）"
+              title="開啟整棟梯形外牆模型（CD 開口）"
             >
-              <Layers className="h-3.5 w-3.5" /><span className="hidden sm:inline">結構</span>
+              <Layers className="h-3.5 w-3.5" /><span className="hidden sm:inline">整棟模型</span>
             </button>
             <button
               type="button"
