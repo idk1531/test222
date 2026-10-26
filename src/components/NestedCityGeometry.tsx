@@ -390,14 +390,124 @@ function addGalleryGuardrails(
   for (const layout of NESTED_CITY.gallery.floorLayouts) {
     const floorY = layout.level;
     for (const edge of layout.galleryInnerEdges) {
-      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial,
-        `gallery-atrium-rail:${edge.id}:${floorY}m`);
+      const openings = NESTED_CITY.stairs.landings
+        .filter((landing) => landing.level === floorY && landing.edge === edge.id)
+        .map((landing) => ({
+          start: Math.max(0, landing.connectionT - (landing.width / 2 + 0.28) / segmentLength(edge)),
+          end: Math.min(1, landing.connectionT + (landing.width / 2 + 0.28) / segmentLength(edge)),
+        }))
+        .sort((a, b) => a.start - b.start);
+      let cursor = 0;
+      openings.forEach((opening, index) => {
+        if (opening.start > cursor) {
+          addGuardrail(group, {
+            from: pointAlong(edge, cursor),
+            to: pointAlong(edge, opening.start),
+          }, floorY, darkMaterial, glassMaterial,
+          `gallery-atrium-rail:${edge.id}:${floorY}m:${index}`);
+        }
+        cursor = Math.max(cursor, opening.end);
+      });
+      if (cursor < 1) {
+        addGuardrail(group, {
+          from: pointAlong(edge, cursor),
+          to: edge.to,
+        }, floorY, darkMaterial, glassMaterial,
+        `gallery-atrium-rail:${edge.id}:${floorY}m:end`);
+      }
     }
     const outerRailEdges = layout.galleryOuterEdges.filter(({ id }) => layout.sideClearance > 0 || id === "CD");
     for (const edge of outerRailEdges) {
       addGuardrail(group, edge, floorY, darkMaterial, glassMaterial,
         `gallery-perimeter-rail:${edge.id}:${floorY}m`);
     }
+  }
+}
+
+function addGalleryStairs(
+  group: THREE.Group,
+  treadMaterial: THREE.Material,
+  landingMaterial: THREE.Material,
+  railMaterial: THREE.Material,
+) {
+  const treadBoxes: BoxInstance[] = [];
+  for (const flight of NESTED_CITY.stairs.flights) {
+    for (const tread of flight.treads) {
+      treadBoxes.push({
+        width: flight.width,
+        height: flight.riserHeight,
+        depth: flight.treadDepth + 0.02,
+        x: tread.center.x,
+        y: tread.topHeight - flight.riserHeight / 2,
+        z: tread.center.z,
+        rotationY: flight.yaw,
+      });
+    }
+
+    const dx = flight.end.x - flight.start.x;
+    const dz = flight.end.z - flight.start.z;
+    const horizontalLength = Math.hypot(dx, dz);
+    const direction = { x: dx / horizontalLength, z: dz / horizontalLength };
+    const across = { x: -direction.z, z: direction.x };
+    const railOffset = flight.width / 2 + 0.08;
+    for (const side of [-1, 1]) {
+      const offset = { x: across.x * railOffset * side, z: across.z * railOffset * side };
+      const start = new THREE.Vector3(
+        flight.start.x + offset.x,
+        flight.lowerLevel + 0.92,
+        flight.start.z + offset.z,
+      );
+      const end = new THREE.Vector3(
+        flight.end.x + offset.x,
+        flight.upperLevel + 0.92,
+        flight.end.z + offset.z,
+      );
+      addBeamBetween(group, start, end, 0.075, 0.075, railMaterial,
+        `gallery-stair:${flight.id}:handrail:${side}`);
+
+      for (const t of [0, 0.5, 1]) {
+        const point = {
+          x: flight.start.x + dx * t + offset.x,
+          z: flight.start.z + dz * t + offset.z,
+        };
+        const floorY = flight.lowerLevel + (flight.upperLevel - flight.lowerLevel) * t;
+        addBox(group, { width: 0.075, height: 0.92, depth: 0.075 }, {
+          x: point.x,
+          y: floorY + 0.46,
+          z: point.z,
+        }, railMaterial, `gallery-stair:${flight.id}:newel:${side}:${t}`);
+      }
+    }
+  }
+  addBoxBatch(group, treadBoxes, treadMaterial, "gallery-stair-treads-all-sides");
+
+  const landingGroups = new Map<string, Array<(typeof NESTED_CITY.stairs.landings)[number]>>();
+  for (const landing of NESTED_CITY.stairs.landings) {
+    const key = `${landing.edge}:${landing.level}:${landing.connectionT.toFixed(6)}`;
+    const group = landingGroups.get(key) ?? [];
+    group.push(landing);
+    landingGroups.set(key, group);
+  }
+  for (const landings of landingGroups.values()) {
+    const landing = landings.reduce((longest, candidate) => {
+      const candidateLength = Math.hypot(
+        candidate.center.x - candidate.connectionPoint.x,
+        candidate.center.z - candidate.connectionPoint.z,
+      );
+      const longestLength = Math.hypot(
+        longest.center.x - longest.connectionPoint.x,
+        longest.center.z - longest.connectionPoint.z,
+      );
+      return candidateLength > longestLength ? candidate : longest;
+    });
+    addPlanPrism(
+      group,
+      landing.footprint,
+      landing.level - 0.12,
+      0.14,
+      landingMaterial,
+      `gallery-stair-landing:${landing.edge}:${landing.level}m:${landing.id}`,
+    );
   }
 }
 
@@ -432,6 +542,10 @@ function addGallerySupportColumns(group: THREE.Group, material: THREE.Material) 
     ];
     for (const { edge, positions, kind } of supportRuns) {
       for (const t of positions) {
+        if (kind === "atrium" && NESTED_CITY.stairs.landings.some((landing) =>
+          landing.edge === edge.id &&
+          Math.abs(landing.connectionT - t) * segmentLength(edge) < landing.width / 2 + 0.4,
+        )) continue;
         const point = pointAlong(edge, t);
         addBox(
           group,
@@ -441,67 +555,6 @@ function addGallerySupportColumns(group: THREE.Group, material: THREE.Material) 
           `gallery-support-column:${kind}:${edge.id}:${floorY}m:${t}`,
         );
       }
-    }
-  }
-}
-
-function addPortalFrame(
-  group: THREE.Group,
-  options: {
-    name: string;
-    centerX: number;
-    centerZ: number;
-    width: number;
-    depth: number;
-    bottom: number;
-    top: number;
-    section: number;
-    material: THREE.Material;
-    bandLevels: readonly number[];
-  },
-) {
-  const { centerX, centerZ, width, depth, bottom, top, section, material, name, bandLevels } = options;
-  const xMin = centerX - width / 2;
-  const xMax = centerX + width / 2;
-  const zMin = centerZ - depth / 2;
-  const zMax = centerZ + depth / 2;
-  const postHeight = top - bottom;
-
-  for (const [x, z, id] of [
-    [xMin, zMin, "SW"], [xMin, zMax, "NW"], [xMax, zMin, "SE"], [xMax, zMax, "NE"],
-  ] as const) {
-    addBox(
-      group,
-      { width: section, height: postHeight, depth: section },
-      { x, y: (bottom + top) / 2, z },
-      material,
-      `${name}:post:${id}`,
-    );
-  }
-
-  const levels = [...new Set([bottom, ...bandLevels, top])].filter((level) => level >= bottom && level <= top);
-  for (const level of levels) {
-    for (const z of [zMin, zMax]) {
-      addBeamBetween(
-        group,
-        new THREE.Vector3(xMin, level, z),
-        new THREE.Vector3(xMax, level, z),
-        section,
-        section,
-        material,
-        `${name}:beam:x:${z}:${level}`,
-      );
-    }
-    for (const x of [xMin, xMax]) {
-      addBeamBetween(
-        group,
-        new THREE.Vector3(x, level, zMin),
-        new THREE.Vector3(x, level, zMax),
-        section,
-        section,
-        material,
-        `${name}:beam:z:${x}:${level}`,
-      );
     }
   }
 }
@@ -672,7 +725,7 @@ export const NestedCityGeometry: React.FC<{
     const timberMaterial = material({
       color: color("#b78350"), roughness: 0.73, metalness: 0.01, envMapIntensity: 0,
     });
-    const frameWoodMaterial = material({
+    const stairWoodMaterial = material({
       color: color("#a67748"), roughness: 0.68, metalness: 0.02, envMapIntensity: 0,
     });
     const bookMaterials = [
@@ -700,43 +753,7 @@ export const NestedCityGeometry: React.FC<{
     addGallerySupportBeams(group, darkMaterial);
     addGallerySupportColumns(group, darkMaterial);
     addGalleryGuardrails(group, darkMaterial, glassMaterial);
-
-    addPortalFrame(group, {
-      name: "central-atrium-frame-outer",
-      centerX: 0,
-      centerZ: 0,
-      width: 14.4,
-      depth: 11.2,
-      bottom: 0,
-      top: ROOM.height,
-      section: 0.44,
-      material: frameWoodMaterial,
-      bandLevels: NESTED_CITY.levels,
-    });
-    addPortalFrame(group, {
-      name: "central-atrium-frame-middle",
-      centerX: 0.55,
-      centerZ: 0.25,
-      width: 9.4,
-      depth: 7.6,
-      bottom: 2,
-      top: 14,
-      section: 0.34,
-      material: darkMaterial,
-      bandLevels: NESTED_CITY.gallery.floors,
-    });
-    addPortalFrame(group, {
-      name: "central-atrium-frame-inner",
-      centerX: -0.6,
-      centerZ: -0.45,
-      width: 5.8,
-      depth: 4.7,
-      bottom: 4,
-      top: 12,
-      section: 0.27,
-      material: frameWoodMaterial,
-      bandLevels: [8],
-    });
+    addGalleryStairs(group, stairWoodMaterial, corridorMaterial, darkMaterial);
 
     addGalleryFurniture(group, NESTED_CITY.trapezoid.wallEdges, timberMaterial, tableMetalMaterial, soilMaterial, leafMaterial);
 

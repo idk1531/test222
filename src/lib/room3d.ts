@@ -66,6 +66,35 @@ export interface CityCorridorFloorLayout {
   galleryInnerEdges: readonly CityCorridorBoundarySegment[];
   galleryFootprints: readonly (readonly CityPlanPoint[])[];
 }
+export interface CityStairTread {
+  index: number;
+  topHeight: number;
+  center: CityPlanPoint;
+  footprint: readonly CityPlanPoint[];
+}
+export interface CityStairFlight {
+  id: string;
+  edge: CityCorridorId;
+  lowerLevel: number;
+  upperLevel: number;
+  start: CityPlanPoint;
+  end: CityPlanPoint;
+  width: number;
+  treadDepth: number;
+  riserHeight: number;
+  yaw: number;
+  treads: readonly CityStairTread[];
+}
+export interface CityStairLanding {
+  id: string;
+  edge: CityCorridorId;
+  level: number;
+  center: CityPlanPoint;
+  connectionPoint: CityPlanPoint;
+  connectionT: number;
+  width: number;
+  footprint: readonly CityPlanPoint[];
+}
 export interface CityTrapezoidWallSegment {
   id: "AB" | "BC" | "AD";
   from: CityPlanPoint;
@@ -282,6 +311,158 @@ const corridorFloorLayouts: readonly CityCorridorFloorLayout[] = corridorLevels.
   };
 });
 const galleryFloorLayouts = corridorFloorLayouts.filter(({ level }) => level > 0);
+const CITY_STAIR_RISER_COUNT = 24;
+const CITY_STAIR_WIDTH = 1.1;
+const CITY_STAIR_MAX_RUN = 6.5;
+const CITY_STAIR_EDGE_MARGIN = 1.2;
+const CITY_STAIR_LANE_GAP = 0.65;
+const CITY_STAIR_LANE_SPACING = CITY_STAIR_WIDTH + CITY_STAIR_LANE_GAP;
+const CITY_STAIR_ATRIUM_CLEARANCE = 0.82;
+const CITY_STAIR_LANDING_WIDTH = CITY_STAIR_WIDTH + 0.42;
+
+function normalizedPlanVector(vector: CityPlanPoint): CityPlanPoint {
+  const length = lengthPlanPoint(vector);
+  return { x: vector.x / length, z: vector.z / length };
+}
+
+function orientedPlanRectangle(
+  center: CityPlanPoint,
+  direction: CityPlanPoint,
+  length: number,
+  width: number,
+): CityPlanPoint[] {
+  const halfLength = length / 2;
+  const halfWidth = width / 2;
+  const across = { x: -direction.z, z: direction.x };
+  return [
+    addPlanPoints(addPlanPoints(center, scalePlanPoint(direction, -halfLength)), scalePlanPoint(across, -halfWidth)),
+    addPlanPoints(addPlanPoints(center, scalePlanPoint(direction, halfLength)), scalePlanPoint(across, -halfWidth)),
+    addPlanPoints(addPlanPoints(center, scalePlanPoint(direction, halfLength)), scalePlanPoint(across, halfWidth)),
+    addPlanPoints(addPlanPoints(center, scalePlanPoint(direction, -halfLength)), scalePlanPoint(across, halfWidth)),
+  ];
+}
+
+function buildCityStairs(): { flights: CityStairFlight[]; landings: CityStairLanding[] } {
+  const flights: CityStairFlight[] = [];
+  const landings: CityStairLanding[] = [];
+
+  for (const [edgeIndex, perimeterEdge] of corridorPerimeterEdges.entries()) {
+    const minimumEdgeLength = Math.min(...corridorFloorLayouts.map((layout) =>
+      lengthPlanPoint(subtractPlanPoints(
+        layout.galleryInnerEdges[edgeIndex].to,
+        layout.galleryInnerEdges[edgeIndex].from,
+      )),
+    ));
+    const runLength = Math.min(
+      CITY_STAIR_MAX_RUN,
+      minimumEdgeLength - 2 * CITY_STAIR_EDGE_MARGIN,
+    );
+    const maxInnerEdgeOffset = Math.max(...corridorFloorLayouts.map((layout) =>
+      layout.perimeterInsets[edgeIndex] + NESTED_CITY_GALLERY_WIDTH,
+    ));
+
+    const makeLanding = (
+      layout: CityCorridorFloorLayout,
+      alongEdge: number,
+      targetPerimeterInset: number,
+      id: string,
+    ): CityStairLanding => {
+      const innerEdge = layout.galleryInnerEdges[edgeIndex];
+      const edgeVector = subtractPlanPoints(innerEdge.to, innerEdge.from);
+      const edgeLength = lengthPlanPoint(edgeVector);
+      const tangent = normalizedPlanVector(edgeVector);
+      const connectionT = Math.max(0.02, Math.min(0.98, 0.5 + alongEdge / edgeLength));
+      const edgePoint = pointAlong(innerEdge.from, innerEdge.to, connectionT);
+      const innerOffset = layout.perimeterInsets[edgeIndex] + NESTED_CITY_GALLERY_WIDTH;
+      const distanceIntoAtrium = targetPerimeterInset - innerOffset;
+      const center = addPlanPoints(edgePoint, scalePlanPoint(perimeterEdge.inward, distanceIntoAtrium));
+      const bridgeStart = addPlanPoints(edgePoint, scalePlanPoint(perimeterEdge.inward, -0.08));
+      const bridgeEnd = addPlanPoints(center, scalePlanPoint(perimeterEdge.inward, 0.3));
+      const halfWidth = CITY_STAIR_LANDING_WIDTH / 2;
+      const footprint = [
+        addPlanPoints(bridgeStart, scalePlanPoint(tangent, -halfWidth)),
+        addPlanPoints(bridgeStart, scalePlanPoint(tangent, halfWidth)),
+        addPlanPoints(bridgeEnd, scalePlanPoint(tangent, halfWidth)),
+        addPlanPoints(bridgeEnd, scalePlanPoint(tangent, -halfWidth)),
+      ];
+      return {
+        id,
+        edge: perimeterEdge.id,
+        level: layout.level,
+        center,
+        connectionPoint: edgePoint,
+        connectionT,
+        width: CITY_STAIR_LANDING_WIDTH,
+        footprint,
+      };
+    };
+
+    for (let transitionIndex = 0; transitionIndex < corridorFloorLayouts.length - 1; transitionIndex++) {
+      const lowerLayout = corridorFloorLayouts[transitionIndex];
+      const upperLayout = corridorFloorLayouts[transitionIndex + 1];
+      const directionSign = transitionIndex % 2 === 0 ? 1 : -1;
+      const laneOffset = CITY_STAIR_ATRIUM_CLEARANCE + transitionIndex * CITY_STAIR_LANE_SPACING;
+      const targetPerimeterInset = maxInnerEdgeOffset + laneOffset;
+      const startOffset = -directionSign * runLength / 2;
+      const endOffset = directionSign * runLength / 2;
+      const id = `${perimeterEdge.id}:${lowerLayout.level}-${upperLayout.level}`;
+      const lowerLanding = makeLanding(
+        lowerLayout,
+        startOffset,
+        targetPerimeterInset,
+        `${id}:lower-landing`,
+      );
+      const upperLanding = makeLanding(
+        upperLayout,
+        endOffset,
+        targetPerimeterInset,
+        `${id}:upper-landing`,
+      );
+      landings.push(lowerLanding, upperLanding);
+
+      const delta = subtractPlanPoints(upperLanding.center, lowerLanding.center);
+      const flightLength = lengthPlanPoint(delta);
+      const direction = normalizedPlanVector(delta);
+      const treadDepth = flightLength / CITY_STAIR_RISER_COUNT;
+      const riserHeight = (upperLayout.level - lowerLayout.level) / CITY_STAIR_RISER_COUNT;
+      const yaw = Math.atan2(direction.x, direction.z);
+      const treads = Array.from({ length: CITY_STAIR_RISER_COUNT }, (_, index) => {
+        const distance = treadDepth * (index + 0.5);
+        const center = addPlanPoints(lowerLanding.center, scalePlanPoint(direction, distance));
+        const footprint = orientedPlanRectangle(
+          center,
+          direction,
+          treadDepth + 0.02,
+          CITY_STAIR_WIDTH,
+        );
+        return {
+          index,
+          topHeight: lowerLayout.level + riserHeight * (index + 1),
+          center,
+          footprint,
+        };
+      });
+      flights.push({
+        id,
+        edge: perimeterEdge.id,
+        lowerLevel: lowerLayout.level,
+        upperLevel: upperLayout.level,
+        start: lowerLanding.center,
+        end: upperLanding.center,
+        width: CITY_STAIR_WIDTH,
+        treadDepth,
+        riserHeight,
+        yaw,
+        treads,
+      });
+    }
+
+  }
+
+  return { flights, landings };
+}
+
+const cityStairs = buildCityStairs();
 const trapezoidWalkableFootprint = TRAPEZOID_WALKABLE_FOOTPRINT;
 export const NESTED_CITY = {
   levels: corridorLevels,
@@ -309,6 +490,12 @@ export const NESTED_CITY = {
     width: NESTED_CITY_GALLERY_WIDTH,
     floors: galleryLevels,
     floorLayouts: galleryFloorLayouts,
+  },
+  stairs: {
+    width: CITY_STAIR_WIDTH,
+    riserCount: CITY_STAIR_RISER_COUNT,
+    flights: cityStairs.flights,
+    landings: cityStairs.landings,
   },
 } as const;
 
@@ -1149,17 +1336,34 @@ export function resolveCollision(
 export const MAX_WALKABLE_STEP = 0.62;
 
 /**
- * Return the nearest reachable surface from the active floor layout. Each upper level's full four-sided
- * gallery ring is walkable; empty atrium space stays open.
+ * Return the nearest reachable floor, stair tread, or landing. Stair flights stay just inside the
+ * four-sided gallery rings, so their small connection platforms preserve the full ring and open atrium.
  */
 export function groundHeightAt(x: number, z: number, referenceY = 0): number {
   const point = { x, z };
+  let stairHeight: number | null = null;
+  for (const flight of NESTED_CITY.stairs.flights) {
+    for (const tread of flight.treads) {
+      if (Math.abs(tread.topHeight - referenceY) > MAX_WALKABLE_STEP ||
+        !isPointInSimplePolygon(point, tread.footprint, 1e-6)) continue;
+      if (stairHeight === null || Math.abs(tread.topHeight - referenceY) < Math.abs(stairHeight - referenceY)) {
+        stairHeight = tread.topHeight;
+      }
+    }
+  }
+  if (stairHeight !== null) return stairHeight;
+
   const floorCandidates = [
     0,
     ...NESTED_CITY.gallery.floorLayouts.flatMap(({ level, galleryFootprints }) =>
       level <= referenceY + MAX_WALKABLE_STEP && galleryFootprints.some((footprint) =>
         isPointInSimplePolygon(point, footprint, 1e-6),
       ) ? [level] : [],
+    ),
+    ...NESTED_CITY.stairs.landings.flatMap(({ level, footprint }) =>
+      level <= referenceY + MAX_WALKABLE_STEP && isPointInSimplePolygon(point, footprint, 1e-6)
+        ? [level]
+        : [],
     ),
   ];
   return floorCandidates.reduce((best, height) =>

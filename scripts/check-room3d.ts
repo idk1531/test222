@@ -243,11 +243,76 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
     }
   }
 
-  assert.deepEqual(Object.keys(NESTED_CITY).sort(), ["corridor", "floorHeight", "gallery", "levels", "trapezoid"]);
+  assert.deepEqual(Object.keys(NESTED_CITY).sort(), ["corridor", "floorHeight", "gallery", "levels", "stairs", "trapezoid"]);
   assert.deepEqual(Object.keys(NESTED_CITY.corridor).sort(), ["floorLayouts", "floors", "perimeterEdges", "segments", "width"]);
   assert.deepEqual(Object.keys(NESTED_CITY.gallery).sort(), ["floorLayouts", "floors", "width"]);
+  assert.deepEqual(Object.keys(NESTED_CITY.stairs).sort(), ["flights", "landings", "riserCount", "width"]);
+
+  assert.equal(NESTED_CITY.stairs.riserCount, 24);
+  assert.equal(NESTED_CITY.stairs.flights.length, 12,
+    "each of the four corridor sides needs a walkable flight between every pair of floors");
+  assert.equal(NESTED_CITY.stairs.landings.length, 24,
+    "each stair flight needs a lower and upper platform connected to its floor ring");
+  for (const edge of ["AB", "BC", "CD", "DA"] as const) {
+    assert.equal(NESTED_CITY.stairs.flights.filter((flight) => flight.edge === edge).length, 3,
+      `${edge} needs stair flights for 1F→2F, 2F→3F, and 3F→4F`);
+  }
+  for (const flight of NESTED_CITY.stairs.flights) {
+    assert.equal(flight.treads.length, NESTED_CITY.stairs.riserCount);
+    assert.equal(flight.upperLevel - flight.lowerLevel, NESTED_CITY.floorHeight);
+    assert.ok(flight.treadDepth >= 0.22 && flight.treadDepth <= 0.34,
+      `${flight.id} must have usable tread depth`);
+    let climbedHeight = flight.lowerLevel;
+    for (const tread of flight.treads) {
+      assert.ok(Math.abs(tread.topHeight - (
+        flight.lowerLevel + flight.riserHeight * (tread.index + 1)
+      )) < 1e-9, `${flight.id} risers must rise evenly`);
+      assert.ok(tread.footprint.every((point) =>
+        isCityPointInsidePolygon(point, trapezoid.walkableFootprint)),
+      `${flight.id} stair treads must remain inside the walkable building footprint`);
+      const nextHeight = groundHeightAt(tread.center.x, tread.center.z, climbedHeight);
+      assert.equal(nextHeight, tread.topHeight,
+        `${flight.id} tread ${tread.index + 1} must be reachable from the previous tread`);
+      assert.ok(nextHeight - climbedHeight <= 0.62,
+        `${flight.id} must never exceed the controller's walkable step height`);
+      climbedHeight = nextHeight;
+    }
+    assert.equal(climbedHeight, flight.upperLevel, `${flight.id} must reach its upper corridor level`);
+
+    let descendedHeight = flight.upperLevel;
+    for (const tread of [...flight.treads].reverse()) {
+      const nextHeight = groundHeightAt(tread.center.x, tread.center.z, descendedHeight);
+      assert.equal(nextHeight, tread.topHeight,
+        `${flight.id} tread ${tread.index + 1} must also be reachable when descending`);
+      assert.ok(descendedHeight - nextHeight <= 0.62,
+        `${flight.id} must never exceed the controller's walkable drop height`);
+      descendedHeight = nextHeight;
+    }
+    const lowerConnection = NESTED_CITY.stairs.landings.find((landing) =>
+      landing.id === `${flight.id}:lower-landing`)!.connectionPoint;
+    assert.equal(groundHeightAt(lowerConnection.x, lowerConnection.z, flight.lowerLevel), flight.lowerLevel,
+      `${flight.id} must exit onto its lower gallery or ground floor`);
+  }
+  for (const landing of NESTED_CITY.stairs.landings) {
+    assert.ok(landing.footprint.length === 4);
+    assert.ok(landing.footprint.every((point) => isCityPointInsidePolygon(point, trapezoid.walkableFootprint)),
+      `${landing.id} must stay within the playable envelope`);
+    assert.ok(Math.abs(groundHeightAt(landing.center.x, landing.center.z, landing.level) - landing.level) <= 0.62,
+      `${landing.id} must connect to its stair without an unwalkable gap`);
+    assert.equal(groundHeightAt(landing.connectionPoint.x, landing.connectionPoint.z, landing.level), landing.level,
+      `${landing.id} must start directly on the gallery ring`);
+    for (const t of [0.25, 0.5, 0.75]) {
+      const point = {
+        x: landing.connectionPoint.x + (landing.center.x - landing.connectionPoint.x) * t,
+        z: landing.connectionPoint.z + (landing.center.z - landing.connectionPoint.z) * t,
+      };
+      assert.ok(Math.abs(groundHeightAt(point.x, point.z, landing.level) - landing.level) <= 0.62,
+        `${landing.id} bridge must remain walkable from the ring to the stairs`);
+    }
+  }
 }
 console.log("  ✓ 每層四邊閉合等腰梯形走廊、偶數層四邊 2 m 淨距、挑空中庭留白");
+console.log("  ✓ 四邊各三段可上下行走的樓梯，24 階踏面與樓層平台連通");
 
 assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
 assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
@@ -506,13 +571,16 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   assert.match(nestedCitySource, /addGalleryGuardrails/);
   assert.match(nestedCitySource, /addGallerySupportBeams/);
   assert.match(nestedCitySource, /addGallerySupportColumns/);
-  assert.match(nestedCitySource, /addPortalFrame/);
+  assert.match(nestedCitySource, /addGalleryStairs/);
+  assert.match(nestedCitySource, /NESTED_CITY\.stairs/);
+  assert.doesNotMatch(nestedCitySource, /central-atrium-frame-(?:outer|middle|inner)|addPortalFrame/,
+    "all decorative portal frames are removed from the central atrium for the stair routes");
   assert.match(nestedCitySource, /addReadingTable/);
   assert.match(nestedCitySource, /addPlanter/);
-  assert.doesNotMatch(nestedCitySource, /NESTED_CITY\.(?:legacyFrames|featureFrames|stairs|obsoleteColumns)/,
+  assert.doesNotMatch(nestedCitySource, /NESTED_CITY\.(?:legacyFrames|featureFrames|obsoleteColumns)/,
     "the renderer uses the current gallery data instead of the removed legacy T1/T2 structures");
   const room3dSource = fs.readFileSync(path.join(process.cwd(), "src/lib/room3d.ts"), "utf8");
-  assert.doesNotMatch(room3dSource, /CityFrame|CityPlatform|CityStair|bridgeRails|featureFrames/,
+  assert.doesNotMatch(room3dSource, /CityFrame|CityPlatform|bridgeRails|featureFrames/,
     "legacy T1/T2 geometry data must be deleted rather than kept dormant");
 
   assert.deepEqual(Object.keys(NESTED_CITY_CAMERA_VIEWS).sort(), ["main", "side", "top"]);
@@ -788,4 +856,4 @@ console.log("  ✓ 第一人稱 view model：站直不遮畫面，低頭才看�
 }
 console.log("  ✓ 跳躍閘門（工作／輸入／坐下／離地）與角色待機／行走／跳躍／坐下動作");
 
-console.log("ALL ROOM CHECKS PASS (trapezoid library / complete four-sided isosceles corridor rings on every floor / even-floor 2 m perimeter clearance / four-sided galleries / full-height bookshelves / open atrium / reading furniture / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
+console.log("ALL ROOM CHECKS PASS (trapezoid library / complete four-sided isosceles corridor rings on every floor / four-side walkable stair flights / even-floor 2 m perimeter clearance / four-sided galleries / open atrium / reading furniture / 360° camera / flight easing / sunlight / projection / SSR quality / textures / shelf and furniture / remote-player AABB / character detail, gait, sprint, jump, sit)");
