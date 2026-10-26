@@ -6,7 +6,7 @@ import {
   CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
   MARBLE_ROUGH, MATCH_VIEW, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
   cityTrapezoidCornerFootprint, cityTrapezoidWallBandFootprint, clipCityPolygonToTrapezoid,
-  collectSceneColliders, floorHeightBelow, isCityPointInsidePolygon, isCityPointInsideTrapezoid,
+  collectSceneColliders, floorHeightBelow, hasWalkableSupport, isCityPointInsidePolygon, isCityPointInsideTrapezoid,
   colliderOverlapsCircle, makeColliderBox, nestedCityGuardrailSegments, nestedCityInspectionDistance,
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
@@ -408,13 +408,21 @@ assert.deepEqual(resolveCollision(0, 0, PLAYER_RADIUS, false, false, undefined, 
   "a railing collider above the player's head must not block a lower fall");
 assert.equal(groundHeightAt(0, 0), 0);
 assert.equal(floorHeightBelow(0, 0, 8), 0, "an open atrium must expose the ground floor as the fall landing surface");
+assert.equal(hasWalkableSupport(0, 0, 0), true, "the ground floor must support the player");
+assert.equal(hasWalkableSupport(0, 0, 8), false,
+  "an unsupported position above the atrium must trigger a fall even when movement is idle");
 const catchableTread = NESTED_CITY.stairs.flights[0].treads[10];
 assert.equal(
   floorHeightBelow(catchableTread.center.x, catchableTread.center.z, catchableTread.topHeight + 1e-6),
   catchableTread.topHeight,
   "fall landing queries must also include intermediate stair treads",
 );
-console.log("  ✓ 家具／模型／遠端玩家碰撞箱、開放欄杆缺口、樓梯踏面落地");
+assert.equal(hasWalkableSupport(catchableTread.center.x, catchableTread.center.z, catchableTread.topHeight), true,
+  "stair tread surfaces must continue supporting normal walking");
+const solidLandingBox = makeColliderBox({ x: 0, z: 0 }, 0.8, 0.8, 2, 2.5);
+assert.equal(floorHeightBelow(0, 0, 8, [solidLandingBox]), 2.5,
+  "falling must stop on a solid model collider instead of passing through it");
+console.log("  ✓ 家具／模型／遠端玩家碰撞箱、開放欄杆缺口、樓梯與模型落地");
 
 // 坐下觸發與「坐著滑進桌下 → F 安全起立」防死鎖。
 assert.deepEqual(SIT, { triggerRadius: 0.34, seatY: 0.42, eyeY: 1.18, walkSpeed: 1.15, fov: 58, fadeOpacity: 0.25 });
@@ -470,8 +478,22 @@ console.log("  ✓ 跳躍頂高約 0.56 m、0.5 秒不污染 base height、最�
   assert.ok(fallFrames > 1, "an unrailed edge must cause a gravity-driven fall, not a teleport");
   assert.equal(fall.floorY, 0, "a falling player must land on the ground floor below the open atrium");
   assert.equal(fall.onGround, true);
+
+  let modelFall = { floorY: 8, jumpOffset: 0, velocity: 0, onGround: false, falling: true };
+  let modelFallFrames = 0;
+  while (!modelFall.onGround && modelFallFrames < 180) {
+    const feetY = modelFall.floorY + modelFall.jumpOffset;
+    modelFall = stepVerticalMotion(
+      modelFall,
+      1 / 60,
+      floorHeightBelow(0, 0, feetY, [solidLandingBox]),
+    );
+    modelFallFrames++;
+  }
+  assert.equal(modelFall.floorY, 2.5, "solid model collision boxes must stop a fall at their top surface");
+  assert.equal(modelFall.onGround, true);
 }
-console.log("  ✓ 無欄杆邊緣以重力自然落下並落到下層樓板，跳躍弧線維持不變");
+console.log("  ✓ 無欄杆空間自然墜落至地面，遇到實體模型則停在碰撞面");
 assert.equal(clampPitchRad(-100), CAMERA.pitchMin);
 assert.equal(clampPitchRad(-100, true), THREE.MathUtils.degToRad(-80), "seated pitch minimum relaxes to −80°");
 assert.equal(clampPitchRad(100), CAMERA.pitchMax);
@@ -644,6 +666,7 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   const roomFurnitureSource = fs.readFileSync(path.join(process.cwd(), "src/components/RoomFurniture.tsx"), "utf8");
   const book3DSource = fs.readFileSync(path.join(process.cwd(), "src/components/Book3D.tsx"), "utf8");
   const shelfDecorSource = fs.readFileSync(path.join(process.cwd(), "src/components/ShelfDecor.tsx"), "utf8");
+  const cameraRigSource = fs.readFileSync(path.join(process.cwd(), "src/components/CameraRig.tsx"), "utf8");
   assert.match(roomGeometrySource, /userData\.collisionBoxes/,
     "box-based room models must register their physical bounds");
   assert.match(roomFurnitureSource, /makeColliderBox/,
@@ -652,6 +675,10 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     "placed data books must expose solid-body collision boxes");
   assert.match(shelfDecorSource, /registerCollider/,
     "instanced and individual shelf decor must expose physical bounds");
+  assert.match(cameraRigSource, /hasWalkableSupport/,
+    "an unsupported player must start falling even when standing still");
+  assert.match(cameraRigSource, /floorHeightBelow[\s\S]{0,180}sceneCollidersRef\.current/,
+    "fall landing must stop on registered solid models as well as gallery floors");
   assert.doesNotMatch(nestedCitySource, /central-atrium-frame-(?:outer|middle|inner)|addPortalFrame/,
     "all decorative portal frames are removed from the central atrium for the stair routes");
   assert.match(nestedCitySource, /addReadingTable/);
