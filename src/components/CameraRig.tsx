@@ -28,6 +28,7 @@ import {
   collectSceneColliders,
   floorHeightBelow,
   groundHeightAt,
+  hasWalkableSupport,
   isWithinSitTrigger,
   JUMP,
   MAX_WALKABLE_STEP,
@@ -948,6 +949,20 @@ export const CameraRig: React.FC<{
         pointRoomCamera(dt);
         return;
       }
+      const supportedState = stateRef.current;
+      if (supportedState.onGround && !interactionRef.current.seated &&
+        !hasWalkableSupport(
+          supportedState.x,
+          supportedState.z,
+          supportedState.groundY,
+          sceneCollidersRef.current,
+        )) {
+        // Do not leave the player hovering if an opening has no support under the center of their feet.
+        supportedState.onGround = false;
+        supportedState.falling = true;
+        supportedState.jumpVelocity = 0;
+        supportedState.jumpOffset = 0;
+      }
       let seatChanged = false;
       const transition = seatTransitionRef.current;
       if (transition) {
@@ -1065,7 +1080,12 @@ export const CameraRig: React.FC<{
         const previousOnGround = current.onGround;
         const previousFalling = current.falling;
         const previousFeetY = current.groundY + current.jumpOffset;
-        const landingFloorY = floorHeightBelow(current.x, current.z, previousFeetY);
+        const landingFloorY = floorHeightBelow(
+          current.x,
+          current.z,
+          previousFeetY,
+          sceneCollidersRef.current,
+        );
         const vertical = stepVerticalMotion({
           floorY: current.groundY,
           jumpOffset: current.jumpOffset,

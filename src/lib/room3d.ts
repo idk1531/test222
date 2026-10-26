@@ -1550,8 +1550,13 @@ export function groundHeightAt(x: number, z: number, referenceY = 0): number {
   );
 }
 
-/** Highest walkable surface directly beneath a falling player, including intermediate gallery decks and stair treads. */
-export function floorHeightBelow(x: number, z: number, maximumY = Number.POSITIVE_INFINITY): number | null {
+/** Highest floor, stair tread, or solid model top beneath a falling player. */
+export function floorHeightBelow(
+  x: number,
+  z: number,
+  maximumY = Number.POSITIVE_INFINITY,
+  additionalColliders: readonly Aabb[] = [],
+): number | null {
   const point = { x, z };
   let highest: number | null = null;
   const consider = (height: number, footprint?: readonly CityPlanPoint[]) => {
@@ -1567,7 +1572,27 @@ export function floorHeightBelow(x: number, z: number, maximumY = Number.POSITIV
   for (const flight of NESTED_CITY.stairs.flights) {
     for (const tread of flight.treads) consider(tread.topHeight, tread.footprint);
   }
+  const considerColliderTop = (collider: Aabb) => {
+    const bottom = collider.bottom ?? 0;
+    if (collider.top > maximumY + 1e-6 || collider.top <= bottom + 1e-6 ||
+      x + PLAYER_RADIUS < collider.minX || x - PLAYER_RADIUS > collider.maxX ||
+      z + PLAYER_RADIUS < collider.minZ || z - PLAYER_RADIUS > collider.maxZ) return;
+    if (circleOverlapsCollider(collider, x, z, PLAYER_RADIUS)) consider(collider.top);
+  };
+  COLLIDERS.forEach(considerColliderTop);
+  additionalColliders.forEach(considerColliderTop);
   return highest;
+}
+
+/** A grounded player must still have a lower/level support surface under their feet. */
+export function hasWalkableSupport(
+  x: number,
+  z: number,
+  feetY: number,
+  additionalColliders: readonly Aabb[] = [],
+): boolean {
+  const surface = floorHeightBelow(x, z, feetY + 1e-4, additionalColliders);
+  return surface !== null && feetY - surface <= MAX_WALKABLE_STEP + 1e-6;
 }
 
 export const JUMP = {
