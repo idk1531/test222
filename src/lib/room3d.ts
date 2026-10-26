@@ -53,8 +53,10 @@ export interface CityCorridorFloorLayout {
   parity: "odd" | "even";
   /** Kept as the preferred furniture wall; the corridor itself follows all four edges. */
   sideWall: "AD" | "BC";
-  /** Clear distance from every trapezoid edge to the near edge of this floor's ring. */
+  /** Requested gap from each inner wall face (or the open CD edge) to the near edge of the ring. */
   sideClearance: number;
+  /** Insets from the ABCD exterior edge, including wall thickness where a wall exists. */
+  perimeterInsets: readonly number[];
   corridorSegments: readonly CityCorridorSegment[];
   corridorOuterEdges: readonly CityCorridorBoundarySegment[];
   corridorInnerEdges: readonly CityCorridorBoundarySegment[];
@@ -194,12 +196,13 @@ const sideWalls = {
 function offsetCorridorCorner(
   previousEdge: CityCorridorPerimeterEdge,
   currentEdge: CityCorridorPerimeterEdge,
-  distance: number,
+  previousOffset: number,
+  currentOffset: number,
 ): CityPlanPoint {
   return lineIntersection(
-    addPlanPoints(previousEdge.from, scalePlanPoint(previousEdge.inward, distance)),
+    addPlanPoints(previousEdge.from, scalePlanPoint(previousEdge.inward, previousOffset)),
     subtractPlanPoints(previousEdge.to, previousEdge.from),
-    addPlanPoints(currentEdge.from, scalePlanPoint(currentEdge.inward, distance)),
+    addPlanPoints(currentEdge.from, scalePlanPoint(currentEdge.inward, currentOffset)),
     subtractPlanPoints(currentEdge.to, currentEdge.from),
   );
 }
@@ -211,27 +214,34 @@ interface CityCorridorRingLayout {
   footprints: readonly (readonly CityPlanPoint[])[];
 }
 
-function corridorRingFootprints(width: number, clearance: number): CityCorridorRingLayout {
+function corridorRingFootprints(width: number, perimeterInsets: readonly number[]): CityCorridorRingLayout {
+  if (perimeterInsets.length !== corridorPerimeterEdges.length) {
+    throw new Error("Each trapezoid corridor ring needs one inset per perimeter edge");
+  }
   const segments: CityCorridorSegment[] = [];
   const outerEdges: CityCorridorBoundarySegment[] = [];
   const innerEdges: CityCorridorBoundarySegment[] = [];
   const footprints: CityPlanPoint[][] = [];
 
   corridorPerimeterEdges.forEach((edge, index) => {
-    const previousEdge = corridorPerimeterEdges[(index + corridorPerimeterEdges.length - 1) % corridorPerimeterEdges.length];
-    const nextEdge = corridorPerimeterEdges[(index + 1) % corridorPerimeterEdges.length];
-    const outerFrom = offsetCorridorCorner(previousEdge, edge, clearance);
-    const outerTo = offsetCorridorCorner(edge, nextEdge, clearance);
-    const innerFrom = offsetCorridorCorner(previousEdge, edge, clearance + width);
-    const innerTo = offsetCorridorCorner(edge, nextEdge, clearance + width);
-    const centerOffset = clearance + width / 2;
+    const previousIndex = (index + corridorPerimeterEdges.length - 1) % corridorPerimeterEdges.length;
+    const nextIndex = (index + 1) % corridorPerimeterEdges.length;
+    const previousEdge = corridorPerimeterEdges[previousIndex];
+    const nextEdge = corridorPerimeterEdges[nextIndex];
+    const previousInset = perimeterInsets[previousIndex];
+    const edgeInset = perimeterInsets[index];
+    const nextInset = perimeterInsets[nextIndex];
+    const outerFrom = offsetCorridorCorner(previousEdge, edge, previousInset, edgeInset);
+    const outerTo = offsetCorridorCorner(edge, nextEdge, edgeInset, nextInset);
+    const innerFrom = offsetCorridorCorner(previousEdge, edge, previousInset + width, edgeInset + width);
+    const innerTo = offsetCorridorCorner(edge, nextEdge, edgeInset + width, nextInset + width);
     segments.push({
       id: edge.id,
       referenceFrom: edge.referenceFrom,
       referenceTo: edge.referenceTo,
       width,
-      from: offsetCorridorCorner(previousEdge, edge, centerOffset),
-      to: offsetCorridorCorner(edge, nextEdge, centerOffset),
+      from: offsetCorridorCorner(previousEdge, edge, previousInset + width / 2, edgeInset + width / 2),
+      to: offsetCorridorCorner(edge, nextEdge, edgeInset + width / 2, nextInset + width / 2),
     });
     outerEdges.push({ id: edge.id, from: outerFrom, to: outerTo });
     innerEdges.push({ id: edge.id, from: innerFrom, to: innerTo });
@@ -243,20 +253,24 @@ function corridorRingFootprints(width: number, clearance: number): CityCorridorR
 
 const corridorLevels = [0, 4, 8, 12] as const;
 const galleryLevels = [4, 8, 12] as const;
-// Every floor has a closed four-run trapezoid corridor; even floors inset the entire ring by 2 m.
+// Every floor has a closed four-run trapezoid corridor; even floors keep 2 m beyond the inside wall face.
 const corridorFloorLayouts: readonly CityCorridorFloorLayout[] = corridorLevels.map((level) => {
   const floorNumber = level / NESTED_CITY_FLOOR_HEIGHT + 1;
   const parity = floorNumber % 2 === 0 ? "even" : "odd";
   const sideWall = parity === "odd" ? "AD" : "BC";
   const sideClearance = parity === "even" ? NESTED_CITY_CORRIDOR_WIDTH : 0;
-  const corridorRing = corridorRingFootprints(NESTED_CITY_CORRIDOR_WIDTH, sideClearance);
-  const galleryRing = corridorRingFootprints(NESTED_CITY_GALLERY_WIDTH, sideClearance);
+  const perimeterInsets = corridorPerimeterEdges.map(({ id }) =>
+    sideClearance + (id === "CD" ? 0 : ROOM.wall),
+  );
+  const corridorRing = corridorRingFootprints(NESTED_CITY_CORRIDOR_WIDTH, perimeterInsets);
+  const galleryRing = corridorRingFootprints(NESTED_CITY_GALLERY_WIDTH, perimeterInsets);
   return {
     level,
     floorNumber,
     parity,
     sideWall,
     sideClearance,
+    perimeterInsets,
     corridorSegments: corridorRing.segments,
     corridorOuterEdges: corridorRing.outerEdges,
     corridorInnerEdges: corridorRing.innerEdges,
