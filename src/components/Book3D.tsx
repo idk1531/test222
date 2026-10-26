@@ -6,6 +6,7 @@ import {
   canvasSizeForPlane,
   CATEGORY_LABEL_PLANE,
   heldCoverPlaneSize,
+  makeColliderBox,
   SHELF,
   SHELF_INWARD,
   spineLabelLayout,
@@ -409,6 +410,24 @@ export function makeBook(placement: ShelfBookPlacement, title: string, place: "s
   return g;
 }
 
+/** Store a world-space box around the solid book body, excluding labels and invisible pick proxies. */
+function registerBookCollision(bookGroup: THREE.Group): void {
+  const bookBody = bookGroup.children[0] as THREE.Mesh | undefined;
+  if (!bookBody?.isMesh) return;
+  bookGroup.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(bookBody);
+  if (bounds.isEmpty()) return;
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  bookGroup.userData.collisionBoxes = [makeColliderBox(
+    { x: center.x, z: center.z },
+    size.x,
+    size.z,
+    bounds.min.y,
+    bounds.max.y,
+  )];
+}
+
 /** Dispose the geometry/materials/textures owned by one standalone book model. */
 export function disposeBookModel(root: THREE.Object3D) {
   const geometries = new Set<THREE.BufferGeometry>();
@@ -484,6 +503,7 @@ export const Book3D: React.FC<{
           board.books.forEach((placement) => {
             if (placement.cardId === heldCardId) return;
             const book = makeBook(placement, titleOf(placement.cardId));
+            registerBookCollision(book);
             trackBookMaterials(book);
             group?.add(book);
           });
@@ -535,6 +555,7 @@ export const Book3D: React.FC<{
         const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(yawDeg));
         const layFlat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
         book.quaternion.copy(yaw).multiply(layFlat);
+        registerBookCollision(book);
         trackBookMaterials(book);
         group?.add(book);
       });

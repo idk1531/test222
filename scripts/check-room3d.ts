@@ -6,12 +6,14 @@ import {
   CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
   MARBLE_ROUGH, MATCH_VIEW, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
   cityTrapezoidCornerFootprint, cityTrapezoidWallBandFootprint, clipCityPolygonToTrapezoid,
-  isCityPointInsidePolygon, isCityPointInsideTrapezoid, colliderOverlapsCircle, nestedCityInspectionDistance,
+  collectSceneColliders, floorHeightBelow, isCityPointInsidePolygon, isCityPointInsideTrapezoid,
+  colliderOverlapsCircle, makeColliderBox, nestedCityGuardrailSegments, nestedCityInspectionDistance,
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
   resolveCollision, nestedCityFloorLabel, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
-  yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
+  yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, stepVerticalMotion,
+  THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
 } from "../src/lib/room3d";
 import { DEFAULT_CAMERA } from "../src/lib/study";
 import { canvasCJKFont } from "../src/lib/fonts";
@@ -310,9 +312,23 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
         `${landing.id} bridge must remain walkable from the ring to the stairs`);
     }
   }
+  const guardrailSegments = nestedCityGuardrailSegments();
+  assert.ok(guardrailSegments.length > 0, "gallery edges must generate physical guardrail runs");
+  for (const landing of NESTED_CITY.stairs.landings) {
+    if (landing.level === 0) continue;
+    const layout = NESTED_CITY.gallery.floorLayouts.find(({ level }) => level === landing.level)!;
+    const edge = layout.galleryInnerEdges.find(({ id }) => id === landing.edge)!;
+    const edgeLength = Math.hypot(edge.to.x - edge.from.x, edge.to.z - edge.from.z);
+    const openingStart = Math.max(0, landing.connectionT - (landing.width / 2 + 0.28) / edgeLength);
+    const openingEnd = Math.min(1, landing.connectionT + (landing.width / 2 + 0.28) / edgeLength);
+    assert.ok(guardrailSegments
+      .filter((segment) => segment.kind === "atrium" && segment.level === landing.level && segment.id === landing.edge)
+      .every((segment) => segment.endT <= openingStart + 1e-6 || segment.startT >= openingEnd - 1e-6),
+    `${landing.id} must leave a collider-free railing opening for the stair/drop route`);
+  }
 }
 console.log("  ✓ 每層四邊閉合等腰梯形走廊、偶數層四邊 2 m 淨距、挑空中庭留白");
-console.log("  ✓ 四邊各三段可上下行走的樓梯，24 階踏面與樓層平台連通");
+console.log("  ✓ 四邊各三段可上下行走的樓梯、24 階踏面、平台與無欄杆落差通道");
 
 assert.equal(DESK.width, 5.79, "room-area growth must not scale the existing desk");
 assert.equal(DESK_FOOTPRINT[0].maxX - DESK_FOOTPRINT[0].minX, DESK.width);
@@ -376,8 +392,29 @@ assert.ok(Math.hypot(playerSeparation.x - otherPlayer.x, playerSeparation.z - ot
   "雙人共享時不可穿過遠端玩家的水平碰撞範圍");
 assert.deepEqual(resolveCollision(1, 0, PLAYER_RADIUS, false, false, undefined, otherPlayer), { x: 1, z: 0 },
   "遠離遠端玩家時不應被動態玩家碰撞體推動");
+const railingCollider = makeColliderBox({ x: 0, z: 0 }, 0.12, 2.6, 4, 5.04, "model", Math.PI / 4);
+const colliderScene = new THREE.Group();
+const railingModel = new THREE.Group();
+railingModel.userData.collisionBoxes = [railingCollider];
+colliderScene.add(railingModel);
+assert.deepEqual(collectSceneColliders(colliderScene), [railingCollider],
+  "procedural models must expose their registered collision boxes to the player controller");
+const stoppedAtRail = resolveCollision(0, 0, PLAYER_RADIUS, false, false, undefined, undefined, 4, [railingCollider]);
+assert.ok(!colliderOverlapsCircle(railingCollider, stoppedAtRail.x, stoppedAtRail.z, PLAYER_RADIUS - 1e-5),
+  "an existing rotated railing collider must stop the player at its edge");
+assert.deepEqual(resolveCollision(0, 0, PLAYER_RADIUS, false, false, undefined, undefined, 4), { x: 0, z: 0 },
+  "a gap with no railing collider must remain traversable");
+assert.deepEqual(resolveCollision(0, 0, PLAYER_RADIUS, false, false, undefined, undefined, 2, [railingCollider]), { x: 0, z: 0 },
+  "a railing collider above the player's head must not block a lower fall");
 assert.equal(groundHeightAt(0, 0), 0);
-console.log("  ✓ 家具／遠端玩家 AABB 碰撞、桌緣、斜角滑動與平地高度");
+assert.equal(floorHeightBelow(0, 0, 8), 0, "an open atrium must expose the ground floor as the fall landing surface");
+const catchableTread = NESTED_CITY.stairs.flights[0].treads[10];
+assert.equal(
+  floorHeightBelow(catchableTread.center.x, catchableTread.center.z, catchableTread.topHeight + 1e-6),
+  catchableTread.topHeight,
+  "fall landing queries must also include intermediate stair treads",
+);
+console.log("  ✓ 家具／模型／遠端玩家碰撞箱、開放欄杆缺口、樓梯踏面落地");
 
 // 坐下觸發與「坐著滑進桌下 → F 安全起立」防死鎖。
 assert.deepEqual(SIT, { triggerRadius: 0.34, seatY: 0.42, eyeY: 1.18, walkSpeed: 1.15, fov: 58, fadeOpacity: 0.25 });
@@ -411,6 +448,30 @@ console.log("  ✓ SIT trigger 半徑、跟隨椅碰撞與桌下安全起立");
   assert.deepEqual(jump, { offset: 0, velocity: 0, onGround: true });
 }
 console.log("  ✓ 跳躍頂高約 0.56 m、0.5 秒不污染 base height、最終落地");
+{
+  let verticalJump = { floorY: 0, jumpOffset: 0, velocity: JUMP.velocity, onGround: false, falling: false };
+  let apex = 0;
+  for (let i = 0; i < 120 && !verticalJump.onGround; i++) {
+    const feetY = verticalJump.floorY + verticalJump.jumpOffset;
+    verticalJump = stepVerticalMotion(verticalJump, 1 / 60, floorHeightBelow(0, 0, feetY));
+    apex = Math.max(apex, verticalJump.jumpOffset);
+  }
+  assert.ok(Math.abs(apex - 0.56) < 0.02, "new vertical controller preserves the normal jump arc");
+  assert.equal(verticalJump.floorY, 0);
+  assert.equal(verticalJump.onGround, true);
+
+  let fall = { floorY: 8, jumpOffset: 0, velocity: 0, onGround: false, falling: true };
+  let fallFrames = 0;
+  while (!fall.onGround && fallFrames < 180) {
+    const feetY = fall.floorY + fall.jumpOffset;
+    fall = stepVerticalMotion(fall, 1 / 60, floorHeightBelow(0, 0, feetY));
+    fallFrames++;
+  }
+  assert.ok(fallFrames > 1, "an unrailed edge must cause a gravity-driven fall, not a teleport");
+  assert.equal(fall.floorY, 0, "a falling player must land on the ground floor below the open atrium");
+  assert.equal(fall.onGround, true);
+}
+console.log("  ✓ 無欄杆邊緣以重力自然落下並落到下層樓板，跳躍弧線維持不變");
 assert.equal(clampPitchRad(-100), CAMERA.pitchMin);
 assert.equal(clampPitchRad(-100, true), THREE.MathUtils.degToRad(-80), "seated pitch minimum relaxes to −80°");
 assert.equal(clampPitchRad(100), CAMERA.pitchMax);
@@ -569,10 +630,28 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   assert.match(nestedCitySource, /layout\.galleryOuterEdges/);
   assert.match(nestedCitySource, /addSideBookshelves/);
   assert.match(nestedCitySource, /addGalleryGuardrails/);
+  assert.match(nestedCitySource, /nestedCityGuardrailSegments/,
+    "visible railing runs and their collision gaps must share one geometry layout");
+  assert.match(nestedCitySource, /registerCollider/);
+  assert.match(nestedCitySource, /makeColliderBox/);
   assert.match(nestedCitySource, /addGallerySupportBeams/);
   assert.match(nestedCitySource, /addGallerySupportColumns/);
   assert.match(nestedCitySource, /addGalleryStairs/);
+  assert.match(nestedCitySource, /addBoxBatch\(group, treadBoxes, treadMaterial, "gallery-stair-treads-all-sides", false\)/,
+    "stair tread batches must remain non-blocking so players can walk up the rendered steps");
   assert.match(nestedCitySource, /NESTED_CITY\.stairs/);
+  const roomGeometrySource = fs.readFileSync(path.join(process.cwd(), "src/components/RoomGeometry.tsx"), "utf8");
+  const roomFurnitureSource = fs.readFileSync(path.join(process.cwd(), "src/components/RoomFurniture.tsx"), "utf8");
+  const book3DSource = fs.readFileSync(path.join(process.cwd(), "src/components/Book3D.tsx"), "utf8");
+  const shelfDecorSource = fs.readFileSync(path.join(process.cwd(), "src/components/ShelfDecor.tsx"), "utf8");
+  assert.match(roomGeometrySource, /userData\.collisionBoxes/,
+    "box-based room models must register their physical bounds");
+  assert.match(roomFurnitureSource, /makeColliderBox/,
+    "composite room furniture must register its model bounds");
+  assert.match(book3DSource, /registerBookCollision/,
+    "placed data books must expose solid-body collision boxes");
+  assert.match(shelfDecorSource, /registerCollider/,
+    "instanced and individual shelf decor must expose physical bounds");
   assert.doesNotMatch(nestedCitySource, /central-atrium-frame-(?:outer|middle|inner)|addPortalFrame/,
     "all decorative portal frames are removed from the central atrium for the stair routes");
   assert.match(nestedCitySource, /addReadingTable/);

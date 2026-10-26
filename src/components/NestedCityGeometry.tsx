@@ -5,10 +5,12 @@ import * as THREE from "three";
 import {
   cityTrapezoidCornerFootprint,
   cityTrapezoidWallBandFootprint,
+  makeColliderBox,
+  nestedCityGuardrailSegments,
   NESTED_CITY,
   ROOM,
 } from "@/lib/room3d";
-import type { CityPlanPoint, CityTrapezoidWallSegment } from "@/lib/room3d";
+import type { Aabb, CityPlanPoint, CityTrapezoidWallSegment } from "@/lib/room3d";
 import type { StudySceneApi } from "./StudyScene";
 
 const SLAB_THICKNESS = 0.3;
@@ -28,6 +30,12 @@ type BoxInstance = {
 
 type Segment3D = { from: CityPlanPoint; to: CityPlanPoint };
 
+function registerCollider(group: THREE.Group, collider: Aabb) {
+  const colliders = group.userData.collisionBoxes as Aabb[] | undefined;
+  if (colliders) colliders.push(collider);
+  else group.userData.collisionBoxes = [collider];
+}
+
 function addPlanPrism(
   group: THREE.Group,
   footprint: readonly CityPlanPoint[],
@@ -35,6 +43,7 @@ function addPlanPrism(
   height: number,
   material: THREE.Material,
   name: string,
+  collider?: Aabb,
 ) {
   if (footprint.length < 3 || height <= 0) return;
 
@@ -54,6 +63,7 @@ function addPlanPrism(
   mesh.receiveShadow = true;
   mesh.userData.kind = "trapezoidLibraryFloor";
   group.add(mesh);
+  if (collider) registerCollider(group, collider);
 }
 
 function addBox(
@@ -63,6 +73,7 @@ function addBox(
   material: THREE.Material,
   name: string,
   rotationY = 0,
+  collidable = true,
 ) {
   const mesh = new THREE.Mesh(UNIT_BOX, material);
   mesh.name = name;
@@ -72,10 +83,27 @@ function addBox(
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   group.add(mesh);
+  if (collidable) {
+    registerCollider(group, makeColliderBox(
+      { x: position.x, z: position.z },
+      dimensions.width,
+      dimensions.depth,
+      position.y - dimensions.height / 2,
+      position.y + dimensions.height / 2,
+      "model",
+      rotationY,
+    ));
+  }
   return mesh;
 }
 
-function addBoxBatch(group: THREE.Group, boxes: readonly BoxInstance[], material: THREE.Material, name: string) {
+function addBoxBatch(
+  group: THREE.Group,
+  boxes: readonly BoxInstance[],
+  material: THREE.Material,
+  name: string,
+  collidable = true,
+) {
   if (boxes.length === 0) return;
 
   const instances = new THREE.InstancedMesh(UNIT_BOX, material, boxes.length);
@@ -93,6 +121,19 @@ function addBoxBatch(group: THREE.Group, boxes: readonly BoxInstance[], material
   instances.instanceMatrix.needsUpdate = true;
   instances.computeBoundingSphere();
   group.add(instances);
+  if (collidable) {
+    for (const box of boxes) {
+      registerCollider(group, makeColliderBox(
+        { x: box.x, z: box.z },
+        box.width,
+        box.depth,
+        box.y - box.height / 2,
+        box.y + box.height / 2,
+        "model",
+        box.rotationY ?? 0,
+      ));
+    }
+  }
 }
 
 function addBeamBetween(
@@ -116,6 +157,18 @@ function addBeamBetween(
   beam.castShadow = true;
   beam.receiveShadow = true;
   group.add(beam);
+  const horizontalLength = Math.hypot(to.x - from.x, to.z - from.z);
+  const beamYaw = Math.atan2(to.x - from.x, to.z - from.z);
+  const halfThickness = Math.max(width, height) / 2;
+  registerCollider(group, makeColliderBox(
+    { x: beam.position.x, z: beam.position.z },
+    Math.max(width, height),
+    Math.max(width, horizontalLength + width * 0.5),
+    Math.min(from.y, to.y) - halfThickness,
+    Math.max(from.y, to.y) + halfThickness,
+    "model",
+    beamYaw,
+  ));
 }
 
 function planPointToVector(point: CityPlanPoint, y: number): THREE.Vector3 {
@@ -158,11 +211,20 @@ function addTrapezoidShell(group: THREE.Group, material: THREE.Material) {
       ROOM.height,
       material,
       `trapezoid-corner:${id}`,
+      makeColliderBox(point, ROOM.wall, ROOM.wall, 0, ROOM.height),
     );
   }
 
   for (const wall of NESTED_CITY.trapezoid.wallEdges) {
     const footprint = cityTrapezoidWallBandFootprint(wall, ROOM.wall);
+    const dx = wall.to.x - wall.from.x;
+    const dz = wall.to.z - wall.from.z;
+    const length = Math.hypot(dx, dz);
+    const yaw = Math.atan2(dx, dz);
+    const center = {
+      x: (wall.from.x + wall.to.x) / 2 + wall.inward.x * ROOM.wall / 2,
+      z: (wall.from.z + wall.to.z) / 2 + wall.inward.z * ROOM.wall / 2,
+    };
     for (const level of NESTED_CITY.trapezoid.wallBandLevels) {
       const bottom = level === ROOM.height ? level - WALL_BAND_HEIGHT : level;
       addPlanPrism(
@@ -172,6 +234,7 @@ function addTrapezoidShell(group: THREE.Group, material: THREE.Material) {
         WALL_BAND_HEIGHT,
         material,
         `trapezoid-wall:${wall.id}:${level}`,
+        makeColliderBox(center, ROOM.wall, length, bottom, bottom + WALL_BAND_HEIGHT, "model", yaw),
       );
     }
   }
@@ -253,6 +316,15 @@ function addSideBookshelves(
         const bayDepth = bay.end - bay.start;
         const shelfCenter = offsetPoint(centerOnWall, wall.inward, 0.76);
         const backCenter = offsetPoint(centerOnWall, wall.inward, 0.43);
+        registerCollider(group, makeColliderBox(
+          shelfCenter,
+          0.94,
+          bayDepth - 0.045,
+          floorY,
+          floorY + 3.8,
+          "model",
+          yaw,
+        ));
         panels.push({
           width: 0.14,
           height: 3.72,
@@ -324,11 +396,12 @@ function addSideBookshelves(
     }
   }
 
-  addBoxBatch(group, panels, panelMaterial, "continuous-side-bookshelf-backing");
-  addBoxBatch(group, shelves, woodMaterial, "six-tier-oak-shelf-boards");
-  addBoxBatch(group, verticalPosts, woodMaterial, "bookshelf-bay-stiles");
+  // Each shelf bay owns one compound collision box; individual book meshes stay lightweight.
+  addBoxBatch(group, panels, panelMaterial, "continuous-side-bookshelf-backing", false);
+  addBoxBatch(group, shelves, woodMaterial, "six-tier-oak-shelf-boards", false);
+  addBoxBatch(group, verticalPosts, woodMaterial, "bookshelf-bay-stiles", false);
   bookBatches.forEach((books, index) => {
-    addBoxBatch(group, books, bookMaterials[index], `instanced-library-books:${index}`);
+    addBoxBatch(group, books, bookMaterials[index], `instanced-library-books:${index}`, false);
   });
 }
 
@@ -387,40 +460,15 @@ function addGalleryGuardrails(
   darkMaterial: THREE.Material,
   glassMaterial: THREE.Material,
 ) {
-  for (const layout of NESTED_CITY.gallery.floorLayouts) {
-    const floorY = layout.level;
-    for (const edge of layout.galleryInnerEdges) {
-      const openings = NESTED_CITY.stairs.landings
-        .filter((landing) => landing.level === floorY && landing.edge === edge.id)
-        .map((landing) => ({
-          start: Math.max(0, landing.connectionT - (landing.width / 2 + 0.28) / segmentLength(edge)),
-          end: Math.min(1, landing.connectionT + (landing.width / 2 + 0.28) / segmentLength(edge)),
-        }))
-        .sort((a, b) => a.start - b.start);
-      let cursor = 0;
-      openings.forEach((opening, index) => {
-        if (opening.start > cursor) {
-          addGuardrail(group, {
-            from: pointAlong(edge, cursor),
-            to: pointAlong(edge, opening.start),
-          }, floorY, darkMaterial, glassMaterial,
-          `gallery-atrium-rail:${edge.id}:${floorY}m:${index}`);
-        }
-        cursor = Math.max(cursor, opening.end);
-      });
-      if (cursor < 1) {
-        addGuardrail(group, {
-          from: pointAlong(edge, cursor),
-          to: edge.to,
-        }, floorY, darkMaterial, glassMaterial,
-        `gallery-atrium-rail:${edge.id}:${floorY}m:end`);
-      }
-    }
-    const outerRailEdges = layout.galleryOuterEdges.filter(({ id }) => layout.sideClearance > 0 || id === "CD");
-    for (const edge of outerRailEdges) {
-      addGuardrail(group, edge, floorY, darkMaterial, glassMaterial,
-        `gallery-perimeter-rail:${edge.id}:${floorY}m`);
-    }
+  for (const segment of nestedCityGuardrailSegments()) {
+    addGuardrail(
+      group,
+      segment,
+      segment.level,
+      darkMaterial,
+      glassMaterial,
+      segment.colliderId,
+    );
   }
 }
 
@@ -479,7 +527,8 @@ function addGalleryStairs(
       }
     }
   }
-  addBoxBatch(group, treadBoxes, treadMaterial, "gallery-stair-treads-all-sides");
+  // Tread tops are standable surfaces handled by groundHeightAt; side-wall collisions would block climbing.
+  addBoxBatch(group, treadBoxes, treadMaterial, "gallery-stair-treads-all-sides", false);
 
   const landingGroups = new Map<string, Array<(typeof NESTED_CITY.stairs.landings)[number]>>();
   for (const landing of NESTED_CITY.stairs.landings) {
@@ -638,6 +687,13 @@ function addPlanter(
     soilMaterial,
     `library-planter:${index}:soil`,
   );
+  registerCollider(group, makeColliderBox(
+    { x: center.x, z: center.z },
+    0.72,
+    0.72,
+    floorY + 0.46,
+    floorY + 1.32,
+  ));
 
   const foliageGeometry = new THREE.IcosahedronGeometry(0.25, 1);
   for (const [dx, dy, dz, scale] of [

@@ -15,6 +15,7 @@ import {
   DESK_PREVIEW_PLANE,
   FIDELITY,
   LOOK,
+  makeColliderBox,
   MARBLE_ROUGH,
   NESTED_CITY,
   PALETTE,
@@ -302,12 +303,15 @@ function box(
   x: number,
   y: number,
   z: number,
-  opts: { cast?: boolean; receive?: boolean } = {}
+  opts: { cast?: boolean; receive?: boolean; collidable?: boolean } = {}
 ): THREE.Mesh {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   m.position.set(x, y, z);
   m.castShadow = opts.cast !== false;
   m.receiveShadow = opts.receive !== false;
+  if (opts.collidable !== false) {
+    m.userData.collisionBoxes = [makeColliderBox({ x, z }, w, d, y - h / 2, y + h / 2)];
+  }
   return m;
 }
 
