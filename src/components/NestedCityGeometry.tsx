@@ -617,12 +617,12 @@ function addGalleryFurniture(
     const side = { from: wall.from, to: wall.to };
     const yaw = segmentYaw(side);
     for (const t of [0.19, 0.39, 0.61, 0.81]) {
-      const center = offsetPoint(pointAlong(side, t), wall.inward, layout.sideClearance + 2.82);
+      const center = offsetPoint(pointAlong(side, t), wall.inward, ROOM.wall + layout.sideClearance + 2.82);
       addReadingTable(group, center, layout.level, yaw, woodMaterial, metalMaterial, tableIndex++);
     }
 
     for (const t of [0.08, 0.92]) {
-      const center = offsetPoint(pointAlong(side, t), wall.inward, layout.sideClearance + 3.52);
+      const center = offsetPoint(pointAlong(side, t), wall.inward, ROOM.wall + layout.sideClearance + 3.52);
       addPlanter(group, center, layout.level, woodMaterial, soilMaterial, leafMaterial, planterIndex++);
     }
   }

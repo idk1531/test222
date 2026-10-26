@@ -76,14 +76,14 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
   assert.deepEqual(corridor.perimeterEdges.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
   assert.deepEqual(corridor.segments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
   assert.ok(corridor.segments.every(({ width }) => width === corridor.width));
-  assert.deepEqual(corridor.floorLayouts.map(({ level, floorNumber, parity, sideWall, sideClearance }) => ({
-    level, floorNumber, parity, sideWall, sideClearance,
+  assert.deepEqual(corridor.floorLayouts.map(({ level, floorNumber, parity, sideWall, sideClearance, perimeterInsets }) => ({
+    level, floorNumber, parity, sideWall, sideClearance, perimeterInsets,
   })), [
-    { level: 0, floorNumber: 1, parity: "odd", sideWall: "AD", sideClearance: 0 },
-    { level: 4, floorNumber: 2, parity: "even", sideWall: "BC", sideClearance: corridor.width },
-    { level: 8, floorNumber: 3, parity: "odd", sideWall: "AD", sideClearance: 0 },
-    { level: 12, floorNumber: 4, parity: "even", sideWall: "BC", sideClearance: corridor.width },
-  ], "every floor has the four-sided ring; even floors keep the existing 2 m edge clearance");
+    { level: 0, floorNumber: 1, parity: "odd", sideWall: "AD", sideClearance: 0, perimeterInsets: [ROOM.wall, ROOM.wall, 0, ROOM.wall] },
+    { level: 4, floorNumber: 2, parity: "even", sideWall: "BC", sideClearance: corridor.width, perimeterInsets: [ROOM.wall + corridor.width, ROOM.wall + corridor.width, corridor.width, ROOM.wall + corridor.width] },
+    { level: 8, floorNumber: 3, parity: "odd", sideWall: "AD", sideClearance: 0, perimeterInsets: [ROOM.wall, ROOM.wall, 0, ROOM.wall] },
+    { level: 12, floorNumber: 4, parity: "even", sideWall: "BC", sideClearance: corridor.width, perimeterInsets: [ROOM.wall + corridor.width, ROOM.wall + corridor.width, corridor.width, ROOM.wall + corridor.width] },
+  ], "every floor has the four-sided ring; even floors keep a full 2 m gap from the inner wall face");
   assert.deepEqual(gallery.floorLayouts.map(({ level, parity }) => ({ level, parity })), [
     { level: 4, parity: "even" }, { level: 8, parity: "odd" }, { level: 12, parity: "even" },
   ]);
@@ -127,14 +127,22 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
     assert.deepEqual(layout.corridorSegments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
     assert.deepEqual(layout.gallerySegments.map(({ id }) => id), ["AB", "BC", "CD", "DA"]);
     const requiredClearance = layout.sideClearance;
+    for (const [index, edge] of trapezoid.corridorEdges.entries()) {
+      const wallFaceInset = edge.id === "CD" ? 0 : ROOM.wall;
+      const outerEdge = layout.corridorOuterEdges[index];
+      for (const point of [outerEdge.from, outerEdge.to]) {
+        assert.ok(Math.abs(edgeDistance(point, edge) - wallFaceInset - requiredClearance) < 1e-6,
+          `${layout.floorNumber}F ${edge.id} corridor edge must be exactly ${requiredClearance} m from the inner wall face`);
+      }
+    }
 
     for (const [index, footprint] of layout.corridorFootprints.entries()) {
       assert.equal(footprint.length, 4);
       assert.ok(footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
         `${layout.floorNumber}F ${layout.corridorSegments[index].id} corridor must stay inside ABCD`);
-      assert.ok(footprint.every((point) => trapezoid.corridorEdges.every((edge) =>
-        edgeDistance(point, edge) >= requiredClearance - 1e-6)),
-      `${layout.floorNumber}F corridor ring must keep its configured clearance from all four edges`);
+      assert.ok(footprint.every((point) => trapezoid.corridorEdges.every((edge, edgeIndex) =>
+        edgeDistance(point, edge) >= layout.perimeterInsets[edgeIndex] - 1e-6)),
+      `${layout.floorNumber}F corridor ring must clear each wall face by the configured amount`);
       const center = footprint.reduce((sum, point) => ({
         x: sum.x + point.x / footprint.length,
         z: sum.z + point.z / footprint.length,
@@ -170,8 +178,8 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
       assert.equal(footprint.length, 4);
       assert.ok(footprint.every((point) => isCityPointInsidePolygon(point, trapezoidVertices)),
         `${layout.floorNumber}F ${layout.gallerySegments[index].id} gallery must stay inside ABCD`);
-      assert.ok(footprint.every((point) => trapezoid.corridorEdges.every((edge) =>
-        edgeDistance(point, edge) >= requiredClearance - 1e-6)),
+      assert.ok(footprint.every((point) => trapezoid.corridorEdges.every((edge, edgeIndex) =>
+        edgeDistance(point, edge) >= layout.perimeterInsets[edgeIndex] - 1e-6)),
       `${layout.floorNumber}F gallery ring must maintain the same wall clearance`);
       const segment = layout.gallerySegments[index];
       const midpoint = { x: (segment.from.x + segment.to.x) / 2, z: (segment.from.z + segment.to.z) / 2 };
@@ -214,13 +222,14 @@ assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compa
           x: (edge.from.x + edge.to.x) / 2,
           z: (edge.from.z + edge.to.z) / 2,
         };
+        const wallFaceInset = edge.id === "CD" ? 0 : ROOM.wall;
         const wallGap = {
-          x: wallMidpoint.x + edge.inward.x * requiredClearance / 2,
-          z: wallMidpoint.z + edge.inward.z * requiredClearance / 2,
+          x: wallMidpoint.x + edge.inward.x * (wallFaceInset + requiredClearance / 2),
+          z: wallMidpoint.z + edge.inward.z * (wallFaceInset + requiredClearance / 2),
         };
         const justInside = {
-          x: wallMidpoint.x + edge.inward.x * (requiredClearance + 0.01),
-          z: wallMidpoint.z + edge.inward.z * (requiredClearance + 0.01),
+          x: wallMidpoint.x + edge.inward.x * (wallFaceInset + requiredClearance + 0.01),
+          z: wallMidpoint.z + edge.inward.z * (wallFaceInset + requiredClearance + 0.01),
         };
         assert.ok(![...layout.corridorFootprints, ...layout.galleryFootprints].some((footprint) =>
           isCityPointInsidePolygon(wallGap, footprint)),
