@@ -36,6 +36,13 @@ export interface CityCorridorBoundarySegment {
   from: CityPlanPoint;
   to: CityPlanPoint;
 }
+export interface CityGalleryGuardrailSegment extends CityCorridorBoundarySegment {
+  level: number;
+  kind: "atrium" | "perimeter";
+  startT: number;
+  endT: number;
+  colliderId: string;
+}
 export interface CityCorridorPerimeterEdge extends CityCorridorBoundarySegment {
   referenceFrom: CityTrapezoidPointId;
   referenceTo: CityTrapezoidPointId;
@@ -498,6 +505,62 @@ export const NESTED_CITY = {
     landings: cityStairs.landings,
   },
 } as const;
+
+/** Rendered and collidable rail runs share this layout; omitted intervals remain true drop openings. */
+export function nestedCityGuardrailSegments(): CityGalleryGuardrailSegment[] {
+  const segments: CityGalleryGuardrailSegment[] = [];
+  for (const layout of NESTED_CITY.gallery.floorLayouts) {
+    for (const edge of layout.galleryInnerEdges) {
+      const edgeLength = lengthPlanPoint(subtractPlanPoints(edge.to, edge.from));
+      const openings = NESTED_CITY.stairs.landings
+        .filter((landing) => landing.level === layout.level && landing.edge === edge.id)
+        .map((landing) => ({
+          start: Math.max(0, landing.connectionT - (landing.width / 2 + 0.28) / edgeLength),
+          end: Math.min(1, landing.connectionT + (landing.width / 2 + 0.28) / edgeLength),
+        }))
+        .sort((a, b) => a.start - b.start);
+      let cursor = 0;
+      openings.forEach((opening, index) => {
+        if (opening.start > cursor) {
+          segments.push({
+            id: edge.id,
+            from: pointAlong(edge.from, edge.to, cursor),
+            to: pointAlong(edge.from, edge.to, opening.start),
+            level: layout.level,
+            kind: "atrium",
+            startT: cursor,
+            endT: opening.start,
+            colliderId: `gallery-atrium-rail:${edge.id}:${layout.level}m:${index}`,
+          });
+        }
+        cursor = Math.max(cursor, opening.end);
+      });
+      if (cursor < 1) {
+        segments.push({
+          id: edge.id,
+          from: pointAlong(edge.from, edge.to, cursor),
+          to: edge.to,
+          level: layout.level,
+          kind: "atrium",
+          startT: cursor,
+          endT: 1,
+          colliderId: `gallery-atrium-rail:${edge.id}:${layout.level}m:end`,
+        });
+      }
+    }
+    for (const edge of layout.galleryOuterEdges.filter(({ id }) => layout.sideClearance > 0 || id === "CD")) {
+      segments.push({
+        ...edge,
+        level: layout.level,
+        kind: "perimeter",
+        startT: 0,
+        endT: 1,
+        colliderId: `gallery-perimeter-rail:${edge.id}:${layout.level}m`,
+      });
+    }
+  }
+  return segments;
+}
 
 const trapezoidBoundary = trapezoidBoundaryPoints;
 
@@ -1206,20 +1269,127 @@ export function shelfPlankY(row: number, _rowCount: number): number {
   return SHELF.height - row * SHELF.pitch;
 }
 
-export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair" | "player";
+export type RoomColliderKind = "desk" | "cabinet" | "shelf" | "chair" | "player" | "model";
 export interface Aabb extends RoomRect {
   kind: RoomColliderKind;
   bottom?: number;
   top: number;
   standable: boolean;
+  /** Optional oriented-box data; min/max still contain its world-space AABB for broad-phase checks. */
+  centerX?: number;
+  centerZ?: number;
+  halfWidth?: number;
+  halfDepth?: number;
+  rotationY?: number;
 }
 export type RoomCollider = Aabb;
 
-/** Circle-versus-box footprint query for the retained study furniture. */
+/** Build a world-space collision box from one rendered model's footprint and vertical bounds. */
+export function makeColliderBox(
+  center: CityPlanPoint,
+  width: number,
+  depth: number,
+  bottom: number,
+  top: number,
+  kind: RoomColliderKind = "model",
+  rotationY = 0,
+): Aabb {
+  const safeWidth = Math.max(0.001, Number.isFinite(width) ? Math.abs(width) : 0.001);
+  const safeDepth = Math.max(0.001, Number.isFinite(depth) ? Math.abs(depth) : 0.001);
+  const safeBottom = Number.isFinite(bottom) ? bottom : 0;
+  const safeTop = Math.max(safeBottom + 0.001, Number.isFinite(top) ? top : safeBottom + 0.001);
+  const yaw = Number.isFinite(rotationY) ? rotationY : 0;
+  const halfWidth = safeWidth / 2;
+  const halfDepth = safeDepth / 2;
+  const cos = Math.abs(Math.cos(yaw));
+  const sin = Math.abs(Math.sin(yaw));
+  const worldHalfX = cos * halfWidth + sin * halfDepth;
+  const worldHalfZ = sin * halfWidth + cos * halfDepth;
+  return {
+    minX: center.x - worldHalfX,
+    maxX: center.x + worldHalfX,
+    minZ: center.z - worldHalfZ,
+    maxZ: center.z + worldHalfZ,
+    kind,
+    bottom: safeBottom,
+    top: safeTop,
+    standable: false,
+    centerX: center.x,
+    centerZ: center.z,
+    halfWidth,
+    halfDepth,
+    rotationY: yaw,
+  };
+}
+
+function colliderCenter(collider: Aabb, offsetX = 0, offsetZ = 0): CityPlanPoint {
+  return {
+    x: (collider.centerX ?? (collider.minX + collider.maxX) / 2) + offsetX,
+    z: (collider.centerZ ?? (collider.minZ + collider.maxZ) / 2) + offsetZ,
+  };
+}
+
+function colliderHalfExtents(collider: Aabb): { width: number; depth: number } {
+  return {
+    width: collider.halfWidth ?? (collider.maxX - collider.minX) / 2,
+    depth: collider.halfDepth ?? (collider.maxZ - collider.minZ) / 2,
+  };
+}
+
+function worldPointToColliderLocal(collider: Aabb, x: number, z: number, offsetX = 0, offsetZ = 0): CityPlanPoint {
+  const center = colliderCenter(collider, offsetX, offsetZ);
+  const dx = x - center.x;
+  const dz = z - center.z;
+  const yaw = collider.rotationY ?? 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  return { x: cos * dx - sin * dz, z: sin * dx + cos * dz };
+}
+
+function colliderLocalPointToWorld(collider: Aabb, x: number, z: number, offsetX = 0, offsetZ = 0): CityPlanPoint {
+  const center = colliderCenter(collider, offsetX, offsetZ);
+  const yaw = collider.rotationY ?? 0;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  return { x: center.x + cos * x + sin * z, z: center.z - sin * x + cos * z };
+}
+
+function circleOverlapsCollider(
+  collider: Aabb,
+  x: number,
+  z: number,
+  radius: number,
+  offsetX = 0,
+  offsetZ = 0,
+): boolean {
+  const local = worldPointToColliderLocal(collider, x, z, offsetX, offsetZ);
+  const half = colliderHalfExtents(collider);
+  const closestX = THREE.MathUtils.clamp(local.x, -half.width, half.width);
+  const closestZ = THREE.MathUtils.clamp(local.z, -half.depth, half.depth);
+  return (local.x - closestX) ** 2 + (local.z - closestZ) ** 2 <= radius ** 2 + 1e-10;
+}
+
+/** Circle-versus-oriented-box footprint query for furniture and generated 3D models. */
 export function colliderOverlapsCircle(collider: Aabb, x: number, z: number, radius = 0): boolean {
-  const closestX = THREE.MathUtils.clamp(x, collider.minX, collider.maxX);
-  const closestZ = THREE.MathUtils.clamp(z, collider.minZ, collider.maxZ);
-  return (x - closestX) ** 2 + (z - closestZ) ** 2 <= radius ** 2 + 1e-10;
+  return circleOverlapsCollider(collider, x, z, radius);
+}
+
+/** Read the compound collision boxes registered by procedural model groups in the scene graph. */
+export function collectSceneColliders(root: THREE.Object3D): Aabb[] {
+  const colliders: Aabb[] = [];
+  root.traverse((object) => {
+    const registered = object.userData.collisionBoxes;
+    if (!Array.isArray(registered)) return;
+    for (const collider of registered) {
+      if (collider &&
+        Number.isFinite(collider.minX) && Number.isFinite(collider.maxX) &&
+        Number.isFinite(collider.minZ) && Number.isFinite(collider.maxZ) &&
+        Number.isFinite(collider.top)) {
+        colliders.push(collider as Aabb);
+      }
+    }
+  });
+  return colliders;
 }
 
 const chairCos = Math.abs(Math.cos(CHAIR.yaw));
@@ -1256,8 +1426,8 @@ export const PLAYER_RADIUS = 0.22;
 export const CHAIR_APPROACH_RADIUS = Math.hypot(chairHalfX + PLAYER_RADIUS, chairHalfZ + PLAYER_RADIUS);
 
 /**
- * 將玩家圓形近似成半徑擴張的 AABB，依最短分離軸推出障礙；距離相同時優先 X。
- * 多輪處理桌櫃轉角的重疊 footprint；坐姿可選擇略過椅子與桌櫃以實現滑行，牆界仍由 clampRoomPosition 負責。
+ * Resolve the player circle against axis-aligned or rotated model boxes using shortest local separation.
+ * Multiple passes handle overlapping corners; seated movement may ignore the chair and desk, while the room boundary remains clamped.
  */
 export function resolveCollision(
   x: number,
@@ -1267,7 +1437,8 @@ export function resolveCollision(
   ignoreDeskAndCabinet = false,
   chairPosition?: { x: number; z: number },
   otherPlayerPosition?: { x: number; z: number; floorY?: number } | null,
-  floorY = 0
+  floorY = 0,
+  additionalColliders: readonly Aabb[] = [],
 ): { x: number; z: number } {
   const start = clampRoomPosition(x, z);
   let px = start.x;
@@ -1285,28 +1456,30 @@ export function resolveCollision(
       }]
     : [];
   const playerTop = floorY + 1.75;
-  const colliders = [...COLLIDERS, ...dynamicPlayerCollider].filter((collider) =>
+  const colliders = [...COLLIDERS, ...additionalColliders, ...dynamicPlayerCollider].filter((collider) =>
     !(ignoreChair && collider.kind === "chair") &&
     !(ignoreDeskAndCabinet && (collider.kind === "desk" || collider.kind === "cabinet")) &&
+    !collider.standable &&
     collider.top > floorY + 0.05 && (collider.bottom ?? 0) < playerTop
   );
-  for (let pass = 0; pass < colliders.length; pass++) {
+  for (let pass = 0; pass < Math.min(colliders.length, 12); pass++) {
     let changed = false;
     for (const collider of colliders) {
       const chairOffsetX = collider.kind === "chair" && chairPosition ? chairPosition.x - CHAIR.x : 0;
       const chairOffsetZ = collider.kind === "chair" && chairPosition ? chairPosition.z - CHAIR.z : 0;
-      const minX = collider.minX + chairOffsetX - radius;
-      const maxX = collider.maxX + chairOffsetX + radius;
-      const minZ = collider.minZ + chairOffsetZ - radius;
-      const maxZ = collider.maxZ + chairOffsetZ + radius;
-      if (px <= minX || px >= maxX || pz <= minZ || pz >= maxZ) continue;
-
+      if (px <= collider.minX + chairOffsetX - radius || px >= collider.maxX + chairOffsetX + radius ||
+        pz <= collider.minZ + chairOffsetZ - radius || pz >= collider.maxZ + chairOffsetZ + radius) continue;
+      const local = worldPointToColliderLocal(collider, px, pz, chairOffsetX, chairOffsetZ);
+      const half = colliderHalfExtents(collider);
+      const expandedX = half.width + radius;
+      const expandedZ = half.depth + radius;
+      if (local.x <= -expandedX || local.x >= expandedX || local.z <= -expandedZ || local.z >= expandedZ) continue;
 
       const candidates = [
-        { axis: "x" as const, value: minX, distance: px - minX },
-        { axis: "x" as const, value: maxX, distance: maxX - px },
-        { axis: "z" as const, value: minZ, distance: pz - minZ },
-        { axis: "z" as const, value: maxZ, distance: maxZ - pz },
+        { axis: "x" as const, value: -expandedX, distance: local.x + expandedX },
+        { axis: "x" as const, value: expandedX, distance: expandedX - local.x },
+        { axis: "z" as const, value: -expandedZ, distance: local.z + expandedZ },
+        { axis: "z" as const, value: expandedZ, distance: expandedZ - local.z },
       ].sort((a, b) => {
         const distance = a.distance - b.distance;
         if (distance !== 0) return distance;
@@ -1314,12 +1487,18 @@ export function resolveCollision(
         return a.axis === "x" ? -1 : 1;
       });
       for (const candidate of candidates) {
-        const bounded = clampRoomPosition(
-          candidate.axis === "x" ? candidate.value : px,
-          candidate.axis === "z" ? candidate.value : pz
+        const candidateLocalX = candidate.axis === "x" ? candidate.value : local.x;
+        const candidateLocalZ = candidate.axis === "z" ? candidate.value : local.z;
+        const world = colliderLocalPointToWorld(collider, candidateLocalX, candidateLocalZ, chairOffsetX, chairOffsetZ);
+        const bounded = clampRoomPosition(world.x, world.z);
+        const stillOverlaps = circleOverlapsCollider(
+          collider,
+          bounded.x,
+          bounded.z,
+          Math.max(0, radius - 1e-7),
+          chairOffsetX,
+          chairOffsetZ,
         );
-        const stillOverlaps =
-          bounded.x > minX && bounded.x < maxX && bounded.z > minZ && bounded.z < maxZ;
         if (stillOverlaps) continue;
         px = bounded.x;
         pz = bounded.z;
@@ -1371,6 +1550,26 @@ export function groundHeightAt(x: number, z: number, referenceY = 0): number {
   );
 }
 
+/** Highest walkable surface directly beneath a falling player, including intermediate gallery decks and stair treads. */
+export function floorHeightBelow(x: number, z: number, maximumY = Number.POSITIVE_INFINITY): number | null {
+  const point = { x, z };
+  let highest: number | null = null;
+  const consider = (height: number, footprint?: readonly CityPlanPoint[]) => {
+    if (height > maximumY + 1e-6 || (footprint && !isPointInSimplePolygon(point, footprint, 1e-6))) return;
+    if (highest === null || height > highest) highest = height;
+  };
+
+  if (isCityPointInsideTrapezoid(point)) consider(0);
+  for (const { level, galleryFootprints } of NESTED_CITY.gallery.floorLayouts) {
+    for (const footprint of galleryFootprints) consider(level, footprint);
+  }
+  for (const landing of NESTED_CITY.stairs.landings) consider(landing.level, landing.footprint);
+  for (const flight of NESTED_CITY.stairs.flights) {
+    for (const tread of flight.treads) consider(tread.topHeight, tread.footprint);
+  }
+  return highest;
+}
+
 export const JUMP = {
   velocity: 3.6,
   gravity: 11.5,
@@ -1388,6 +1587,42 @@ export function stepJump(state: JumpState, dt: number): JumpState {
   const offset = state.offset + state.velocity * dt - 0.5 * JUMP.gravity * dt * dt;
   if (offset <= 0 && velocity <= 0) return { offset: 0, velocity: 0, onGround: true };
   return { offset: Math.max(0, offset), velocity, onGround: false };
+}
+
+export interface VerticalMotionState {
+  /** Current walking surface; continuously tracks world height while freely falling. */
+  floorY: number;
+  /** Positive while jumping from a platform; zero during a free fall. */
+  jumpOffset: number;
+  velocity: number;
+  onGround: boolean;
+  falling: boolean;
+}
+
+/** Integrate a jump or a walk-off fall, landing on the highest surface crossed below the player. */
+export function stepVerticalMotion(
+  state: VerticalMotionState,
+  dt: number,
+  landingFloorY: number | null,
+): VerticalMotionState {
+  if (state.onGround || dt <= 0) return state;
+  const previousFeetY = state.floorY + state.jumpOffset;
+  const velocity = state.velocity - JUMP.gravity * dt;
+  const nextFeetY = previousFeetY + state.velocity * dt - 0.5 * JUMP.gravity * dt * dt;
+  if (velocity <= 0 && landingFloorY !== null &&
+    previousFeetY >= landingFloorY - 1e-6 && nextFeetY <= landingFloorY + 1e-6) {
+    return { floorY: landingFloorY, jumpOffset: 0, velocity: 0, onGround: true, falling: false };
+  }
+  if (state.falling || nextFeetY < state.floorY - 1e-6) {
+    return { floorY: nextFeetY, jumpOffset: 0, velocity, onGround: false, falling: true };
+  }
+  return {
+    floorY: state.floorY,
+    jumpOffset: Math.max(0, nextFeetY - state.floorY),
+    velocity,
+    onGround: false,
+    falling: false,
+  };
 }
 
 export interface ShelfBookItem {
@@ -1683,12 +1918,14 @@ export function thirdPersonDistance(width: number, height: number): number {
   return width / height < THIRD_PERSON.portraitAspect ? THIRD_PERSON.portraitDistance : THIRD_PERSON.distance;
 }
 
-function thirdPersonBlocked(x: number, y: number, z: number): boolean {
+function thirdPersonBlocked(x: number, y: number, z: number, additionalColliders: readonly Aabb[] = []): boolean {
   if (!isCityPointInsideTrapezoid({ x, z }, THIRD_PERSON.wallMargin)) return true;
-  return COLLIDERS.some((collider) =>
+  const overlaps = (collider: Aabb) =>
     y > (collider.bottom ?? 0) - 0.1 && y < collider.top + 0.12 &&
-    colliderOverlapsCircle(collider, x, z, 0.18)
-  );
+    x > collider.minX - 0.18 && x < collider.maxX + 0.18 &&
+    z > collider.minZ - 0.18 && z < collider.maxZ + 0.18 &&
+    colliderOverlapsCircle(collider, x, z, 0.18);
+  return COLLIDERS.some(overlaps) || additionalColliders.some(overlaps);
 }
 
 /**
@@ -1696,12 +1933,16 @@ function thirdPersonBlocked(x: number, y: number, z: number): boolean {
  * 只回傳位置；lookAt 由 CameraRig 依角色前方計算。
  */
 export function resolveThirdPersonCamera(
-  pose: Pick<PlayerPose, "x" | "z" | "eyeY" | "jumpOffset" | "floorY">,
+  pose: Pick<PlayerPose, "x" | "z" | "eyeY" | "jumpOffset" | "floorY"> & Partial<Pick<PlayerPose, "onGround">>,
   viewYaw: number,
   viewPitch: number,
-  distance = THIRD_PERSON.distance
+  distance = THIRD_PERSON.distance,
+  additionalColliders: readonly Aabb[] = [],
 ): { x: number; y: number; z: number } {
-  const eyeY = groundHeightAt(pose.x, pose.z, pose.floorY ?? 0) + pose.eyeY + pose.jumpOffset;
+  const baseFloorY = pose.onGround === false
+    ? pose.floorY ?? groundHeightAt(pose.x, pose.z, 0)
+    : groundHeightAt(pose.x, pose.z, pose.floorY ?? 0);
+  const eyeY = baseFloorY + pose.eyeY + pose.jumpOffset;
   const dir = forwardFromYawPitch(viewYaw, viewPitch);
   const back = new THREE.Vector3(-dir.x, 0, -dir.z);
   if (back.lengthSq() < 1e-6) back.set(0, 0, 1);
@@ -1725,7 +1966,7 @@ export function resolveThirdPersonCamera(
   const isUsableCameraPosition = (candidate: { x: number; y: number; z: number }) =>
     Math.hypot(candidate.x - pose.x, candidate.z - pose.z) > 0.28 &&
     Math.hypot(candidate.x - pose.x, candidate.y - eyeY, candidate.z - pose.z) > minimumVisibleDistance &&
-    !thirdPersonBlocked(candidate.x, candidate.y, candidate.z);
+    !thirdPersonBlocked(candidate.x, candidate.y, candidate.z, additionalColliders);
 
   // 1) 理想：從最遠處往內找第一個沒被擋住、且未被牆角夾到角色身上的位置。
   const steps = 18;

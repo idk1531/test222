@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import * as THREE from "three";
 import type { StudySceneApi } from "./StudyScene";
-import { CHAIR, DESK, DESK_FOOTPRINT, FIDELITY, LOOK, WINDOW } from "@/lib/room3d";
+import { CHAIR, DESK, DESK_FOOTPRINT, FIDELITY, LOOK, makeColliderBox, WINDOW } from "@/lib/room3d";
 import { attachPhotoMap } from "@/lib/roomTextures";
 
 /**
@@ -86,6 +86,21 @@ export const RoomFurniture: React.FC<{
         }
       });
       group.add(o);
+      if (o.userData.kind !== "chair") {
+        o.updateMatrixWorld(true);
+        const bounds = new THREE.Box3().setFromObject(o);
+        if (!bounds.isEmpty()) {
+          const size = bounds.getSize(new THREE.Vector3());
+          const center = bounds.getCenter(new THREE.Vector3());
+          o.userData.collisionBoxes = [makeColliderBox(
+            { x: center.x, z: center.z },
+            size.x,
+            size.z,
+            bounds.min.y,
+            bounds.max.y,
+          )];
+        }
+      }
       return o;
     };
 

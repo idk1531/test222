@@ -7,11 +7,13 @@ import {
   DESK,
   DESK_FOOTPRINT,
   FIDELITY,
+  makeColliderBox,
   SHELF,
   SHELF_INWARD,
   shelfFrontX,
   shelfPlankCount,
   shelfPlankY,
+  type Aabb,
   type ShelfLayout,
   type ShelfRowLayout,
 } from "@/lib/room3d";
@@ -60,6 +62,25 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
     group.name = "shelf-decor";
     api.scene.add(group);
     const materials: THREE.Material[] = [];
+    const registerCollider = (collider: Aabb) => {
+      const colliders = group.userData.collisionBoxes as Aabb[] | undefined;
+      if (colliders) colliders.push(collider);
+      else group.userData.collisionBoxes = [collider];
+    };
+    const registerObjectCollider = (object: THREE.Object3D) => {
+      object.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(object);
+      if (bounds.isEmpty()) return;
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      registerCollider(makeColliderBox(
+        { x: center.x, z: center.z },
+        size.x,
+        size.z,
+        bounds.min.y,
+        bounds.max.y,
+      ));
+    };
 
     const inward = SHELF_INWARD;
     const frontX = shelfFrontX();
@@ -180,6 +201,17 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
     });
     if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     group.add(inst);
+    for (const book of books) {
+      registerCollider(makeColliderBox(
+        { x: book.x, z: book.z },
+        book.sx,
+        book.sz,
+        book.y - book.sy / 2,
+        book.y + book.sy / 2,
+        "model",
+        book.ry,
+      ));
+    }
 
     // ---- 腰高檯面／矮擱板的書堆（附圖：檯面與地面層板上的橫躺書堆） ----
     {
@@ -218,6 +250,7 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
           bookMesh.castShadow = true;
           bookMesh.receiveShadow = true;
           group.add(bookMesh);
+          registerObjectCollider(bookMesh);
         }
       });
     }
@@ -244,6 +277,7 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
       holder.position.set(SHELF.xBack + inward * 0.05, fr.y, fr.z);
       holder.rotation.z = inward * 0.09; // 頂端往牆面倒
       group.add(holder);
+      registerObjectCollider(holder);
     }
 
 
@@ -267,6 +301,7 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
       );
       holder.rotation.z = inward * 0.08;
       group.add(holder);
+      registerObjectCollider(holder);
     }
     {
       const stackColors = ["#3a3f47", "#7a3b34", "#c9b999", "#4a4f57"];
@@ -285,6 +320,7 @@ export const ShelfDecor: React.FC<{ api: StudySceneApi; layout: ShelfLayout }> =
         book.castShadow = true;
         book.receiveShadow = true;
         group.add(book);
+        registerObjectCollider(book);
       }
     }
 

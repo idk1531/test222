@@ -25,6 +25,8 @@ import {
   clampHeight,
   clampPitchRad,
   clampRoomPosition,
+  collectSceneColliders,
+  floorHeightBelow,
   groundHeightAt,
   isWithinSitTrigger,
   JUMP,
@@ -35,9 +37,10 @@ import {
   roomFovFor,
   ROOM,
   SIT,
-  stepJump,
+  stepVerticalMotion,
   THIRD_PERSON,
   thirdPersonDistance,
+  type Aabb,
   type PlayerPose,
   type ViewMode,
 } from "@/lib/room3d";
@@ -137,6 +140,7 @@ export const CameraRig: React.FC<{
     jumpOffset: 0,
     jumpVelocity: 0,
     onGround: true,
+    falling: false,
 
     mode: "room" as CameraMode,
     flying: false,
@@ -190,6 +194,7 @@ export const CameraRig: React.FC<{
   const inspectionViewRef = useRef<NestedCityView | null>(inspectionView);
   const movementEnabledRef = useRef(movementEnabled);
   const toggleViewRef = useRef(onToggleView);
+  const sceneCollidersRef = useRef<readonly Aabb[]>([]);
   const localPoseRef = useRef<PlayerPose | null>(null);
   const poseRef = playerRef ?? localPoseRef;
   const jumpRef = useRef<() => void>(() => {});
@@ -301,10 +306,11 @@ export const CameraRig: React.FC<{
     if (viewModeRef.current === "third" && modeRef.current === "room" && !flightRef.current) {
       const portrait = camera.aspect < THIRD_PERSON.portraitAspect;
       const target = resolveThirdPersonCamera(
-        { x: s.x, z: s.z, eyeY: s.eyeHeight, jumpOffset: s.jumpOffset, floorY: s.groundY },
+        { x: s.x, z: s.z, eyeY: s.eyeHeight, jumpOffset: s.jumpOffset, floorY: s.groundY, onGround: s.onGround },
         s.yaw,
         s.pitch,
-        thirdPersonDistance(camera.aspect, 1)
+        thirdPersonDistance(camera.aspect, 1),
+        sceneCollidersRef.current,
       );
       const desired = new THREE.Vector3(target.x, target.y, target.z);
       if (snap) camera.position.copy(desired);
@@ -372,6 +378,7 @@ export const CameraRig: React.FC<{
 
   const storeCamera = () => {
     const s = stateRef.current;
+    if (!s.onGround) return;
     persistRef.current({
       yaw: normalizeYawDeg(THREE.MathUtils.radToDeg(s.yaw)),
       pitch: THREE.MathUtils.radToDeg(s.pitch),
@@ -419,6 +426,7 @@ export const CameraRig: React.FC<{
 
   useEffect(() => {
     const canvas = api.dom;
+    sceneCollidersRef.current = collectSceneColliders(api.scene);
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const chairTargetPosition = new THREE.Vector3();
@@ -558,6 +566,7 @@ export const CameraRig: React.FC<{
       current.jumpOffset = 0;
       current.jumpVelocity = 0;
       current.onGround = true;
+      current.falling = false;
       seatTransitionRef.current = {
         startedAt: performance.now(),
         duration: 240,
@@ -622,6 +631,7 @@ export const CameraRig: React.FC<{
       if (action.type === "jump" && stateRef.current.onGround && !interactionRef.current.seated) {
         stateRef.current.jumpVelocity = JUMP.velocity;
         stateRef.current.onGround = false;
+        stateRef.current.falling = false;
       } else if (action.type === "sit") {
         interactionRef.current.seated = true;
         beginSeatTransition(true);
@@ -656,6 +666,7 @@ export const CameraRig: React.FC<{
       })) return;
       stateRef.current.jumpVelocity = JUMP.velocity;
       stateRef.current.onGround = false;
+      stateRef.current.falling = false;
     };
     jumpRef.current = jumpIfPossible;
     performKeyRef.current = (key: InputKey) => performInteraction(key, undefined, undefined, true);
@@ -877,6 +888,10 @@ export const CameraRig: React.FC<{
         groundY: resetFloorY,
         height: clampHeight(c.height ?? 1.5),
         eyeHeight: interactionRef.current.seated ? stateRef.current.eyeHeight : clampHeight(c.height ?? 1.5),
+        jumpOffset: 0,
+        jumpVelocity: 0,
+        onGround: true,
+        falling: false,
         yaw: THREE.MathUtils.degToRad(c.yaw),
         pitch: THREE.MathUtils.degToRad(c.pitch),
       };
@@ -969,17 +984,7 @@ export const CameraRig: React.FC<{
         chairTriggerCallbackRef.current?.(inChairTrigger);
       }
       let jumpChanged = false;
-      if (!interactionRef.current.seated) {
-        const current = stateRef.current;
-        const jump = stepJump(
-          { offset: current.jumpOffset, velocity: current.jumpVelocity, onGround: current.onGround },
-          Math.min(dt, 0.05)
-        );
-        jumpChanged = jump.offset !== current.jumpOffset || jump.onGround !== current.onGround;
-        current.jumpOffset = jump.offset;
-        current.jumpVelocity = jump.velocity;
-        current.onGround = jump.onGround;
-      }
+      let positionChanged = false;
       const keys = keysRef.current;
       let forward = movementEnabledRef.current
         ? Number(keys.has("w") || keys.has("arrowup")) - Number(keys.has("s") || keys.has("arrowdown"))
@@ -1009,6 +1014,9 @@ export const CameraRig: React.FC<{
         const chairX = chairRigRef.current?.group.position.x ?? CHAIR.x;
         const chairZ = chairRigRef.current?.group.position.z ?? CHAIR.z;
         const seatedApproach = Math.hypot(nextX - chairX, nextZ - chairZ) < CHAIR_APPROACH_RADIUS;
+        sceneCollidersRef.current = collectSceneColliders(api.scene);
+        const current = stateRef.current;
+        const currentFeetY = current.groundY + current.jumpOffset;
         const separated = resolveCollision(
           nextX,
           nextZ,
@@ -1017,25 +1025,64 @@ export const CameraRig: React.FC<{
           seatedNow,
           { x: chairX, z: chairZ },
           currentOtherPlayerPosition(),
-          stateRef.current.groundY
+          currentFeetY,
+          sceneCollidersRef.current,
         );
         const pos = clampRoomPosition(separated.x, separated.z);
-        const currentFloorY = stateRef.current.groundY;
-        const nextFloorY = groundHeightAt(pos.x, pos.z, currentFloorY);
-        // 沒有相連樓板／斜坡時不跨越樓層落差，避免從挑空邊緣直接掉回地面。
-        if (Math.abs(nextFloorY - currentFloorY) <= MAX_WALKABLE_STEP) {
-          stateRef.current.x = pos.x;
-          stateRef.current.z = pos.z;
-          stateRef.current.groundY = nextFloorY;
+        const currentFloorY = current.groundY;
+        const nextFloorY = groundHeightAt(pos.x, pos.z, current.onGround ? currentFloorY : currentFeetY);
+        if (current.onGround) {
+          const floorDelta = nextFloorY - currentFloorY;
+          if (Math.abs(floorDelta) <= MAX_WALKABLE_STEP) {
+            current.x = pos.x;
+            current.z = pos.z;
+            current.groundY = nextFloorY;
+          } else if (floorDelta < -MAX_WALKABLE_STEP) {
+            // An unrailed edge is a real drop: begin gravity instead of snapping back or blocking movement.
+            current.x = pos.x;
+            current.z = pos.z;
+            current.onGround = false;
+            current.falling = true;
+            current.jumpVelocity = 0;
+            current.jumpOffset = 0;
+          }
+        } else if (nextFloorY <= currentFeetY + MAX_WALKABLE_STEP) {
+          // While airborne, allow travel over lower floors/voids, but not through a higher deck.
+          current.x = pos.x;
+          current.z = pos.z;
         }
-        pointRoomCamera();
-      } else {
-        if (jumpChanged || seatChanged) pointRoomCamera();
-        if (wasMovingRef.current) {
-          wasMovingRef.current = false;
-          storeCamera();
-        }
+        positionChanged = current.x !== nextX || current.z !== nextZ || Math.hypot(dx, dz) > 0;
+      } else if (wasMovingRef.current) {
+        wasMovingRef.current = false;
+        storeCamera();
       }
+
+      if (!interactionRef.current.seated && !stateRef.current.onGround) {
+        const current = stateRef.current;
+        const previousFloorY = current.groundY;
+        const previousJumpOffset = current.jumpOffset;
+        const previousVelocity = current.jumpVelocity;
+        const previousOnGround = current.onGround;
+        const previousFalling = current.falling;
+        const previousFeetY = current.groundY + current.jumpOffset;
+        const landingFloorY = floorHeightBelow(current.x, current.z, previousFeetY);
+        const vertical = stepVerticalMotion({
+          floorY: current.groundY,
+          jumpOffset: current.jumpOffset,
+          velocity: current.jumpVelocity,
+          onGround: current.onGround,
+          falling: current.falling,
+        }, Math.min(dt, 0.05), landingFloorY);
+        current.groundY = vertical.floorY;
+        current.jumpOffset = vertical.jumpOffset;
+        current.jumpVelocity = vertical.velocity;
+        current.onGround = vertical.onGround;
+        current.falling = vertical.falling;
+        if (!previousOnGround && current.onGround) storeCamera();
+        jumpChanged = current.groundY !== previousFloorY || current.jumpOffset !== previousJumpOffset ||
+          current.jumpVelocity !== previousVelocity || current.onGround !== previousOnGround || current.falling !== previousFalling;
+      }
+      if (positionChanged || jumpChanged || seatChanged) pointRoomCamera();
       const nowState = stateRef.current;
       poseRef.current = {
         x: nowState.x,
