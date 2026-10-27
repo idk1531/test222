@@ -5,6 +5,14 @@ import Link from "next/link";
 import { InfiniteCanvas, CanvasObjectData, RelationData } from "@/components/InfiniteCanvas";
 import type { CardData } from "@/components/KnowledgeCardNode";
 import { useWorkspaceState, actions, exportFile, copyExportJson, importFile, resetToSeed, getState } from "@/lib/store";
+import {
+  BLANK_BOOK_WRITTEN_EVENT,
+  getBlankBookDraftContext,
+  hasWrittenCardContent,
+  persistBlankBookDraft,
+  type BlankBookCardDraft,
+  type BlankBookWrittenEventDetail,
+} from "@/lib/blankBooks";
 import { CardDetailModal } from "@/components/CardDetailModal";
 import { AIAuditDrawer } from "@/components/AIAuditDrawer";
 import { ExpansionTestModal } from "@/components/ExpansionTestModal";
@@ -206,6 +214,21 @@ export default function WorkbenchPage() {
 
   const handleSaveCard = async (updatedCard: Partial<CardData>) => {
     if (!updatedCard.id) return;
+    const draftRecord = updatedCard as Partial<CardData> & Record<string, unknown>;
+    const blankContext = getBlankBookDraftContext(draftRecord);
+    if (blankContext) {
+      if (!hasWrittenCardContent(draftRecord)) return;
+      const createdId = persistBlankBookDraft(
+        updatedCard as BlankBookCardDraft,
+        { x: 100 + Math.random() * 120, y: 100 + Math.random() * 120 },
+      );
+      if (createdId) {
+        window.dispatchEvent(new CustomEvent<BlankBookWrittenEventDetail>(BLANK_BOOK_WRITTEN_EVENT, {
+          detail: { blankBookId: blankContext.blankBookId },
+        }));
+      }
+      return;
+    }
     actions.updateCard(updatedCard.id, updatedCard);
   };
 

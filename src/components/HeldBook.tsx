@@ -2,7 +2,8 @@
 
 import React, { useEffect } from "react";
 import * as THREE from "three";
-import { makeBook, disposeBookModel } from "./Book3D";
+import { makeBlankDecorBook, makeBook, disposeBookModel } from "./Book3D";
+import type { ShelfDecorBook } from "@/lib/shelfDecorBooks";
 import { firstPersonHeldAnchor, thirdPersonHandOffset, type ShelfBookPlacement } from "@/lib/room3d";
 import { ensureCanvasCJKFont } from "@/lib/fonts";
 import type { StudySceneApi } from "./StudyScene";
@@ -16,12 +17,13 @@ export const HeldBook: React.FC<{
   api: StudySceneApi;
   cardId: string | null;
   placement: ShelfBookPlacement | null;
+  blankBook?: ShelfDecorBook | null;
   title: string;
   viewMode?: ViewMode;
   playerRef?: React.MutableRefObject<PlayerPose>;
-}> = ({ api, cardId, placement, title, viewMode = "first", playerRef }) => {
+}> = ({ api, cardId, placement, blankBook, title, viewMode = "first", playerRef }) => {
   useEffect(() => {
-    if (!cardId || !placement) return;
+    if (!cardId || (!placement && !blankBook)) return;
     let cancelled = false;
     let heldGroup: THREE.Group | null = null;
     let removeFrame: (() => void) | null = null;
@@ -41,7 +43,10 @@ export const HeldBook: React.FC<{
       // 封面貼在書的 +Z 面，group 直接面向相機（不可再繞 Y 轉 180°，否則只看得到封底）。
       group.rotation.set(-0.24, 0.3, 0.08);
       group.scale.setScalar(initial.scale);
-      group.add(makeBook({ ...placement, x: 0, y: 0, z: 0 }, title, "held"));
+      const bookModel = blankBook
+        ? makeBlankDecorBook(blankBook, cardId, { x: 0, y: 0, z: 0 }, "held")
+        : makeBook({ ...placement!, x: 0, y: 0, z: 0 }, title, "held");
+      group.add(bookModel);
       // 第一人稱：書下方一定要有手掌／袖口，否則書像浮在半空中。
       if (viewMode === "first") {
         const handGroup = new THREE.Group();
@@ -127,7 +132,7 @@ export const HeldBook: React.FC<{
       api.camera.remove(heldGroup);
       disposeBookModel(heldGroup);
     };
-  }, [api, cardId, placement, title, viewMode, playerRef]);
+  }, [api, cardId, placement, blankBook, title, viewMode, playerRef]);
 
   return null;
 };

@@ -35,6 +35,10 @@ export interface StudyBookLayout {
   place?: "shelf" | "desk";
   /** 僅 place === "desk" 有意義；房間座標系，公尺 */
   desk?: StudyDeskPosition;
+  /** 裝飾空書首次寫入後，記住其原始書架位置 ID，避免空書重生。 */
+  decorSourceId?: string;
+  /** 寫入前所用裝飾書的封面色；未設定時依 cardId 使用裝飾書色票。 */
+  decorColor?: string;
   updatedAt: string;
 }
 
