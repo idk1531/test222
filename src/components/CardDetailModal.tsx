@@ -210,6 +210,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
   const publishTargetPresence = useCallback((target: HTMLInputElement | HTMLTextAreaElement, typing: boolean, active = true) => {
     const currentCard = cardRef.current;
+    if (currentCard.id.startsWith("blank-draft:")) return;
     const path = target.dataset.collaborativeTextPath
       || (activeTextTargetRef.current === target ? activeTextPathRef.current : null);
     if (!path || !hasCollaborativeTextPathStructure(currentCard, path)) return;
@@ -283,7 +284,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         activeTextPathRef.current = resolved.path;
       }
     }
-    if (collaboration.canCollaborateOnText) {
+    if (collaboration.canCollaborateOnText && !card.id.startsWith("blank-draft:")) {
       for (const change of changes) {
         if (!hasCollaborativeTextPathStructure(card, change.path)) continue;
         const merged = collaboration.applyCollaborativeTextChange(card.id, change.path, change.previousValue, change.value);
@@ -311,11 +312,14 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     });
   }, [card, setCurrentFormData]);
 
-  useEffect(() => subscribeCollaborativeText((update) => {
-    if (update.cardId !== card.id) return;
-    const next = setCollaborativeTextAtPath(formDataRef.current, update.path, update.value);
-    setCurrentFormData(next);
-  }), [card.id, setCurrentFormData, subscribeCollaborativeText]);
+  useEffect(() => {
+    if (card.id.startsWith("blank-draft:")) return;
+    return subscribeCollaborativeText((update) => {
+      if (update.cardId !== card.id) return;
+      const next = setCollaborativeTextAtPath(formDataRef.current, update.path, update.value);
+      setCurrentFormData(next);
+    });
+  }, [card.id, setCurrentFormData, subscribeCollaborativeText]);
 
   useEffect(() => {
     const unsubscribe = subscribeRemoteEditing(() => {

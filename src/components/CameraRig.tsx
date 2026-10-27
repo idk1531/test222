@@ -446,6 +446,15 @@ export const CameraRig: React.FC<{
       return held || tagged;
     };
 
+    const bookCardIdForHit = (object: THREE.Object3D, instanceId?: number): string | undefined => {
+      if (Number.isInteger(instanceId)) {
+        const instanceCardIds = object.userData.instanceCardIds as unknown[] | undefined;
+        const instanceCardId = instanceCardIds?.[instanceId as number];
+        if (typeof instanceCardId === "string") return instanceCardId;
+      }
+      return typeof object.userData.cardId === "string" ? object.userData.cardId : undefined;
+    };
+
     const isPlayerPart = (object: THREE.Object3D) => {
       let current: THREE.Object3D | null = object;
       while (current) {
@@ -468,7 +477,7 @@ export const CameraRig: React.FC<{
       // 第三人稱的角色沒有 userData.kind，不會擋住後方的書本／桌面。
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(api.scene.children, true);
-      let bookTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
+      let bookTarget: { object: THREE.Object3D; point: THREE.Vector3; cardId: string } | null = null;
       let chairTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
       let paperTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
       let deskTarget: THREE.Vector3 | null = null;
@@ -478,8 +487,9 @@ export const CameraRig: React.FC<{
         const object = findSemanticObject(intersection.object);
         if (!object) continue;
         const kind = object.userData.kind;
-        if ((kind === "book" || kind === "heldBook") && object.userData.cardId && !bookTarget) {
-          bookTarget = { object, point: intersection.point };
+        const cardId = bookCardIdForHit(object, intersection.instanceId);
+        if ((kind === "book" || kind === "heldBook") && cardId && !bookTarget) {
+          bookTarget = { object, point: intersection.point, cardId };
         } else if (kind === "chair" && !chairTarget) {
           chairTarget = { object, point: intersection.point };
         } else if (kind === "deskCanvas" && !paperTarget) {
@@ -513,7 +523,7 @@ export const CameraRig: React.FC<{
         : "deskPaper";
       return {
         hit,
-        cardId: target.object.userData.cardId as string | undefined,
+        cardId: bookTarget?.cardId,
         bookOnDesk: target.object.userData.place === "desk",
         hitDeskSurface: !!deskTarget,
         deskPoint: deskTarget ? { x: deskTarget.x, z: deskTarget.z } : undefined,
@@ -540,12 +550,13 @@ export const CameraRig: React.FC<{
         for (const intersection of hits) {
           const object = findSemanticObject(intersection.object);
           if (!object) continue;
-          if (object.userData.kind !== "book" || !object.userData.cardId) continue;
+          const cardId = bookCardIdForHit(object, intersection.instanceId);
+          if (object.userData.kind !== "book" || !cardId) continue;
           // 只採用輔助圈內最近的一本，並保留桌面/椅子等資訊
           if (!best) {
             best = {
               hit: "book",
-              cardId: object.userData.cardId as string,
+              cardId,
               bookOnDesk: object.userData.place === "desk",
               hitDeskSurface: center.hitDeskSurface,
               deskPoint: center.deskPoint,

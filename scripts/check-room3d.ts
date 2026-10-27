@@ -675,6 +675,14 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     "placed data books must expose solid-body collision boxes");
   assert.match(shelfDecorSource, /registerCollider/,
     "instanced and individual shelf decor must expose physical bounds");
+  assert.match(shelfDecorSource, /instanceCardIds/,
+    "decorative bookshelf instances must map ray hits to transient blank-book IDs");
+  assert.match(cameraRigSource, /intersection\.instanceId/,
+    "the room raycaster must resolve per-instance blank-book identities");
+  assert.match(book3DSource, /makeBlankDecorBook/,
+    "held and desk blank books must keep the decorative-book model");
+  assert.match(book3DSource, /makeBookLabel/,
+    "written-book spine text rendering remains on the existing label path");
   assert.match(cameraRigSource, /hasWalkableSupport/,
     "an unsupported player must start falling even when standing still");
   assert.match(cameraRigSource, /floorHeightBelow[\s\S]{0,180}sceneCollidersRef\.current/,

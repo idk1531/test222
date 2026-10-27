@@ -601,6 +601,21 @@ export const actions = {
     }));
   },
 
+  /** Keep a written book's decorative appearance and the blank shelf slot it came from. */
+  setBookDecor(cardId: string, decor: { decorSourceId: string; decorColor: string }) {
+    setState((s) => ({
+      ...s,
+      studyBooks: s.studyBooks.map((book) => book.cardId === cardId
+        ? {
+            ...book,
+            decorSourceId: decor.decorSourceId,
+            decorColor: decor.decorColor,
+            updatedAt: new Date().toISOString(),
+          }
+        : book),
+    }));
+  },
+
   /** 確保每張卡都有對應書本（缺則補建；1:1 檢查的安全網） */
   ensureBookForCard(cardId: string) {
     setState((s) => {

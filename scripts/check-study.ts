@@ -13,6 +13,15 @@ import {
 import { DEFAULT_CAMERA, clampCamera, ensureStudyState, makeBookForCard, UNCATEGORIZED_ID, UNCATEGORIZED_NAME } from "../src/lib/study";
 import { computeShelfLayout } from "../src/lib/room3d";
 import { resolveAction } from "../src/lib/roomActions";
+import {
+  blankBookCardId,
+  getBlankBookDraftContext,
+  hasWrittenCardContent,
+  isBlankBookId,
+  makeBlankBookDraft,
+  persistBlankBookDraft,
+} from "../src/lib/blankBooks";
+import { makeShelfDecorBooks } from "../src/lib/shelfDecorBooks";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -92,6 +101,63 @@ console.log("v8.4 書本落點選填欄位");
   assert.deepEqual(getState().studyLayout.camera, cameraBefore);
   assert.deepEqual(getState().canvasObjects.map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height })), canvasBefore);
   check("桌上開卡契約：camera/canvasObjects deep-equal 且 workMode=false", !workMode);
+  resetToSeed();
+}
+
+// ---------- 書架裝飾書：空書可互動，但只有寫入內容才進持久資料 ----------
+console.log("書架空書與首次寫入持久化");
+{
+  resetToSeed();
+  const before = getState();
+  const layout = computeShelfLayout(before.studyCategories, before.studyBooks, before.cards, () => "#6d5a45");
+  const decorBooks = makeShelfDecorBooks(layout);
+  const repeatedDecorBooks = makeShelfDecorBooks(layout);
+  check("裝飾空書 ID／外觀在重建時穩定", JSON.stringify(decorBooks) === JSON.stringify(repeatedDecorBooks));
+  check("主書架與檯面裝飾書皆有唯一互動 ID", decorBooks.length > 0 && new Set(decorBooks.map((book) => book.id)).size === decorBooks.length);
+
+  const firstDecorBook = decorBooks[0];
+  const blankId = blankBookCardId(firstDecorBook.id);
+  const context = {
+    blankBookId: blankId,
+    place: "desk" as const,
+    desk: { x: 0, z: -1.92, yawDeg: 30 },
+    categoryId: null,
+    orderInShelf: 0,
+    decorColor: firstDecorBook.color,
+  };
+  const emptyDraft = makeBlankBookDraft(before.workspace.id, context);
+  const stateBeforeEmptySave = JSON.stringify({ cards: getState().cards, books: getState().studyBooks, objects: getState().canvasObjects });
+  check("空白草稿不含書寫內容", !hasWrittenCardContent(emptyDraft));
+  check("只有形狀／分類等 metadata 不算寫入", !hasWrittenCardContent({ ...emptyDraft, reasoningShape: "C", cardFont: "serif" }));
+  check("空白草稿附帶非持久化來源位置", getBlankBookDraftContext(emptyDraft)?.blankBookId === blankId);
+  check("空白書卡片 ID 可辨識但不加入 store", isBlankBookId(blankId) && persistBlankBookDraft(emptyDraft) === null &&
+    JSON.stringify({ cards: getState().cards, books: getState().studyBooks, objects: getState().canvasObjects }) === stateBeforeEmptySave);
+
+  const writtenDraft = { ...emptyDraft, title: "只在首次寫入後保存" };
+  const createdId = persistBlankBookDraft(writtenDraft, { x: 321, y: 234 });
+  const writtenCard = getState().cards.find((card) => card.id === createdId);
+  const writtenBook = getState().studyBooks.find((book) => book.cardId === createdId);
+  const writtenNode = getState().canvasObjects.find((object) => object.cardId === createdId);
+  check("標題文字足以觸發首次保存", hasWrittenCardContent(writtenDraft) && !!createdId && writtenCard?.title === writtenDraft.title);
+  check("寫入後書本保留裝飾來源色與空書槽 ID", writtenBook?.decorColor === firstDecorBook.color && writtenBook.decorSourceId === blankId);
+  check("寫入後沿用空書桌面位置並建立對應畫布卡片", writtenBook?.place === "desk" && writtenBook.desk?.yawDeg === 30 && writtenNode?.x === 321 && writtenNode?.y === 234);
+  check("持久卡片不殘留暫存空書草稿資料", !!writtenCard && !Object.prototype.hasOwnProperty.call(writtenCard, "__blankBookDraft"));
+  const migratedWrittenState = ensureStudyState({
+    cards: getState().cards,
+    studyBooks: getState().studyBooks,
+    studyCategories: getState().studyCategories,
+  } as any);
+  const migratedWrittenBook = migratedWrittenState.studyBooks.find((book: any) => book.cardId === createdId);
+  check("重新載入遷移保留裝飾色與空書槽關聯", migratedWrittenBook?.decorColor === firstDecorBook.color && migratedWrittenBook.decorSourceId === blankId);
+  const openAction = resolveAction("book", "click", {
+    mode: "room", flying: false, held: null, seated: false, bookOnDesk: false,
+    hitDeskSurface: false, seatedCanStand: true, cardId: blankId,
+  });
+  check("裝飾空書仍共用點擊開卡與 E 拿書 action", openAction.type === "openCard" && openAction.cardId === blankId &&
+    resolveAction("book", "KeyE", {
+      mode: "room", flying: false, held: null, seated: false, bookOnDesk: false,
+      hitDeskSurface: false, seatedCanStand: true, cardId: blankId,
+    }).type === "pickUp");
   resetToSeed();
 }
 

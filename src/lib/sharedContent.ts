@@ -135,6 +135,10 @@ function isValidSharedEntity(collection: SharedCollection, id: string, value: Re
     if (typeof value.orderInShelf !== "number" || !Number.isFinite(value.orderInShelf)) return false;
     if (value.place !== undefined && value.place !== "shelf" && value.place !== "desk") return false;
     if (value.spineColor !== undefined && typeof value.spineColor !== "string") return false;
+    if (value.decorColor !== undefined && (
+      typeof value.decorColor !== "string" || !/^#?[0-9a-f]{6}$/i.test(value.decorColor)
+    )) return false;
+    if (value.decorSourceId !== undefined && !isSafeString(value.decorSourceId)) return false;
     if (value.desk !== undefined) {
       if (!isRecord(value.desk)
         || typeof value.desk.x !== "number" || !Number.isFinite(value.desk.x)

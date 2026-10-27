@@ -5,6 +5,7 @@ import * as THREE from "three";
 import {
   canvasSizeForPlane,
   CATEGORY_LABEL_PLANE,
+  DESK,
   heldCoverPlaneSize,
   makeColliderBox,
   SHELF,
@@ -15,6 +16,8 @@ import {
 } from "@/lib/room3d";
 import { canvasCJKFont, ensureCanvasCJKFont } from "@/lib/fonts";
 import type { ShelfLayout, ShelfBookPlacement } from "@/lib/room3d";
+import type { StudyDeskPosition } from "@/lib/study";
+import type { ShelfDecorBook } from "@/lib/shelfDecorBooks";
 import type { StudySceneApi } from "./StudyScene";
 
 interface SpineTextureEntry {
@@ -294,8 +297,69 @@ function materialFor(hex: string): THREE.MeshStandardMaterial {
   });
 }
 
+/** Render one transient empty book using the same plain-box look as ShelfDecor. */
+export function makeBlankDecorBook(
+  source: ShelfDecorBook,
+  cardId: string,
+  position: { x: number; y: number; z: number; yawDeg?: number },
+  place: "desk" | "held",
+): THREE.Group {
+  const group = new THREE.Group();
+  group.name = `blank-book-${cardId}`;
+  group.position.set(position.x, position.y, position.z);
+  group.userData.kind = place === "held" ? "heldBook" : "book";
+  group.userData.cardId = cardId;
+  group.userData.place = place;
+
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(source.sx, source.sy, source.sz),
+    materialFor(source.color),
+  );
+  body.castShadow = true;
+  body.receiveShadow = true;
+  body.userData.kind = "book";
+  body.userData.cardId = cardId;
+  body.userData.place = place;
+  group.add(body);
+
+  if (place === "desk") {
+    const proxy = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        Math.max(source.sx, 0.13) * 1.12,
+        Math.max(source.sy, 0.075) * 1.14,
+        Math.max(source.sz, 0.06) * 1.5,
+      ),
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        colorWrite: false,
+      }),
+    );
+    proxy.userData.kind = "book";
+    proxy.userData.cardId = cardId;
+    proxy.userData.place = place;
+    proxy.castShadow = false;
+    proxy.receiveShadow = false;
+    group.add(proxy);
+  }
+
+  const yaw = THREE.MathUtils.degToRad(position.yawDeg ?? THREE.MathUtils.radToDeg(source.ry));
+  const yawRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+  const layFlat = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0),
+    place === "desk" && source.sy > 0.05 ? -Math.PI / 2 : 0,
+  );
+  group.quaternion.copy(yawRotation).multiply(layFlat);
+  if (place === "held") {
+    const largestSide = Math.max(source.sx, source.sy, source.sz, 0.01);
+    group.scale.setScalar(0.22 / largestSide);
+  }
+  return group;
+}
+
 /**
- * 看不見但可 raycast 的放大命中盒：資料書混在裝飾書中，沒有它手指／準心幾乎點不到。
+ * 看不見但可 raycast 的放大命中盒：資料書混在裝飾書中，沒有它手指／準心幾乎點不到。"}
  * （透明材質仍會被 Raycaster 命中；visible=false 則不會。）
  */
 export function addPickProxy(
@@ -333,12 +397,10 @@ export function makeBook(placement: ShelfBookPlacement, title: string, place: "s
   const d = Math.max(0.12, placement.height);
   const t = placement.thickness;
   const depth = 0.18;
-  const spineMat = materialFor(placement.spineHex);
   const coverMat = materialFor(placement.spineHex);
-  const pageMat = new THREE.MeshStandardMaterial({ color: "#f3ead5", roughness: 0.98 });
-  const shapeMat = materialFor(placement.shapeHex);
-  const book = new THREE.Mesh(new THREE.BoxGeometry(depth, d, t), [pageMat, pageMat, pageMat, pageMat, spineMat, coverMat]);
-  // 材質索引由 BoxGeometry 順序決定；面向室內的 X− 側使用書脊色。
+  // Written books now use the same clean, single-color block as shelf decor; the existing paper
+  // title label below remains unchanged and continues to expose the written text.
+  const book = new THREE.Mesh(new THREE.BoxGeometry(depth, d, t), coverMat);
   book.castShadow = true;
   book.receiveShadow = true;
   book.userData.kind = "book";
@@ -400,12 +462,6 @@ export function makeBook(placement: ShelfBookPlacement, title: string, place: "s
     stripe.userData.place = place;
     g.add(stripe);
   }
-  const foot = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.012, t * 0.8), shapeMat);
-  foot.position.set((-depth / 2 - 0.005) * SHELF.wallSign, -d * 0.46, 0);
-  foot.userData.kind = "book";
-  foot.userData.cardId = placement.cardId;
-  foot.userData.place = place;
-  g.add(foot);
   addPickProxy(g, placement, place);
   return g;
 }
@@ -454,14 +510,21 @@ export interface DeskBookModel {
   yawDeg: number;
 }
 
-/** 3D 書脊/桌上書 meshes；每本書以 userData.cardId 導回唯一筆記卡。 */
+export interface DeskBlankBookModel {
+  cardId: string;
+  book: ShelfDecorBook;
+  desk: StudyDeskPosition;
+}
+
+/** 3D 書脊/桌上書 meshes；每本已寫入書以 cardId 導回筆記卡，空書仍只用瞬態 ID。 */
 export const Book3D: React.FC<{
   api: StudySceneApi;
   layout: ShelfLayout;
   deskBooks: DeskBookModel[];
+  deskBlankBooks: DeskBlankBookModel[];
   heldCardId: string | null;
   titleOf: (id: string) => string;
-}> = ({ api, layout, deskBooks, heldCardId, titleOf }) => {
+}> = ({ api, layout, deskBooks, deskBlankBooks, heldCardId, titleOf }) => {
   useEffect(() => {
     let cancelled = false;
     let attached = false;
@@ -559,6 +622,19 @@ export const Book3D: React.FC<{
         trackBookMaterials(book);
         group?.add(book);
       });
+      deskBlankBooks.forEach(({ cardId, book: source, desk }) => {
+        if (cardId === heldCardId) return;
+        const thickness = source.sy <= 0.05 ? source.sy : source.sz;
+        const book = makeBlankDecorBook(source, cardId, {
+          x: desk.x,
+          y: DESK.top + thickness / 2 + 0.002,
+          z: desk.z,
+          yawDeg: desk.yawDeg,
+        }, "desk");
+        registerBookCollision(book);
+        trackBookMaterials(book);
+        group?.add(book);
+      });
       if (cancelled) {
         disposeGroup();
         return;
@@ -573,6 +649,6 @@ export const Book3D: React.FC<{
       cancelled = true;
       disposeGroup();
     };
-  }, [api, layout, deskBooks, heldCardId, titleOf]);
+  }, [api, layout, deskBooks, deskBlankBooks, heldCardId, titleOf]);
   return null;
 };

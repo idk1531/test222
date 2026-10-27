@@ -179,6 +179,20 @@ test("shared operation parser validates entity keys, actions, versions, and mess
   assert.deepEqual(shared.parseSharedContentMessage(JSON.stringify(valid)), valid);
   assert.equal(shared.parseSharedContentMessage(JSON.stringify({
     ...valid,
+    operations: [{
+      ...valid.operations[0],
+      value: { ...valid.operations[0].value, decorColor: "not-a-color" },
+    }],
+  })), null);
+  assert.equal(shared.parseSharedContentMessage(JSON.stringify({
+    ...valid,
+    operations: [{
+      ...valid.operations[0],
+      value: { ...valid.operations[0].value, decorSourceId: "" },
+    }],
+  })), null);
+  assert.equal(shared.parseSharedContentMessage(JSON.stringify({
+    ...valid,
     operations: [{ ...valid.operations[0], value: { cardId: "another-card" } }],
   })), null);
   assert.equal(shared.parseSharedContentMessage(JSON.stringify({
@@ -338,6 +352,8 @@ test("owner and editor merge initial books/cards, then sync edits, moves, orderi
       orderInShelf: 2,
       place: "desk",
       desk: { x: 1.5, z: -0.5, yawDeg: 35 },
+      decorSourceId: "blank-book:decor-source",
+      decorColor: "#6d5a45",
     } : book),
     studyCategories: [...state.studyCategories, { id: "cat-new", name: "Physics", order: 0, color: "#123456" }],
   }));
@@ -351,6 +367,8 @@ test("owner and editor merge initial books/cards, then sync edits, moves, orderi
     assert.equal(store.getState().studyBooks.find((book) => book.cardId === "card-host").categoryId, "cat-new");
     assert.equal(store.getState().studyBooks.find((book) => book.cardId === "card-host").place, "desk");
     assert.deepEqual(store.getState().studyBooks.find((book) => book.cardId === "card-host").desk, { x: 1.5, z: -0.5, yawDeg: 35 });
+    assert.equal(store.getState().studyBooks.find((book) => book.cardId === "card-host").decorSourceId, "blank-book:decor-source");
+    assert.equal(store.getState().studyBooks.find((book) => book.cardId === "card-host").decorColor, "#6d5a45");
     assert.equal(store.getState().studyCategories.some((category) => category.id === "cat-new"), true);
   }
 

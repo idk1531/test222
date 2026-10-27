@@ -20,6 +20,14 @@ import { Joystick, type JoystickVector } from "./Joystick";
 import { StudyCategoryPanel } from "./StudyCategoryPanel";
 import type { InfiniteCanvasProps } from "./InfiniteCanvas";
 import type { CardData } from "./KnowledgeCardNode";
+import {
+  BLANK_BOOK_WRITTEN_EVENT,
+  blankBookCardId,
+  isBlankBookId,
+  makeBlankBookDraft,
+  type BlankBookWrittenEventDetail,
+} from "@/lib/blankBooks";
+import { decorBookColorForId, makeShelfDecorBooks, type ShelfDecorBook } from "@/lib/shelfDecorBooks";
 import { useWorkspaceState, actions } from "@/lib/store";
 import { useCollaboration } from "@/components/CollaborationProvider";
 import {
@@ -34,7 +42,15 @@ import {
   type ShelfBookPlacement,
   type ViewMode,
 } from "@/lib/room3d";
-import { DEFAULT_CAMERA, resolveSpineColor, desaturateColor, type StudyCamera, type StudyBookLayout } from "@/lib/study";
+import {
+  DEFAULT_CAMERA,
+  UNCATEGORIZED_ID,
+  resolveSpineColor,
+  desaturateColor,
+  type StudyCamera,
+  type StudyBookLayout,
+  type StudyDeskPosition,
+} from "@/lib/study";
 import type { RoomAction } from "@/lib/roomActions";
 
 export type StudyRoomViewProps = Omit<InfiniteCanvasProps, "backgroundConfig" | "apiRef"> & {
@@ -46,6 +62,21 @@ interface BookPreview {
   x: number;
   y: number;
   from: "shelf" | "desk";
+}
+
+interface BlankBookShelfContext {
+  categoryId: string | null;
+  orderInShelf: number;
+}
+
+interface BlankBookInstance {
+  cardId: string;
+  book: ShelfDecorBook;
+  shelfContext: BlankBookShelfContext;
+}
+
+interface BlankDeskBook extends BlankBookInstance {
+  desk: StudyDeskPosition;
 }
 
 const HIDDEN_REMOTE_POSE: PlayerPose = {
@@ -70,6 +101,7 @@ const HIDDEN_REMOTE_POSE: PlayerPose = {
  * HUD/搖桿/預覽一律 [data-no-orbit]，WASD 對輸入框/IME 不作用。
  */
 export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
+  const { onOpenCardDetail } = props;
   const state = useWorkspaceState();
   const { snapshot: collaborationSnapshot, localRole, remoteParticipant, remotePoseRef, publishPose } = useCollaboration();
   const [quality] = useState<SceneQuality>(() => detectQuality());
@@ -91,6 +123,8 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   const [showCatalog, setShowCatalog] = useState(false);
   const [previewSnapshot, setPreview] = useState<BookPreview | null>(null);
   const [heldCardId, setHeldCardId] = useState<string | null>(null);
+  const [heldBlankBook, setHeldBlankBook] = useState<BlankBookInstance | null>(null);
+  const [blankDeskBooks, setBlankDeskBooks] = useState<BlankDeskBook[]>([]);
   const [seated, setSeated] = useState(false);
   const [chairInTrigger, setChairInTrigger] = useState(false);
   const [pointerLocked, setPointerLocked] = useState(false);
@@ -139,6 +173,19 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   useEffect(() => () => {
     if (hintTimeoutRef.current !== null) window.clearTimeout(hintTimeoutRef.current);
   }, []);
+  useEffect(() => {
+    const handleBlankBookWritten = (event: Event) => {
+      const detail = (event as CustomEvent<BlankBookWrittenEventDetail>).detail;
+      if (!detail?.blankBookId) return;
+      setBlankDeskBooks((current) => current.filter((entry) => entry.cardId !== detail.blankBookId));
+      if (interactionRef.current.heldCardId === detail.blankBookId) {
+        setHeldBlankBook(null);
+        setHeldTransient(null);
+      }
+    };
+    window.addEventListener(BLANK_BOOK_WRITTEN_EVENT, handleBlankBookWritten);
+    return () => window.removeEventListener(BLANK_BOOK_WRITTEN_EVENT, handleBlankBookWritten);
+  }, [setHeldTransient]);
 
   const accentOf = useCallback((cardId: string) => {
     const object = state.canvasObjects.find((o: any) => o.cardId === cardId);
@@ -148,8 +195,14 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     state.studyCategories,
     state.studyBooks,
     state.cards as CardData[],
-    (book, card) => desaturateColor(resolveSpineColor(book, accentOf(card.id), card.reasoningShape), 0.4)
-  ), [state.studyCategories, state.studyBooks, state.cards, accentOf]);
+    (book, card) => book.decorColor || decorBookColorForId(card.id)
+  ), [state.studyCategories, state.studyBooks, state.cards]);
+  const blankShelfBooks = useMemo(() => makeShelfDecorBooks(layout), [layout]);
+  const hiddenBlankBookIds = useMemo(() => [
+    ...state.studyBooks.flatMap((book) => book.decorSourceId ? [book.decorSourceId] : []),
+    ...blankDeskBooks.map((book) => book.cardId),
+    ...(heldCardId && isBlankBookId(heldCardId) ? [heldCardId] : []),
+  ], [blankDeskBooks, heldCardId, state.studyBooks]);
 
   // Keep preview content anchored to IDs, never a stale copy of store data.
   const previewCard = previewSnapshot
@@ -192,6 +245,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
 
   const handleEnterWork = useCallback(() => {
     setHeldTransient(null);
+    setHeldBlankBook(null);
     setWorkMode(true);
     const target = pendingFocusRef.current;
     if (target) {
@@ -234,14 +288,14 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     }
   }, [publishPose]);
 
-  const handleOpenCard = (card: CardData) => {
+  const handleOpenCard = useCallback((card: CardData) => {
     setPreview(null);
     sceneApiRef.current?.setActive(false);
-    props.onOpenCardDetail(card);
-  };
+    onOpenCardDetail(card);
+  }, [onOpenCardDetail]);
 
   const titleOf = useCallback((id: string) =>
-    (state.cards as CardData[]).find((c) => c.id === id)?.title || "（未命名）",
+    isBlankBookId(id) ? "空白書" : (state.cards as CardData[]).find((c) => c.id === id)?.title || "（未命名）",
   [state.cards]);
 
   const buildBookPlacement = useCallback((
@@ -255,14 +309,68 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     return {
       cardId: book.cardId,
       categoryId: book.categoryId,
-      spineHex: desaturateColor(resolveSpineColor(book, accentOf(card.id), card.reasoningShape), 0.4),
+      spineHex: book.decorColor || decorBookColorForId(card.id),
       categoryHex,
       shapeHex: resolveSpineColor(undefined, undefined, card.reasoningShape),
       thickness: dims.thickness,
       height: dims.height,
       ...position,
     };
-  }, [accentOf, state.studyCategories]);
+  }, [state.studyCategories]);
+
+  const shelfContextForBlankBook = useCallback((decorBook: ShelfDecorBook): BlankBookShelfContext => {
+    if (decorBook.plankIndex < 0) {
+      return {
+        categoryId: null,
+        orderInShelf: state.studyBooks.filter((book) => !book.categoryId).length,
+      };
+    }
+    const row = layout.rows.find((entry) => entry.plankIndex === decorBook.plankIndex);
+    const boards = row?.boards ?? [];
+    if (!boards.length) {
+      return {
+        categoryId: null,
+        orderInShelf: state.studyBooks.filter((book) => !book.categoryId).length,
+      };
+    }
+    const distanceToBoard = (board: (typeof boards)[number]) =>
+      decorBook.z < board.z0 ? board.z0 - decorBook.z
+        : decorBook.z > board.z1 ? decorBook.z - board.z1
+        : 0;
+    const board = boards.find((entry) => distanceToBoard(entry) === 0)
+      ?? [...boards].sort((left, right) => distanceToBoard(left) - distanceToBoard(right))[0];
+    const orderedBooks = [...board.books].sort((left, right) => left.z - right.z);
+    const insertionIndex = orderedBooks.findIndex((book) => book.z > decorBook.z);
+    return {
+      categoryId: board.category.id === UNCATEGORIZED_ID ? null : board.category.id,
+      orderInShelf: insertionIndex < 0 ? orderedBooks.length : insertionIndex,
+    };
+  }, [layout.rows, state.studyBooks]);
+
+  const findBlankBookInstance = useCallback((cardId: string): BlankBookInstance | null => {
+    const placed = blankDeskBooks.find((entry) => entry.cardId === cardId);
+    if (placed) return { cardId, book: placed.book, shelfContext: placed.shelfContext };
+    const decorBook = blankShelfBooks.find((entry) => blankBookCardId(entry.id) === cardId);
+    return decorBook
+      ? { cardId, book: decorBook, shelfContext: shelfContextForBlankBook(decorBook) }
+      : null;
+  }, [blankDeskBooks, blankShelfBooks, shelfContextForBlankBook]);
+
+  const openBlankBook = useCallback((cardId: string) => {
+    const instance = findBlankBookInstance(cardId);
+    if (!instance) return false;
+    const onDesk = blankDeskBooks.find((entry) => entry.cardId === cardId);
+    const draft = makeBlankBookDraft(state.workspace.id, {
+      blankBookId: cardId,
+      place: onDesk ? "desk" : "shelf",
+      ...(onDesk ? { desk: onDesk.desk } : {}),
+      categoryId: instance.shelfContext.categoryId,
+      orderInShelf: instance.shelfContext.orderInShelf,
+      decorColor: instance.book.color,
+    });
+    handleOpenCard(draft);
+    return true;
+  }, [blankDeskBooks, findBlankBookInstance, handleOpenCard, state.workspace.id]);
 
   const deskBookModels = useMemo<DeskBookModel[]>(() => state.studyBooks.flatMap((book) => {
     if (book.place !== "desk" || !book.desk) return [];
@@ -287,6 +395,10 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
   }, [heldCardId, state.studyBooks, state.cards, buildBookPlacement]);
 
   const openBookPreview = (cardId: string) => {
+    if (isBlankBookId(cardId)) {
+      openBlankBook(cardId);
+      return;
+    }
     const card = (state.cards as CardData[]).find((c) => c.id === cardId);
     const book = state.studyBooks.find((entry) => entry.cardId === cardId);
     const api = sceneApiRef.current;
@@ -315,23 +427,57 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     }
     // Both shelf/desk sources stop at CardDetailModal; this path never flies or focuses the canvas.
     if (action.type === "openCard") {
-      const card = (state.cards as CardData[]).find((entry) => entry.id === action.cardId);
-      if (card) handleOpenCard(card);
+      if (isBlankBookId(action.cardId)) {
+        openBlankBook(action.cardId);
+      } else {
+        const card = (state.cards as CardData[]).find((entry) => entry.id === action.cardId);
+        if (card) handleOpenCard(card);
+      }
     } else if (action.type === "openPreview") {
       openBookPreview(action.cardId);
     } else if (action.type === "pickUp") {
+      if (isBlankBookId(action.cardId)) {
+        const blankBook = findBlankBookInstance(action.cardId);
+        if (!blankBook) {
+          showRoomHint("這本空書暫時無法拿取");
+          return;
+        }
+        setHeldBlankBook(blankBook);
+        setBlankDeskBooks((current) => current.filter((entry) => entry.cardId !== action.cardId));
+      } else {
+        setHeldBlankBook(null);
+      }
       setHeldTransient(action.cardId);
       setPreview(null);
     } else if (action.type === "putOnDesk") {
       const cardId = interactionRef.current.heldCardId;
       if (!cardId) return;
-      actions.setBookPlace(cardId, "desk", { x: action.x, z: action.z, yawDeg: action.yawDeg });
+      const desk = { x: action.x, z: action.z, yawDeg: action.yawDeg };
+      if (isBlankBookId(cardId)) {
+        const blankBook = heldBlankBook ?? findBlankBookInstance(cardId);
+        if (!blankBook) {
+          showRoomHint("這本空書暫時無法放置");
+          return;
+        }
+        setBlankDeskBooks((current) => [
+          ...current.filter((entry) => entry.cardId !== cardId),
+          { ...blankBook, desk },
+        ]);
+        setHeldBlankBook(null);
+      } else {
+        actions.setBookPlace(cardId, "desk", desk);
+      }
       setHeldTransient(null);
       showRoomHint("已放到桌面");
     } else if (action.type === "returnToShelf") {
       const cardId = interactionRef.current.heldCardId;
       if (!cardId) return;
-      actions.setBookPlace(cardId, "shelf");
+      if (isBlankBookId(cardId)) {
+        setBlankDeskBooks((current) => current.filter((entry) => entry.cardId !== cardId));
+        setHeldBlankBook(null);
+      } else {
+        actions.setBookPlace(cardId, "shelf");
+      }
       setHeldTransient(null);
       showRoomHint("已放回書架");
     } else if (action.type === "enterWorkView") {
@@ -339,6 +485,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
       if (document.pointerLockElement) document.exitPointerLock();
       // Work view never inherits a transient hand-held prop; the stored book placement is untouched.
       setHeldTransient(null);
+      setHeldBlankBook(null);
       setPreview(null);
       setShowCatalog(false);
       setShowCategoryPanel(false);
@@ -356,6 +503,7 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     if (document.pointerLockElement) document.exitPointerLock();
     pendingFocusRef.current = cardId;
     setHeldTransient(null);
+    setHeldBlankBook(null);
     setPreview(null);
     setShowCatalog(false);
     rigRef.current?.enterWorkView();
@@ -389,9 +537,24 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
                 />
                 <NestedCityGeometry api={api} whiteModel={whiteModel} />
                 <WindowLight api={api} />
-                <Book3D api={api} layout={layout} deskBooks={deskBookModels} heldCardId={heldCardId} titleOf={titleOf} />
-                <HeldBook api={api} cardId={heldCardId} placement={heldBookPlacement} title={titleOf(heldCardId || "")} viewMode={viewMode} playerRef={playerRef} />
-                <ShelfDecor api={api} layout={layout} />
+                <Book3D
+                  api={api}
+                  layout={layout}
+                  deskBooks={deskBookModels}
+                  deskBlankBooks={blankDeskBooks}
+                  heldCardId={heldCardId}
+                  titleOf={titleOf}
+                />
+                <HeldBook
+                  api={api}
+                  cardId={heldCardId}
+                  placement={heldBookPlacement}
+                  blankBook={heldBlankBook?.book}
+                  title={titleOf(heldCardId || "")}
+                  viewMode={viewMode}
+                  playerRef={playerRef}
+                />
+                <ShelfDecor api={api} layout={layout} hiddenBlankBookIds={hiddenBlankBookIds} />
                 <RoomFurniture api={api} chairRigRef={chairRigRef} />
                 <VoxelCharacter api={api} playerRef={playerRef} viewMode={viewMode} />
                 {collaborationSnapshot.phase === "open" && remoteParticipant && (
