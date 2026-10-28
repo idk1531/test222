@@ -22,6 +22,7 @@ import {
   persistBlankBookDraft,
 } from "../src/lib/blankBooks";
 import { makeShelfDecorBooks } from "../src/lib/shelfDecorBooks";
+import { makeNestedWallShelfDecorBooks } from "../src/lib/wallShelfBooks";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
@@ -158,6 +159,45 @@ console.log("書架空書與首次寫入持久化");
       mode: "room", flying: false, held: null, seated: false, bookOnDesk: false,
       hitDeskSurface: false, seatedCanStand: true, cardId: blankId,
     }).type === "pickUp");
+
+  const wallDecorBooks = makeNestedWallShelfDecorBooks();
+  const repeatedWallBooks = makeNestedWallShelfDecorBooks();
+  check("多層牆架空書有穩定且唯一的來源 ID", wallDecorBooks.length > 0 &&
+    new Set(wallDecorBooks.map((book) => book.id)).size === wallDecorBooks.length &&
+    wallDecorBooks[0].id === repeatedWallBooks[0].id &&
+    wallDecorBooks.at(-1)?.id === repeatedWallBooks.at(-1)?.id);
+  check("牆架空書涵蓋 BC／AD 與所有樓層", new Set(wallDecorBooks.map((book) => book.wallId)).size === 2 &&
+    new Set(wallDecorBooks.map((book) => book.floorY)).size === 4);
+
+  const firstWallBook = wallDecorBooks[0];
+  const wallBlankId = blankBookCardId(firstWallBook.id);
+  const wallDraft = makeBlankBookDraft(before.workspace.id, {
+    blankBookId: wallBlankId,
+    place: "shelf",
+    categoryId: null,
+    orderInShelf: 0,
+    decorColor: firstWallBook.color,
+  });
+  const stateBeforeWallEmptySave = JSON.stringify({ cards: getState().cards, books: getState().studyBooks, objects: getState().canvasObjects });
+  const wallOpenAction = resolveAction("book", "click", {
+    mode: "room", flying: false, held: null, seated: false, bookOnDesk: false,
+    hitDeskSurface: false, seatedCanStand: true, cardId: wallBlankId,
+  });
+  const wallPickAction = resolveAction("book", "KeyE", {
+    mode: "room", flying: false, held: null, seated: false, bookOnDesk: false,
+    hitDeskSurface: false, seatedCanStand: true, cardId: wallBlankId,
+  });
+  check("多層牆架空書共用點擊開卡與 E 拿取流程", isBlankBookId(wallBlankId) &&
+    wallOpenAction.type === "openCard" && wallOpenAction.cardId === wallBlankId &&
+    wallPickAction.type === "pickUp" && wallPickAction.cardId === wallBlankId);
+  check("未寫入的牆架空白草稿不持久化", persistBlankBookDraft(wallDraft) === null &&
+    JSON.stringify({ cards: getState().cards, books: getState().studyBooks, objects: getState().canvasObjects }) === stateBeforeWallEmptySave);
+  const writtenWallDraft = { ...wallDraft, body: "牆架空書首次寫入" };
+  const writtenWallId = persistBlankBookDraft(writtenWallDraft);
+  const writtenWallBook = getState().studyBooks.find((book) => book.cardId === writtenWallId);
+  check("牆架空書只有寫入後才建立持久卡片與書本", !!writtenWallId &&
+    getState().cards.some((card) => card.id === writtenWallId) && writtenWallBook?.decorSourceId === wallBlankId &&
+    writtenWallBook?.decorColor === firstWallBook.color);
   resetToSeed();
 }
 

@@ -19,6 +19,7 @@ import { DEFAULT_CAMERA } from "../src/lib/study";
 import { canvasCJKFont } from "../src/lib/fonts";
 import { CHARACTER, characterAnim } from "../src/lib/character";
 import { resolveAction, type HitKind, type InputKey, type RoomAction, type RoomActionCtx } from "../src/lib/roomActions";
+import { makeNestedWallShelfDecorBooks } from "../src/lib/wallShelfBooks";
 
 const edge = clampRoomPosition(100, -100);
 assert.ok(isCityPointInsidePolygon(edge, NESTED_CITY.trapezoid.walkableFootprint),
@@ -40,6 +41,19 @@ assert.deepEqual(nestedCityFloorLabel(8), { full: "3F · 8 m", compact: "3F" });
 assert.deepEqual(nestedCityFloorLabel(12), { full: "4F · 12 m", compact: "4F" });
 assert.deepEqual(nestedCityFloorLabel(2), { full: "樓層間", compact: "樓層間" });
 assert.deepEqual(nestedCityFloorLabel(Number.NaN), { full: "位置未知", compact: "未知" });
+
+const nestedWallBooks = makeNestedWallShelfDecorBooks();
+const nestedWallBooksRepeated = makeNestedWallShelfDecorBooks();
+assert.ok(nestedWallBooks.length > 0, "multi-level side-wall shelving must provide interactive blank books");
+assert.equal(new Set(nestedWallBooks.map((book) => book.id)).size, nestedWallBooks.length,
+  "wall blank-book source IDs must be unique for raycast and persistence mapping");
+assert.deepEqual(new Set(nestedWallBooks.map((book) => book.wallId)), new Set(["BC", "AD"]));
+assert.deepEqual(new Set(nestedWallBooks.map((book) => book.floorY)), new Set(NESTED_CITY.levels));
+assert.deepEqual(
+  [nestedWallBooks[0].id, nestedWallBooks.at(-1)?.id],
+  [nestedWallBooksRepeated[0].id, nestedWallBooksRepeated.at(-1)?.id],
+  "wall blank-book transforms must keep stable IDs across scene rebuilds",
+);
 
 // Trapezoid envelope and complete four-sided corridor rings (coordinates are X/Z in metres).
 {
@@ -651,8 +665,20 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   assert.match(nestedCitySource, /layout\.galleryInnerEdges/);
   assert.match(nestedCitySource, /layout\.galleryOuterEdges/);
   assert.match(nestedCitySource, /addSideBookshelves/);
-  assert.match(nestedCitySource, /SHELF_DECOR_BOOK_COLORS/,
-    "multi-level wall bookcases must use the same muted decorative book palette as the main shelf");
+  const wallShelfBooksSource = fs.readFileSync(path.join(process.cwd(), "src/lib/wallShelfBooks.ts"), "utf8");
+  assert.match(wallShelfBooksSource, /SHELF_DECOR_BOOK_COLORS/,
+    "multi-level wall books must use the same muted decorative book palette as the main shelf");
+  assert.match(nestedCitySource, /instanceCardIds/,
+    "instanced wall books must map ray hits to transient blank-book IDs");
+  assert.match(nestedCitySource, /instanced-wall-shelf-blank-books/);
+  assert.match(nestedCitySource, /hiddenBlankBookIds/,
+    "picked-up, desk-placed, or written wall blanks must hide without rebuilding the nested scene");
+  assert.match(nestedCitySource, /wallBookMeshRef/,
+    "wall blank visibility must update on the existing instanced mesh");
+  assert.match(nestedCitySource, /useLayoutEffect\(\(\) => \{[\s\S]{0,300}applyHiddenWallBooks/,
+    "wall-source visibility changes must apply before paint");
+  assert.match(nestedCitySource, /\}, \[api, structureOnly, wallDecorBooks, whiteModel\]\);/,
+    "transient hidden-book IDs must not rebuild the multi-level scene");
   assert.match(nestedCitySource, /LOOK\.shelfWood[\s\S]{0,500}LOOK\.shelfBack/,
     "multi-level wall bookcases must share the main shelf walnut and stone finishes");
   assert.match(nestedCitySource, /warm-bookshelf-light-wash/,
@@ -673,6 +699,7 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   const book3DSource = fs.readFileSync(path.join(process.cwd(), "src/components/Book3D.tsx"), "utf8");
   const shelfDecorSource = fs.readFileSync(path.join(process.cwd(), "src/components/ShelfDecor.tsx"), "utf8");
   const cameraRigSource = fs.readFileSync(path.join(process.cwd(), "src/components/CameraRig.tsx"), "utf8");
+  const studyRoomSource = fs.readFileSync(path.join(process.cwd(), "src/components/StudyRoomView.tsx"), "utf8");
   assert.match(roomGeometrySource, /userData\.collisionBoxes/,
     "box-based room models must register their physical bounds");
   assert.match(roomFurnitureSource, /makeColliderBox/,
@@ -683,6 +710,12 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     "instanced and individual shelf decor must expose physical bounds");
   assert.match(shelfDecorSource, /instanceCardIds/,
     "decorative bookshelf instances must map ray hits to transient blank-book IDs");
+  assert.match(studyRoomSource, /makeNestedWallShelfDecorBooks/,
+    "StudyRoomView must register wall blanks in the same shared transient source list");
+  assert.match(studyRoomSource, /\.\.\.wallDecorBooks/,
+    "wall blanks must be discoverable by the existing open, pick-up, place, and write handlers");
+  assert.match(studyRoomSource, /wallDecorBooks=\{wallDecorBooks\}/);
+  assert.match(studyRoomSource, /hiddenBlankBookIds=\{hiddenBlankBookIds\}/);
   assert.match(cameraRigSource, /intersection\.instanceId/,
     "the room raycaster must resolve per-instance blank-book identities");
   assert.match(book3DSource, /makeBlankDecorBook/,
