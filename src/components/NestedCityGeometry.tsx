@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useLayoutEffect, useRef } from "react";
 import * as THREE from "three";
 import {
   cityTrapezoidCornerFootprint,
@@ -13,7 +13,17 @@ import {
   SHELF,
   TEXTURES,
 } from "@/lib/room3d";
-import { SHELF_DECOR_BOOK_COLORS } from "@/lib/shelfDecorBooks";
+import { blankBookCardId } from "@/lib/blankBooks";
+import {
+  WALL_SHELF_CAP_HEIGHT,
+  WALL_SHELF_FRAME_DEPTH,
+  WALL_SHELF_FRAME_HEIGHT,
+  WALL_SHELF_FRAME_THICKNESS,
+  WALL_SHELF_ROW_COUNT,
+  WALL_SHELF_ROW_PITCH,
+  WALL_SHELF_BAY_WIDTH,
+  type WallShelfDecorBook,
+} from "@/lib/wallShelfBooks";
 import { attachPhotoMap } from "@/lib/roomTextures";
 import type { Aabb, CityPlanPoint, CityTrapezoidWallSegment } from "@/lib/room3d";
 import type { StudySceneApi } from "./StudyScene";
@@ -356,8 +366,10 @@ function addSideBookshelves(
   woodMaterial: THREE.Material,
   ledMaterial: THREE.Material,
   glowMaterial: THREE.Material,
-  bookMaterials: readonly THREE.Material[],
-) {
+  bookMaterial: THREE.Material,
+  wallDecorBooks: readonly WallShelfDecorBook[],
+  whiteModel: boolean,
+): THREE.InstancedMesh | null {
   const sideWalls = walls.filter((wall) => wall.id === "BC" || wall.id === "AD");
   const panels: BoxInstance[] = [];
   const verticalPosts: BoxInstance[] = [];
@@ -365,32 +377,27 @@ function addSideBookshelves(
   const ledStrips: BoxInstance[] = [];
   const topLedStrips: BoxInstance[] = [];
   const glowPlanes: BoxInstance[] = [];
-  const bookBatches = bookMaterials.map(() => [] as BoxInstance[]);
-  const rowCount = 6;
   const backThickness = 0.014;
-  const frameThickness = 0.045;
-  const frameDepth = SHELF.depth + 0.02;
-  const frameHeight = 3.76;
-  const capHeight = 0.1;
+  const frameThickness = WALL_SHELF_FRAME_THICKNESS;
+  const frameDepth = WALL_SHELF_FRAME_DEPTH;
+  const frameHeight = WALL_SHELF_FRAME_HEIGHT;
+  const capHeight = WALL_SHELF_CAP_HEIGHT;
 
-  for (let wallIndex = 0; wallIndex < sideWalls.length; wallIndex++) {
-    const wall = sideWalls[wallIndex];
+  for (const wall of sideWalls) {
     const wallLine = { from: wall.from, to: wall.to };
     const length = segmentLength(wallLine);
     const yaw = segmentYaw(wallLine);
     const first = 0.55;
     const last = length - 0.55;
-    const bayCount = Math.ceil((last - first) / 2.75);
+    const bayCount = Math.ceil((last - first) / WALL_SHELF_BAY_WIDTH);
     const bayLength = (last - first) / bayCount;
     const bays = Array.from({ length: bayCount }, (_, index) => ({
       start: first + index * bayLength,
       end: first + (index + 1) * bayLength,
     }));
 
-    for (let floorIndex = 0; floorIndex < NESTED_CITY.levels.length; floorIndex++) {
-      const floorY = NESTED_CITY.levels[floorIndex];
-      for (let bayIndex = 0; bayIndex < bays.length; bayIndex++) {
-        const bay = bays[bayIndex];
+    for (const floorY of NESTED_CITY.levels) {
+      for (const bay of bays) {
         const centerDistance = (bay.start + bay.end) / 2;
         const centerOnWall = pointAlong(wallLine, centerDistance / length);
         const bayLength = bay.end - bay.start;
@@ -419,8 +426,8 @@ function addSideBookshelves(
           rotationY: yaw,
         });
 
-        for (let row = 0; row < rowCount; row++) {
-          const boardTopY = floorY + frameHeight - capHeight - row * 0.55;
+        for (let row = 0; row < WALL_SHELF_ROW_COUNT; row++) {
+          const boardTopY = floorY + frameHeight - capHeight - row * WALL_SHELF_ROW_PITCH;
           const boardLength = bayLength - frameThickness;
           shelves.push({
             width: SHELF.depth,
@@ -449,37 +456,6 @@ function addSideBookshelves(
             z: glowCenter.z,
             rotationY: Math.atan2(wall.inward.x, wall.inward.z),
           });
-
-          // Keep the same muted solid-color book blocks and warm palette as the main wall shelf.
-          const bookStart = bay.start + frameThickness / 2 + 0.025;
-          const bookEnd = bay.end - frameThickness / 2 - 0.025;
-          let distance = bookStart;
-          let bookIndex = 0;
-          while (distance < bookEnd - 0.022) {
-            const pattern = wallIndex * 13 + bayIndex * 7 + row * 11 + bookIndex * 5 + floorIndex * 3;
-            const thickness = 0.022 + (pattern % 27) * 0.001;
-            if (distance + thickness > bookEnd) break;
-            const height = 0.16 + ((pattern * 3) % 8) * 0.01;
-            const depth = 0.16 + ((pattern * 7) % 5) * 0.01;
-            const spinePoint = pointAlong(wallLine, (distance + thickness / 2) / length);
-            const bookCenter = offsetPoint(
-              spinePoint,
-              wall.inward,
-              ROOM.wall + SHELF.depth - 0.012 - depth / 2,
-            );
-            const materialIndex = pattern % bookBatches.length;
-            bookBatches[materialIndex].push({
-              width: depth,
-              height,
-              depth: thickness,
-              x: bookCenter.x,
-              y: boardTopY + 0.0015 + height / 2,
-              z: bookCenter.z,
-              rotationY: yaw,
-            });
-            distance += thickness + 0.002 + (bookIndex % 17 === 0 ? 0.018 : 0);
-            bookIndex++;
-          }
         }
 
         // A slim dark-walnut header closes each built-in shelf section like the main wall unit.
@@ -493,13 +469,14 @@ function addSideBookshelves(
           z: capCenter.z,
           rotationY: yaw,
         });
+        const topLightCenter = offsetPoint(centerOnWall, wall.inward, ROOM.wall + frameDepth - 0.02);
         topLedStrips.push({
           width: 0.014,
           height: 0.02,
           depth: bayLength - 0.12,
-          x: offsetPoint(centerOnWall, wall.inward, ROOM.wall + frameDepth - 0.02).x,
+          x: topLightCenter.x,
           y: floorY + frameHeight - 0.035,
-          z: offsetPoint(centerOnWall, wall.inward, ROOM.wall + frameDepth - 0.02).z,
+          z: topLightCenter.z,
           rotationY: yaw,
         });
       }
@@ -527,9 +504,33 @@ function addSideBookshelves(
   addBoxBatch(group, verticalPosts, woodMaterial, "dark-walnut-bookshelf-frames", false);
   addBoxBatch(group, ledStrips, ledMaterial, "warm-bookshelf-led-strips", false);
   addBoxBatch(group, topLedStrips, ledMaterial, "warm-bookshelf-header-light", false);
-  bookBatches.forEach((books, index) => {
-    addBoxBatch(group, books, bookMaterials[index], `instanced-library-books:${index}`, false);
-  });
+
+  let bookMesh: THREE.InstancedMesh | null = null;
+  if (wallDecorBooks.length) {
+    bookMesh = new THREE.InstancedMesh(UNIT_BOX, bookMaterial, wallDecorBooks.length);
+    bookMesh.name = "instanced-wall-shelf-blank-books";
+    bookMesh.userData.kind = "book";
+    bookMesh.userData.place = "shelf";
+    bookMesh.userData.instanceCardIds = wallDecorBooks.map((book) => blankBookCardId(book.id));
+    bookMesh.userData.wallShelfBooks = true;
+    bookMesh.castShadow = true;
+    bookMesh.receiveShadow = true;
+    const transform = new THREE.Object3D();
+    const color = new THREE.Color();
+    wallDecorBooks.forEach((book, index) => {
+      transform.position.set(book.x, book.y, book.z);
+      transform.rotation.set(0, book.ry, 0);
+      transform.scale.set(book.sx, book.sy, book.sz);
+      transform.updateMatrix();
+      bookMesh!.setMatrixAt(index, transform.matrix);
+      color.set(whiteModel ? "#f2f0ec" : book.color);
+      bookMesh!.setColorAt(index, color);
+    });
+    if (bookMesh.instanceColor) bookMesh.instanceColor.needsUpdate = true;
+    bookMesh.instanceMatrix.needsUpdate = true;
+    bookMesh.computeBoundingSphere();
+    group.add(bookMesh);
+  }
 
   if (glowPlanes.length) {
     const geometry = new THREE.PlaneGeometry(1, 1);
@@ -550,6 +551,25 @@ function addSideBookshelves(
     group.add(instances);
   }
 
+  return bookMesh;
+}
+
+function applyHiddenWallBooks(
+  mesh: THREE.InstancedMesh,
+  books: readonly WallShelfDecorBook[],
+  hiddenIds: ReadonlySet<string>,
+) {
+  const transform = new THREE.Object3D();
+  books.forEach((book, index) => {
+    transform.position.set(book.x, book.y, book.z);
+    transform.rotation.set(0, book.ry, 0);
+    if (hiddenIds.has(blankBookCardId(book.id))) transform.scale.set(0, 0, 0);
+    else transform.scale.set(book.sx, book.sy, book.sz);
+    transform.updateMatrix();
+    mesh.setMatrixAt(index, transform.matrix);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingSphere();
 }
 
 function addGuardrail(
@@ -884,13 +904,28 @@ function addGalleryFurniture(
   }
 }
 
+const EMPTY_HIDDEN_WALL_BOOK_IDS: readonly string[] = [];
+
 export const NestedCityGeometry: React.FC<{
   api: StudySceneApi;
+  wallDecorBooks: readonly WallShelfDecorBook[];
+  hiddenBlankBookIds?: readonly string[];
   whiteModel?: boolean;
   structureOnly?: boolean;
-}> = ({ api, whiteModel = false, structureOnly = false }) => {
+}> = ({
+  api,
+  wallDecorBooks,
+  hiddenBlankBookIds = EMPTY_HIDDEN_WALL_BOOK_IDS,
+  whiteModel = false,
+  structureOnly = false,
+}) => {
+  const wallBookMeshRef = useRef<THREE.InstancedMesh | null>(null);
+  const hiddenWallBookIdsRef = useRef<ReadonlySet<string>>(new Set(hiddenBlankBookIds));
+
+  // eslint-disable-next-line react-hooks/immutability -- this effect intentionally mutates the Three.js scene graph
   useEffect(() => {
     const group = new THREE.Group();
+    let wallBooksMesh: THREE.InstancedMesh | null = null;
     group.name = "multi-level-trapezoid-library";
     api.scene.add(group);
 
@@ -968,9 +1003,9 @@ export const NestedCityGeometry: React.FC<{
     const stairWoodMaterial = material({
       color: color("#a67748"), roughness: 0.68, metalness: 0.02, envMapIntensity: 0,
     });
-    const bookMaterials = SHELF_DECOR_BOOK_COLORS.map((bookColor) => material({
-      color: color(bookColor), roughness: 0.86, metalness: 0, envMapIntensity: 0,
-    }));
+    const wallBookMaterial = material({
+      color: "#ffffff", roughness: 0.86, metalness: 0, envMapIntensity: 0,
+    });
     const glassMaterial = material({
       color: color("#a9c1c6"), roughness: 0.16, metalness: 0.08, transparent: true, opacity: whiteModel ? 0.28 : 0.24,
       depthWrite: false, side: THREE.DoubleSide,
@@ -987,15 +1022,19 @@ export const NestedCityGeometry: React.FC<{
     addTrapezoidShell(group, wallMaterial);
     if (structureOnly) addGroundFloor(group, groundMaterial);
     addGalleryFloors(group, galleryMaterial, corridorMaterial, structureOnly);
-    addSideBookshelves(
+    wallBooksMesh = addSideBookshelves(
       group,
       NESTED_CITY.trapezoid.wallEdges,
       shelfBackMaterial,
       shelfWoodMaterial,
       shelfLedMaterial,
       shelfGlowMaterial,
-      bookMaterials,
+      wallBookMaterial,
+      wallDecorBooks,
+      whiteModel,
     );
+    wallBookMeshRef.current = wallBooksMesh;
+    if (wallBooksMesh) applyHiddenWallBooks(wallBooksMesh, wallDecorBooks, hiddenWallBookIdsRef.current);
     addGallerySupportBeams(group, darkMaterial);
     addGallerySupportColumns(group, darkMaterial);
     addGalleryGuardrails(group, darkMaterial, glassMaterial);
@@ -1029,13 +1068,23 @@ export const NestedCityGeometry: React.FC<{
 
     return () => {
       api.scene.remove(group);
+      if (wallBookMeshRef.current === wallBooksMesh) wallBookMeshRef.current = null;
       if (structureOnly) api.scene.environmentIntensity = originalEnvironmentIntensity;
       textureDisposers.forEach((dispose) => dispose());
       ownedGeometries.forEach((geometry) => geometry.dispose());
       materials.forEach((entry) => entry.dispose());
       ownedTextures.forEach((texture) => texture.dispose());
     };
-  }, [api, structureOnly, whiteModel]);
+  }, [api, structureOnly, wallDecorBooks, whiteModel]);
+
+  useLayoutEffect(() => {
+    const hiddenIds = new Set(hiddenBlankBookIds);
+    hiddenWallBookIdsRef.current = hiddenIds;
+    const mesh = wallBookMeshRef.current;
+    if (mesh && mesh.count === wallDecorBooks.length && wallDecorBooks.length) {
+      applyHiddenWallBooks(mesh, wallDecorBooks, hiddenIds);
+    }
+  }, [hiddenBlankBookIds, wallDecorBooks]);
 
   return null;
 };

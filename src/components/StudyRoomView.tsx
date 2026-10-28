@@ -28,6 +28,7 @@ import {
   type BlankBookWrittenEventDetail,
 } from "@/lib/blankBooks";
 import { decorBookColorForId, makeShelfDecorBooks, type ShelfDecorBook } from "@/lib/shelfDecorBooks";
+import { makeNestedWallShelfDecorBooks } from "@/lib/wallShelfBooks";
 import { useWorkspaceState, actions } from "@/lib/store";
 import { useCollaboration } from "@/components/CollaborationProvider";
 import {
@@ -197,7 +198,11 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
     state.cards as CardData[],
     (book, card) => book.decorColor || decorBookColorForId(card.id)
   ), [state.studyCategories, state.studyBooks, state.cards]);
-  const blankShelfBooks = useMemo(() => makeShelfDecorBooks(layout), [layout]);
+  const wallDecorBooks = useMemo(() => makeNestedWallShelfDecorBooks(), []);
+  const blankShelfBooks = useMemo(() => [
+    ...makeShelfDecorBooks(layout),
+    ...wallDecorBooks,
+  ], [layout, wallDecorBooks]);
   const hiddenBlankBookIds = useMemo(() => [
     ...state.studyBooks.flatMap((book) => book.decorSourceId ? [book.decorSourceId] : []),
     ...blankDeskBooks.map((book) => book.cardId),
@@ -526,7 +531,12 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
         {(api) => (
           <>
             {inspectionView ? (
-              <NestedCityGeometry api={api} structureOnly />
+              <NestedCityGeometry
+                api={api}
+                wallDecorBooks={wallDecorBooks}
+                hiddenBlankBookIds={hiddenBlankBookIds}
+                structureOnly
+              />
             ) : (
               <>
                 <RoomGeometry
@@ -535,7 +545,12 @@ export const StudyRoomView: React.FC<StudyRoomViewProps> = (props) => {
                   cards={state.cards as CardData[]}
                   shelfRows={layout.rows.length}
                 />
-                <NestedCityGeometry api={api} whiteModel={whiteModel} />
+                <NestedCityGeometry
+                  api={api}
+                  wallDecorBooks={wallDecorBooks}
+                  hiddenBlankBookIds={hiddenBlankBookIds}
+                  whiteModel={whiteModel}
+                />
                 <WindowLight api={api} />
                 <Book3D
                   api={api}
