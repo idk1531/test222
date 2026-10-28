@@ -651,6 +651,12 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
   assert.match(nestedCitySource, /layout\.galleryInnerEdges/);
   assert.match(nestedCitySource, /layout\.galleryOuterEdges/);
   assert.match(nestedCitySource, /addSideBookshelves/);
+  assert.match(nestedCitySource, /SHELF_DECOR_BOOK_COLORS/,
+    "multi-level wall bookcases must use the same muted decorative book palette as the main shelf");
+  assert.match(nestedCitySource, /LOOK\.shelfWood[\s\S]{0,500}LOOK\.shelfBack/,
+    "multi-level wall bookcases must share the main shelf walnut and stone finishes");
+  assert.match(nestedCitySource, /warm-bookshelf-light-wash/,
+    "multi-level wall bookcases must keep the same warm under-shelf lighting language");
   assert.match(nestedCitySource, /addGalleryGuardrails/);
   assert.match(nestedCitySource, /nestedCityGuardrailSegments/,
     "visible railing runs and their collision gaps must share one geometry layout");
