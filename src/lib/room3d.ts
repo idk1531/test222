@@ -845,6 +845,12 @@ export const CHAIR = {
   seatHeight: 0.42,
 };
 
+export const ROOM_INTERACTION_RANGE = 4;
+
+export function isWithinRoomInteractionRange(distance: number): boolean {
+  return Number.isFinite(distance) && distance >= 0 && distance <= ROOM_INTERACTION_RANGE;
+}
+
 export const SIT = {
   triggerRadius: 0.34,
   seatY: 0.42,
@@ -1281,6 +1287,8 @@ export interface Aabb extends RoomRect {
   halfWidth?: number;
   halfDepth?: number;
   rotationY?: number;
+  /** The primary upholstered chair may follow a seated player; gallery seats remain fixed. */
+  movesWithChair?: boolean;
 }
 export type RoomCollider = Aabb;
 
@@ -1418,6 +1426,7 @@ export const COLLIDERS: readonly Aabb[] = [
     bottom: 0,
     top: CHAIR.seatHeight,
     standable: false,
+    movesWithChair: true,
   },
 ];
 
@@ -1465,8 +1474,8 @@ export function resolveCollision(
   for (let pass = 0; pass < Math.min(colliders.length, 12); pass++) {
     let changed = false;
     for (const collider of colliders) {
-      const chairOffsetX = collider.kind === "chair" && chairPosition ? chairPosition.x - CHAIR.x : 0;
-      const chairOffsetZ = collider.kind === "chair" && chairPosition ? chairPosition.z - CHAIR.z : 0;
+      const chairOffsetX = collider.movesWithChair && chairPosition ? chairPosition.x - CHAIR.x : 0;
+      const chairOffsetZ = collider.movesWithChair && chairPosition ? chairPosition.z - CHAIR.z : 0;
       if (px <= collider.minX + chairOffsetX - radius || px >= collider.maxX + chairOffsetX + radius ||
         pz <= collider.minZ + chairOffsetZ - radius || pz >= collider.maxZ + chairOffsetZ + radius) continue;
       const local = worldPointToColliderLocal(collider, px, pz, chairOffsetX, chairOffsetZ);

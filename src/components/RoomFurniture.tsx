@@ -187,6 +187,9 @@ export const RoomFurniture: React.FC<{
     brace.position.set(0, 0.36, -0.16);
     chair.add(brace);
     chair.userData.kind = "chair";
+    chair.userData.seatFloorY = CHAIR.y;
+    chair.userData.seatYaw = CHAIR.yaw;
+    chair.userData.seatFollowsPlayer = true;
     add(chair);
     if (chairRigRef) chairRigRef.current = { group: chair, shell, shellMaterial };
 

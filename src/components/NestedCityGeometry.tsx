@@ -89,6 +89,7 @@ function addBox(
   name: string,
   rotationY = 0,
   collidable = true,
+  colliderKind: Aabb["kind"] = "model",
 ) {
   const mesh = new THREE.Mesh(UNIT_BOX, material);
   mesh.name = name;
@@ -105,7 +106,7 @@ function addBox(
       dimensions.depth,
       position.y - dimensions.height / 2,
       position.y + dimensions.height / 2,
-      "model",
+      colliderKind,
       rotationY,
     ));
   }
@@ -821,14 +822,20 @@ function addReadingTable(
   }
 
   const seatCenter = rotateLocalPoint(center, 0, tableDepth / 2 + 0.3, yaw);
-  addBox(
+  const seat = addBox(
     group,
     { width: 0.56, height: 0.08, depth: 0.32 },
     { x: seatCenter.x, y: floorY + 0.46, z: seatCenter.z },
     woodMaterial,
     `gallery-reading-seat:${index}`,
     yaw,
+    true,
+    "chair",
   );
+  seat.userData.kind = "chair";
+  seat.userData.seatFloorY = floorY;
+  seat.userData.seatYaw = yaw;
+  seat.userData.seatFollowsPlayer = false;
 }
 
 function addPlanter(

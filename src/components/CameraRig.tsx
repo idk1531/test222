@@ -16,7 +16,6 @@ import {
   type NestedCityView,
   CHAIR_APPROACH_RADIUS,
   DESK,
-  DESK_FOOTPRINT,
   canJump,
   easeInOutCubic,
   forwardFromYawPitch,
@@ -38,6 +37,8 @@ import {
   resolveThirdPersonCamera,
   roomFovFor,
   ROOM,
+  ROOM_INTERACTION_RANGE,
+  isWithinRoomInteractionRange,
   SIT,
   stepVerticalMotion,
   THIRD_PERSON,
@@ -80,6 +81,15 @@ interface Pose {
   height: number;
   eyeHeight: number;
   floorY: number;
+}
+
+interface SeatAnchor {
+  object: THREE.Object3D;
+  x: number;
+  z: number;
+  floorY: number;
+  yaw: number;
+  followsPlayer: boolean;
 }
 
 type CameraMode = "room" | "work";
@@ -177,15 +187,28 @@ export const CameraRig: React.FC<{
   const lastFocusCheckRef = useRef(0);
   const previousChairTriggerRef = useRef(false);
   const interactWithChairRef = useRef<() => void>(() => {});
+  const activeSeatRef = useRef<SeatAnchor | null>(null);
+  const nearbySeatRef = useRef<SeatAnchor | null>(null);
   const seatTransitionRef = useRef<{
     startedAt: number;
     duration: number;
+    fromX: number;
+    toX: number;
+    fromZ: number;
+    toZ: number;
+    fromFloorY: number;
+    toFloorY: number;
+    fromYaw: number;
+    toYaw: number;
     fromEyeY: number;
     toEyeY: number;
     fromFov: number;
     toFov: number;
     fromOpacity: number;
     toOpacity: number;
+    toSeated: boolean;
+    seat: SeatAnchor | null;
+    shellMaterial: THREE.Material | null;
   } | null>(null);
   const lastLockedPersistRef = useRef(0);
   const modeRef = useRef<CameraMode>("room");
@@ -430,8 +453,53 @@ export const CameraRig: React.FC<{
     const canvas = api.dom;
     sceneCollidersRef.current = collectSceneColliders(api.scene);
     const raycaster = new THREE.Raycaster();
+    raycaster.far = ROOM_INTERACTION_RANGE;
     const pointer = new THREE.Vector2();
     const chairTargetPosition = new THREE.Vector3();
+    const interactionOrigin = new THREE.Vector3();
+    const seatWorldPosition = new THREE.Vector3();
+    const seatWorldQuaternion = new THREE.Quaternion();
+    const seatWorldEuler = new THREE.Euler();
+    const seatObjects: THREE.Object3D[] = [];
+    let lastSeatScan = 0;
+
+    const refreshSeatObjects = () => {
+      seatObjects.length = 0;
+      api.scene.traverse((object) => {
+        if (object.userData.kind === "chair") seatObjects.push(object);
+      });
+      const primaryChair = chairRigRef.current?.group;
+      if (primaryChair && !seatObjects.includes(primaryChair)) seatObjects.push(primaryChair);
+      lastSeatScan = performance.now();
+    };
+
+    const seatAnchorFor = (object: THREE.Object3D): SeatAnchor => {
+      object.updateWorldMatrix(true, false);
+      object.getWorldPosition(seatWorldPosition);
+      object.getWorldQuaternion(seatWorldQuaternion);
+      seatWorldEuler.setFromQuaternion(seatWorldQuaternion, "YXZ");
+      const floorY = object.userData.seatFloorY;
+      const yaw = object.userData.seatYaw;
+      return {
+        object,
+        x: seatWorldPosition.x,
+        z: seatWorldPosition.z,
+        floorY: typeof floorY === "number" && Number.isFinite(floorY)
+          ? floorY
+          : groundHeightAt(seatWorldPosition.x, seatWorldPosition.z, stateRef.current.groundY),
+        yaw: typeof yaw === "number" && Number.isFinite(yaw) ? yaw : seatWorldEuler.y,
+        followsPlayer: object.userData.seatFollowsPlayer === true,
+      };
+    };
+    const interactionDistanceFromPlayer = (point: THREE.Vector3) => {
+      const player = stateRef.current;
+      return Math.hypot(
+        point.x - player.x,
+        point.y - (player.groundY + player.eyeHeight + player.jumpOffset),
+        point.z - player.z,
+      );
+    };
+    refreshSeatObjects();
 
     const findSemanticObject = (object: THREE.Object3D) => {
       let current: THREE.Object3D | null = object;
@@ -474,15 +542,19 @@ export const CameraRig: React.FC<{
         pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       }
-      // 第一／第三人稱都以「相機中心」為射線，畫面準心才會與實際可互動目標一致。
-      // 第三人稱的角色沒有 userData.kind，不會擋住後方的書本／桌面。
+      // 第一／第三人稱都以相機中心瞄準，但互動距離一律從玩家眼睛量起。
+      // 射線先按相機與玩家的實際間距延長；命中後再嚴格限制玩家至目標為 4 m。
+      const player = stateRef.current;
+      interactionOrigin.set(player.x, player.groundY + player.eyeHeight + player.jumpOffset, player.z);
+      raycaster.far = ROOM_INTERACTION_RANGE + camera.position.distanceTo(interactionOrigin);
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(api.scene.children, true);
       let bookTarget: { object: THREE.Object3D; point: THREE.Vector3; cardId: string } | null = null;
-      let chairTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
+      let chairTarget: { object: THREE.Object3D; point: THREE.Vector3; seat: SeatAnchor } | null = null;
       let paperTarget: { object: THREE.Object3D; point: THREE.Vector3 } | null = null;
       let deskTarget: THREE.Vector3 | null = null;
       for (const intersection of hits) {
+        if (!isWithinRoomInteractionRange(interactionDistanceFromPlayer(intersection.point))) continue;
         // 相機就在角色軀幹內：玩家的 mesh 不可以參與互動射線（也不會回傳 dist 0 的雜訊）。
         if (isPlayerPart(intersection.object)) continue;
         const object = findSemanticObject(intersection.object);
@@ -492,7 +564,7 @@ export const CameraRig: React.FC<{
         if ((kind === "book" || kind === "heldBook") && cardId && !bookTarget) {
           bookTarget = { object, point: intersection.point, cardId };
         } else if (kind === "chair" && !chairTarget) {
-          chairTarget = { object, point: intersection.point };
+          chairTarget = { object, point: intersection.point, seat: seatAnchorFor(object) };
         } else if (kind === "deskCanvas" && !paperTarget) {
           paperTarget = { object, point: intersection.point };
         }
@@ -515,6 +587,7 @@ export const CameraRig: React.FC<{
           hitDeskSurface: !!deskTarget,
           deskPoint: deskTarget ? { x: deskTarget.x, z: deskTarget.z } : undefined,
           worldPoint: undefined,
+          seatTarget: null,
         };
       }
       const kind = target.object.userData.kind;
@@ -529,6 +602,7 @@ export const CameraRig: React.FC<{
         hitDeskSurface: !!deskTarget,
         deskPoint: deskTarget ? { x: deskTarget.x, z: deskTarget.z } : undefined,
         worldPoint: { x: target.point.x, y: target.point.y, z: target.point.z },
+        seatTarget: kind === "chair" ? chairTarget?.seat ?? null : null,
       };
     };
 
@@ -549,6 +623,7 @@ export const CameraRig: React.FC<{
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(api.scene.children, true);
         for (const intersection of hits) {
+          if (!isWithinRoomInteractionRange(interactionDistanceFromPlayer(intersection.point))) continue;
           const object = findSemanticObject(intersection.object);
           if (!object) continue;
           const cardId = bookCardIdForHit(object, intersection.instanceId);
@@ -562,6 +637,7 @@ export const CameraRig: React.FC<{
               hitDeskSurface: center.hitDeskSurface,
               deskPoint: center.deskPoint,
               worldPoint: { x: intersection.point.x, y: intersection.point.y, z: intersection.point.z },
+              seatTarget: null,
             };
           }
           break;
@@ -571,41 +647,76 @@ export const CameraRig: React.FC<{
       return best ?? center;
     };
 
-    const beginSeatTransition = (toSeated: boolean) => {
+    const beginSeatTransition = (toSeated: boolean, requestedSeat?: SeatAnchor) => {
       const current = stateRef.current;
-      const shellMaterial = chairRigRef.current?.shellMaterial;
+      const seat = toSeated ? requestedSeat ?? nearbySeatRef.current : activeSeatRef.current;
+      const targetPosition = toSeated && seat
+        ? clampRoomPosition(seat.x, seat.z)
+        : { x: current.x, z: current.z };
+      const targetFloorY = toSeated && seat
+        ? groundHeightAt(targetPosition.x, targetPosition.z, seat.floorY)
+        : current.groundY;
+      const selectedSeat = toSeated && seat
+        ? { ...seat, x: targetPosition.x, z: targetPosition.z, floorY: targetFloorY }
+        : seat;
+      const shellMaterial = selectedSeat && chairRigRef.current?.group === selectedSeat.object
+        ? chairRigRef.current.shellMaterial
+        : null;
       const fromOpacity = shellMaterial?.opacity ?? (toSeated ? 1 : SIT.fadeOpacity);
       current.eyeHeight += current.jumpOffset;
       current.jumpOffset = 0;
       current.jumpVelocity = 0;
       current.onGround = true;
       current.falling = false;
+      keysRef.current.clear();
+      joystickRef.current = { x: 0, y: 0 };
       seatTransitionRef.current = {
         startedAt: performance.now(),
-        duration: 240,
+        duration: 320,
+        fromX: current.x,
+        toX: targetPosition.x,
+        fromZ: current.z,
+        toZ: targetPosition.z,
+        fromFloorY: current.groundY,
+        toFloorY: targetFloorY,
+        fromYaw: current.yaw,
+        toYaw: toSeated && seat ? seat.yaw : current.yaw,
         fromEyeY: current.eyeHeight,
         toEyeY: toSeated ? SIT.eyeY : clampHeight(current.height),
         fromFov: camera.fov,
         toFov: toSeated ? SIT.fov : roomFovFor(camera.aspect),
         fromOpacity,
         toOpacity: toSeated ? SIT.fadeOpacity : 1,
+        toSeated,
+        seat: selectedSeat ?? null,
+        shellMaterial,
       };
+      if (toSeated) activeSeatRef.current = selectedSeat ?? null;
       if (shellMaterial) {
         shellMaterial.transparent = true;
         shellMaterial.depthWrite = false;
         shellMaterial.needsUpdate = true;
       }
     };
-    const moveOutFromDeskBeforeStanding = () => {
+    const moveToSafeStandingPosition = () => {
       const s = stateRef.current;
-      const overlap = SIT.seatY + 1.5 > DESK.top && DESK_FOOTPRINT.some((rect) =>
-        s.x >= rect.minX - 0.3 && s.x <= rect.maxX + 0.3 &&
-        s.z >= rect.minZ - 0.3 && s.z <= rect.maxZ + 0.3
+      sceneCollidersRef.current = collectSceneColliders(api.scene);
+      const movingChair = chairRigRef.current?.group.position ?? CHAIR;
+      const safe = resolveCollision(
+        s.x,
+        s.z,
+        0.30,
+        false,
+        false,
+        { x: movingChair.x, z: movingChair.z },
+        currentOtherPlayerPosition(),
+        s.groundY,
+        sceneCollidersRef.current,
       );
-      if (!overlap) return;
-      const safe = resolveCollision(s.x, s.z, 0.30, true, false, undefined, currentOtherPlayerPosition(), s.groundY);
-      s.x = safe.x;
-      s.z = safe.z;
+      const bounded = clampRoomPosition(safe.x, safe.z);
+      s.x = bounded.x;
+      s.z = bounded.z;
+      s.groundY = groundHeightAt(s.x, s.z, s.groundY);
       pointRoomCamera();
       storeCamera();
     };
@@ -621,11 +732,22 @@ export const CameraRig: React.FC<{
       const coarse = window.matchMedia("(pointer: coarse)").matches;
       const target = forceCenter && coarse ? raycastBookAssist() : raycast(clientX, clientY, forceCenter);
       const heldId = interactionRef.current.heldCardId;
+      const nearbySeat = nearbySeatRef.current;
+      const requestedHit = hitOverride ?? (
+        key === "KeyF" && !interactionRef.current.seated && target.hit === "none" && nearbySeat
+          ? "chair"
+          : target.hit
+      );
       const actionHit = key === "KeyF" && interactionRef.current.seated
         ? "none"
-        : heldId && key !== "KeyF"
+        : heldId && key !== "KeyF" && !(key === "click" && requestedHit === "chair")
           ? "heldBook"
-          : hitOverride ?? target.hit;
+          : requestedHit;
+      const actionSeat = actionHit === "chair"
+        ? hitOverride === "chair"
+          ? nearbySeat ?? target.seatTarget
+          : target.seatTarget ?? nearbySeat
+        : null;
       const context: RoomActionCtx = {
         mode: modeRef.current,
         flying: flyingRef.current,
@@ -641,15 +763,16 @@ export const CameraRig: React.FC<{
       };
       const action = resolveAction(actionHit, key, context);
       if (!movementEnabledRef.current && ["jump", "sit", "stand", "pickUp", "putOnDesk", "returnToShelf"].includes(action.type)) return;
+      if (action.type === "sit" && !actionSeat) return;
       if (action.type === "jump" && stateRef.current.onGround && !interactionRef.current.seated) {
         stateRef.current.jumpVelocity = JUMP.velocity;
         stateRef.current.onGround = false;
         stateRef.current.falling = false;
       } else if (action.type === "sit") {
         interactionRef.current.seated = true;
-        beginSeatTransition(true);
+        beginSeatTransition(true, actionSeat ?? undefined);
       } else if (action.type === "stand") {
-        moveOutFromDeskBeforeStanding();
+        moveToSafeStandingPosition();
         interactionRef.current.seated = false;
         beginSeatTransition(false);
       }
@@ -929,6 +1052,7 @@ export const CameraRig: React.FC<{
     window.addEventListener("study-room-reset-camera", onReset);
 
     const removeFrame = api.addFrameCallback((dt, t) => {
+      if (performance.now() - lastSeatScan > 1000) refreshSeatObjects();
       const flight = flightRef.current;
       if (flight) {
         const p = Math.min(1, (performance.now() - flight.startedAt) / flight.duration);
@@ -980,10 +1104,18 @@ export const CameraRig: React.FC<{
       if (transition) {
         const progress = Math.min(1, (performance.now() - transition.startedAt) / transition.duration);
         const eased = easeInOutCubic(progress);
+        const yawDelta = Math.atan2(
+          Math.sin(transition.toYaw - transition.fromYaw),
+          Math.cos(transition.toYaw - transition.fromYaw),
+        );
+        stateRef.current.x = THREE.MathUtils.lerp(transition.fromX, transition.toX, eased);
+        stateRef.current.z = THREE.MathUtils.lerp(transition.fromZ, transition.toZ, eased);
+        stateRef.current.groundY = THREE.MathUtils.lerp(transition.fromFloorY, transition.toFloorY, eased);
+        stateRef.current.yaw = transition.fromYaw + yawDelta * eased;
         stateRef.current.eyeHeight = THREE.MathUtils.lerp(transition.fromEyeY, transition.toEyeY, eased);
         camera.fov = THREE.MathUtils.lerp(transition.fromFov, transition.toFov, eased);
         camera.updateProjectionMatrix();
-        const shellMaterial = chairRigRef.current?.shellMaterial;
+        const shellMaterial = transition.shellMaterial;
         if (shellMaterial) {
           shellMaterial.opacity = THREE.MathUtils.lerp(transition.fromOpacity, transition.toOpacity, eased);
           if (progress >= 1) {
@@ -993,18 +1125,32 @@ export const CameraRig: React.FC<{
           }
         }
         seatChanged = true;
-        if (progress >= 1) seatTransitionRef.current = null;
+        if (progress >= 1) {
+          seatTransitionRef.current = null;
+          if (!transition.toSeated) activeSeatRef.current = null;
+        }
       }
       const chairRig = chairRigRef.current;
-      if (interactionRef.current.seated && chairRig) {
+      const activeSeat = activeSeatRef.current;
+      if (interactionRef.current.seated && activeSeat?.followsPlayer && chairRig && activeSeat.object === chairRig.group) {
         chairTargetPosition.set(stateRef.current.x, CHAIR.y, stateRef.current.z);
         chairRig.group.position.lerp(chairTargetPosition, 0.18);
         chairRig.group.rotation.y = stateRef.current.yaw;
       }
-      const chairX = chairRig?.group.position.x ?? CHAIR.x;
-      const chairZ = chairRig?.group.position.z ?? CHAIR.z;
-      const inChairTrigger = stateRef.current.groundY < 0.1 &&
-        isWithinSitTrigger(stateRef.current.x, stateRef.current.z, chairX, chairZ);
+      let nearbySeat: SeatAnchor | null = null;
+      let nearestSeatDistance = Number.POSITIVE_INFINITY;
+      for (const seatObject of seatObjects) {
+        if (!seatObject.parent || !seatObject.visible) continue;
+        const seat = seatAnchorFor(seatObject);
+        if (Math.abs(stateRef.current.groundY - seat.floorY) > 0.25) continue;
+        const distance = Math.hypot(stateRef.current.x - seat.x, stateRef.current.z - seat.z);
+        if (isWithinSitTrigger(stateRef.current.x, stateRef.current.z, seat.x, seat.z) && distance < nearestSeatDistance) {
+          nearbySeat = seat;
+          nearestSeatDistance = distance;
+        }
+      }
+      nearbySeatRef.current = nearbySeat;
+      const inChairTrigger = nearbySeat !== null;
       interactionRef.current.chairInTrigger = inChairTrigger;
       if (inChairTrigger !== previousChairTriggerRef.current) {
         previousChairTriggerRef.current = inChairTrigger;
@@ -1013,14 +1159,15 @@ export const CameraRig: React.FC<{
       let jumpChanged = false;
       let positionChanged = false;
       const keys = keysRef.current;
-      let forward = movementEnabledRef.current
+      const acceptMovement = movementEnabledRef.current && !seatTransitionRef.current;
+      let forward = acceptMovement
         ? Number(keys.has("w") || keys.has("arrowup")) - Number(keys.has("s") || keys.has("arrowdown"))
         : 0;
-      let side = movementEnabledRef.current
+      let side = acceptMovement
         ? Number(keys.has("d") || keys.has("arrowright")) - Number(keys.has("a") || keys.has("arrowleft"))
         : 0;
       const joy = joystickRef.current;
-      if (movementEnabledRef.current) {
+      if (acceptMovement) {
         forward += joy.y;
         side += joy.x;
       }
@@ -1038,9 +1185,13 @@ export const CameraRig: React.FC<{
         const dz = (-Math.cos(yaw) * forward + Math.sin(yaw) * side) * speed;
         const nextX = stateRef.current.x + dx;
         const nextZ = stateRef.current.z + dz;
-        const chairX = chairRigRef.current?.group.position.x ?? CHAIR.x;
-        const chairZ = chairRigRef.current?.group.position.z ?? CHAIR.z;
-        const seatedApproach = Math.hypot(nextX - chairX, nextZ - chairZ) < CHAIR_APPROACH_RADIUS;
+        const movingChair = chairRigRef.current?.group.position ?? CHAIR;
+        const seatedApproach = seatObjects.some((seatObject) => {
+          if (!seatObject.parent || !seatObject.visible) return false;
+          const seat = seatAnchorFor(seatObject);
+          return Math.abs(stateRef.current.groundY - seat.floorY) <= MAX_WALKABLE_STEP &&
+            Math.hypot(nextX - seat.x, nextZ - seat.z) < CHAIR_APPROACH_RADIUS;
+        });
         sceneCollidersRef.current = collectSceneColliders(api.scene);
         const current = stateRef.current;
         const previousX = current.x;
@@ -1052,7 +1203,7 @@ export const CameraRig: React.FC<{
           PLAYER_RADIUS,
           seatedNow || seatedApproach,
           seatedNow,
-          { x: chairX, z: chairZ },
+          { x: movingChair.x, z: movingChair.z },
           currentOtherPlayerPosition(),
           currentFeetY,
           sceneCollidersRef.current,

@@ -17,7 +17,7 @@ export interface RoomActionCtx {
   deskPoint?: { x: number; z: number } | null;
   /** Current room yaw in degrees; placement is quantized to 15-degree turns. */
   playerYawDeg?: number;
-  /** Player is within SIT.triggerRadius of the chair seat center. */
+  /** Player is close enough to show the optional sit/stand HUD button. */
   chairInTrigger?: boolean;
 }
 
@@ -76,7 +76,7 @@ export function resolveAction(hit: HitKind, key: InputKey, ctx: RoomActionCtx): 
   // Q／右鍵／Shift＝回架，E／點擊＝只有對準桌面才放下。
   // 舊版只要準心落在另一本書上，E 會直接換拿那一本（前一場實際預覽重現），
   // 且 Q 依賴射線命中手持書，錯過就默默失敗。
-  if (ctx.held) {
+  if (ctx.held && hit !== "chair") {
     if (key === "KeyQ" || key === "rightClick" || key === "shiftClick") return { type: "returnToShelf" };
     if (key === "KeyE" || key === "click") return putOnDesk(ctx);
   }
@@ -102,7 +102,8 @@ export function resolveAction(hit: HitKind, key: InputKey, ctx: RoomActionCtx): 
     case "chair":
       if (key === "click" || key === "KeyF") {
         if (ctx.seated) return { type: "stand" };
-        return ctx.chairInTrigger ? { type: "sit" } : NOOP;
+        // CameraRig only reports chair hits that are within the shared four-metre player range.
+        return { type: "sit" };
       }
       return NOOP;
 

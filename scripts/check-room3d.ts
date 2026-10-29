@@ -4,13 +4,13 @@ import path from "node:path";
 import * as THREE from "three";
 import {
   CAMERA, CABINET_FOOTPRINT, CATEGORY_LABEL_PLANE, CHAIR, COLLIDERS, DESK, DESK_FOOTPRINT, DESK_PREVIEW_PLANE, DESK_SNAP, FIDELITY, JUMP,
-  MARBLE_ROUGH, MATCH_VIEW, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, SHELF, SHELF_INWARD, SIT,
+  MARBLE_ROUGH, MATCH_VIEW, NESTED_CITY, NESTED_CITY_CAMERA_VIEWS, PLAYER_RADIUS, ROOM, ROOM_AREA_SCALE, ROOM_INTERACTION_RANGE, SHELF, SHELF_INWARD, SIT,
   cityTrapezoidCornerFootprint, cityTrapezoidWallBandFootprint, clipCityPolygonToTrapezoid,
   collectSceneColliders, floorHeightBelow, hasWalkableSupport, isCityPointInsidePolygon, isCityPointInsideTrapezoid,
   colliderOverlapsCircle, makeColliderBox, nestedCityGuardrailSegments, nestedCityInspectionDistance,
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
-  forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
+  forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, isWithinRoomInteractionRange, projectToScreen, detectQuality,
   resolveAirborneSurfaceMove, resolveCollision, nestedCityFloorLabel, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
   yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, stepVerticalMotion,
   THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
@@ -104,6 +104,8 @@ assert.deepEqual(
     { level: 4, parity: "even" }, { level: 8, parity: "odd" }, { level: 12, parity: "even" },
   ]);
   assert.equal(gallery.width, 4.6);
+  assert.equal(gallery.floorLayouts.length * 4, 12,
+    "the three gallery levels must provide twelve individually seatable reading chairs");
 
   const signedArea = (points: readonly { x: number; z: number }[]) => points.reduce((sum, point, index) => {
     const next = points[(index + 1) % points.length];
@@ -524,6 +526,14 @@ assert.equal(floorHeightBelow(0, 0, 8, [solidLandingBox]), 2.5,
   "falling must stop on a solid model collider instead of passing through it");
 console.log("  ✓ 家具／模型／遠端玩家碰撞箱、開放欄杆缺口、樓梯與模型落地");
 
+// 所有互動射線最遠 4 m；距離按命中表面測量，4 m 邊界包含在內。
+assert.equal(ROOM_INTERACTION_RANGE, 4);
+assert.equal(isWithinRoomInteractionRange(0), true);
+assert.equal(isWithinRoomInteractionRange(4), true);
+assert.equal(isWithinRoomInteractionRange(4 + 1e-6), false);
+assert.equal(isWithinRoomInteractionRange(-1), false);
+assert.equal(isWithinRoomInteractionRange(Number.NaN), false);
+
 // 坐下觸發與「坐著滑進桌下 → F 安全起立」防死鎖。
 assert.deepEqual(SIT, { triggerRadius: 0.34, seatY: 0.42, eyeY: 1.18, walkSpeed: 1.15, fov: 58, fadeOpacity: 0.25 });
 assert.ok(isWithinSitTrigger(CHAIR.x + SIT.triggerRadius - 1e-6, CHAIR.z));
@@ -539,7 +549,13 @@ assert.ok(!COLLIDERS.some((collider) =>
 const movedChair = { x: CHAIR.x + 1.5, z: CHAIR.z };
 assert.deepEqual(resolveCollision(CHAIR.x, CHAIR.z, PLAYER_RADIUS, false, false, movedChair), { x: CHAIR.x, z: CHAIR.z },
   "椅子跟隨玩家後，碰撞箱也要移動，原位置不可殘留幽靈碰撞");
-console.log("  ✓ SIT trigger 半徑、跟隨椅碰撞與桌下安全起立");
+const gallerySeat = makeColliderBox({ x: 5, z: 5 }, 0.56, 0.32, 4.42, 4.5, "chair");
+assert.notDeepEqual(
+  resolveCollision(5, 5, PLAYER_RADIUS, false, false, movedChair, undefined, 4, [gallerySeat]),
+  { x: 5, z: 5 },
+  "primary chair movement must not shift a fixed gallery chair collider",
+);
+console.log("  ✓ SIT trigger 半徑、所有樓層椅子碰撞與安全起立");
 
 // 跳躍高度是瞬態 offset；0.5 秒後 base height（持久化視高）仍與起跳前完全相同。
 {
@@ -790,6 +806,18 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     "box-based room models must register their physical bounds");
   assert.match(roomFurnitureSource, /makeColliderBox/,
     "composite room furniture must register its model bounds");
+  assert.match(roomFurnitureSource, /chair\.userData\.seatFollowsPlayer = true/,
+    "the desk chair must expose a seat anchor for the shared sit interaction");
+  assert.match(nestedCitySource, /seat\.userData\.kind = "chair"/,
+    "every generated gallery reading seat must be a raycastable chair target");
+  assert.match(nestedCitySource, /seat\.userData\.seatFloorY = floorY/,
+    "gallery chair targets must retain their floor height for seated camera placement");
+  assert.match(nestedCitySource, /yaw,\s*true,\s*"chair"/,
+    "each gallery chair must keep its own static collision volume");
+  assert.match(cameraRigSource, /raycaster\.far = ROOM_INTERACTION_RANGE \+ camera\.position\.distanceTo\(interactionOrigin\)/,
+    "raycasts must compensate for the current camera offset before checking player interaction range");
+  assert.match(cameraRigSource, /isWithinRoomInteractionRange\(interactionDistanceFromPlayer\(intersection\.point\)\)/,
+    "center and touch-assisted interactions must enforce the same four-metre player distance");
   assert.match(book3DSource, /registerBookCollision/,
     "placed data books must expose solid-body collision boxes");
   assert.match(shelfDecorSource, /registerCollider/,
@@ -902,6 +930,12 @@ assert.equal(roomActionCells.length, 35, "the resolver test must cover every cel
 for (const { hit, key, ctx, expected } of roomActionCells) {
   assert.deepEqual(resolveAction(hit, key, ctx), expected, `resolveAction(${hit}, ${key})`);
 }
+assert.deepEqual(resolveAction("chair", "click", { ...baseActionCtx, chairInTrigger: false }), { type: "sit" },
+  "clicking any raycast chair within the shared 4 m range must not require the close-contact HUD trigger");
+assert.deepEqual(resolveAction("chair", "KeyF", { ...baseActionCtx, chairInTrigger: false }), { type: "sit" },
+  "F must sit on an aimed chair even outside the close-contact HUD trigger");
+assert.deepEqual(resolveAction("chair", "click", { ...baseActionCtx, held: actionCardId }), { type: "sit" },
+  "clicking a chair must remain available while carrying a book");
 // The same shelf/desk row keeps its book-source distinction, and unsafe stand context never deadlocks.
 assert.deepEqual(resolveAction("book", "click", { ...baseActionCtx, bookOnDesk: true }), {
   type: "openCard", cardId: actionCardId, from: "desk",
