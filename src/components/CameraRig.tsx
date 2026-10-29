@@ -33,6 +33,7 @@ import {
   JUMP,
   MAX_WALKABLE_STEP,
   PLAYER_RADIUS,
+  resolveAirborneSurfaceMove,
   resolveCollision,
   resolveThirdPersonCamera,
   roomFovFor,
@@ -1042,6 +1043,8 @@ export const CameraRig: React.FC<{
         const seatedApproach = Math.hypot(nextX - chairX, nextZ - chairZ) < CHAIR_APPROACH_RADIUS;
         sceneCollidersRef.current = collectSceneColliders(api.scene);
         const current = stateRef.current;
+        const previousX = current.x;
+        const previousZ = current.z;
         const currentFeetY = current.groundY + current.jumpOffset;
         const separated = resolveCollision(
           nextX,
@@ -1072,12 +1075,21 @@ export const CameraRig: React.FC<{
             current.jumpVelocity = 0;
             current.jumpOffset = 0;
           }
-        } else if (nextFloorY <= currentFeetY + MAX_WALKABLE_STEP) {
-          // While airborne, allow travel over lower floors/voids, but not through a higher deck.
-          current.x = pos.x;
-          current.z = pos.z;
+        } else {
+          const nextSupportY = floorHeightBelow(pos.x, pos.z, currentFeetY, sceneCollidersRef.current);
+          const airborneMove = resolveAirborneSurfaceMove({
+            x: current.x,
+            z: current.z,
+            floorY: current.groundY,
+            jumpOffset: current.jumpOffset,
+            falling: current.falling,
+          }, pos, nextFloorY, nextSupportY);
+          current.x = airborneMove.x;
+          current.z = airborneMove.z;
+          current.groundY = airborneMove.floorY;
+          current.jumpOffset = airborneMove.jumpOffset;
         }
-        positionChanged = current.x !== nextX || current.z !== nextZ || Math.hypot(dx, dz) > 0;
+        positionChanged = current.x !== previousX || current.z !== previousZ;
       } else if (wasMovingRef.current) {
         wasMovingRef.current = false;
         storeCamera();

@@ -1624,6 +1624,49 @@ export interface VerticalMotionState {
   falling: boolean;
 }
 
+export interface AirborneSurfaceMoveState extends CityPlanPoint {
+  floorY: number;
+  jumpOffset: number;
+  falling: boolean;
+}
+
+export interface AirborneSurfaceMoveResult extends AirborneSurfaceMoveState {
+  moved: boolean;
+}
+
+/**
+ * Keep an airborne jump attached to climbable stair surfaces: do not move through a higher tread
+ * while the feet are below it, and shift the jump offset when stepping onto a reachable tread.
+ * True falls retain the existing free-flight movement rules.
+ */
+export function resolveAirborneSurfaceMove(
+  state: AirborneSurfaceMoveState,
+  target: CityPlanPoint,
+  targetFloorY: number,
+  supportFloorY: number | null = targetFloorY,
+): AirborneSurfaceMoveResult {
+  const feetY = state.floorY + state.jumpOffset;
+  if (state.falling) {
+    if (targetFloorY > feetY + MAX_WALKABLE_STEP) return { ...state, moved: false };
+    return { ...state, ...target, moved: true };
+  }
+  if (targetFloorY > feetY + 1e-6) return { ...state, moved: false };
+
+  const supportY = supportFloorY ?? targetFloorY;
+  const floorDelta = supportY - state.floorY;
+  if (Math.abs(floorDelta) > MAX_WALKABLE_STEP) {
+    // A far-below surface is a fall target (for example, the ground seen through the atrium).
+    return { ...state, ...target, moved: true };
+  }
+  return {
+    ...state,
+    ...target,
+    floorY: supportY,
+    jumpOffset: Math.max(0, feetY - supportY),
+    moved: true,
+  };
+}
+
 /** Integrate a jump or a walk-off fall, landing on the highest surface crossed below the player. */
 export function stepVerticalMotion(
   state: VerticalMotionState,
