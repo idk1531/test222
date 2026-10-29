@@ -11,7 +11,7 @@ import {
   SUN, TEXTURES, WINDOW, canvasSizeForPlane, heldCoverPlaneSize, spineLabelLayout, spineLabelTextBounds, spineTitleGlyphs,
   clampRoomPosition, clampPitchRad, clampHeight, clampToDesk,
   forwardFromYawPitch, easeInOutCubic, groundHeightAt, isWithinSitTrigger, projectToScreen, detectQuality,
-  resolveCollision, nestedCityFloorLabel, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
+  resolveAirborneSurfaceMove, resolveCollision, nestedCityFloorLabel, shelfFrontX, shelfPlankCount, shelfPlankY, stepJump, roomFovFor, thirdPersonHandOffset,
   yawFromLookDelta, pitchFromLookDelta, resolveThirdPersonCamera, canJump, stepVerticalMotion,
   THIRD_PERSON, firstPersonHeldAnchor, firstPersonViewVisibility, VIEW_MODEL, PLAYER_RADIUS as RADIUS,
 } from "../src/lib/room3d";
@@ -433,6 +433,92 @@ assert.equal(
 );
 assert.equal(hasWalkableSupport(catchableTread.center.x, catchableTread.center.z, catchableTread.topHeight), true,
   "stair tread surfaces must continue supporting normal walking");
+const blockedJumpStep = resolveAirborneSurfaceMove(
+  { x: 0, z: 0, floorY: 0.167, jumpOffset: 0.05, falling: false },
+  { x: 0.1, z: 0 },
+  0.333,
+);
+assert.equal(blockedJumpStep.moved, false,
+  "a jump must not move the player through an uphill tread while their feet are below it");
+const clearedJumpStep = resolveAirborneSurfaceMove(
+  { x: 0, z: 0, floorY: 0.167, jumpOffset: 0.3, falling: false },
+  { x: 0.1, z: 0 },
+  0.333,
+);
+assert.equal(clearedJumpStep.moved, true);
+assert.ok(Math.abs(clearedJumpStep.floorY + clearedJumpStep.jumpOffset - 0.467) < 1e-9,
+  "moving onto a higher tread must preserve the absolute jump height while rebasing its support");
+const descendingJumpStep = resolveAirborneSurfaceMove(
+  { x: 0, z: 0, floorY: 0.667, jumpOffset: 0.5, falling: false },
+  { x: 0.1, z: 0 },
+  0,
+  0.5,
+);
+assert.equal(descendingJumpStep.floorY, 0.5,
+  "a lower stair support below the airborne feet must be used even when nearest-height lookup misses it");
+assert.ok(Math.abs(descendingJumpStep.floorY + descendingJumpStep.jumpOffset - 1.167) < 1e-9,
+  "moving down across treads must preserve the absolute jump height");
+const trueFallMove = resolveAirborneSurfaceMove(
+  { x: 0, z: 0, floorY: 4, jumpOffset: 0, falling: true },
+  { x: 0.1, z: 0 },
+  0,
+);
+assert.equal(trueFallMove.moved, true);
+assert.equal(trueFallMove.floorY, 4,
+  "a genuine fall must retain its existing free-flight behavior instead of snapping to a distant floor");
+
+// Regression: jump while walking up/down every stair flight; never pass through the treads.
+for (const flight of NESTED_CITY.stairs.flights) {
+  const length = Math.hypot(flight.end.x - flight.start.x, flight.end.z - flight.start.z);
+  const directions = [
+    { label: "上樓", sign: 1, startIndices: [0, 4, 8, 12, 16, 20], speedMultipliers: [1, CAMERA.sprintMultiplier] },
+    { label: "下樓", sign: -1, startIndices: [4, 8, 12, 16, 20], speedMultipliers: [1] },
+  ] as const;
+  for (const { label, sign, startIndices, speedMultipliers } of directions) {
+    const direction = {
+      x: (flight.end.x - flight.start.x) / length * sign,
+      z: (flight.end.z - flight.start.z) / length * sign,
+    };
+    for (const speedMultiplier of speedMultipliers) {
+      const dt = speedMultiplier === 1 ? 1 / 60 : 0.05;
+      for (const startIndex of startIndices) {
+        const takeoff = flight.treads[startIndex];
+        let state = {
+          x: takeoff.center.x,
+          z: takeoff.center.z,
+          floorY: takeoff.topHeight,
+          jumpOffset: 0,
+          velocity: JUMP.velocity,
+          onGround: false,
+          falling: false,
+        };
+        const start = { x: state.x, z: state.z };
+        for (let frame = 0; frame < 90 && !state.onGround && !state.falling; frame++) {
+          const feetY = state.floorY + state.jumpOffset;
+          const target = {
+            x: state.x + direction.x * CAMERA.walkSpeed * speedMultiplier * dt,
+            z: state.z + direction.z * CAMERA.walkSpeed * speedMultiplier * dt,
+          };
+          const nextFloorY = groundHeightAt(target.x, target.z, feetY);
+          const supportFloorY = floorHeightBelow(target.x, target.z, feetY);
+          const moved = resolveAirborneSurfaceMove(state, target, nextFloorY, supportFloorY);
+          state.x = moved.x;
+          state.z = moved.z;
+          state.floorY = moved.floorY;
+          state.jumpOffset = moved.jumpOffset;
+          const landing = floorHeightBelow(state.x, state.z, state.floorY + state.jumpOffset);
+          state = { ...state, ...stepVerticalMotion(state, Math.min(dt, 0.05), landing) };
+        }
+        assert.equal(state.falling, false,
+          `${flight.id} ${label} jump from tread ${startIndex + 1} must not become a fall`);
+        assert.equal(state.onGround, true,
+          `${flight.id} ${label} jump from tread ${startIndex + 1} must settle on a walkable surface`);
+        assert.ok(Math.hypot(state.x - start.x, state.z - start.z) > 0.2,
+          `${flight.id} ${label} jump should still allow stair movement`);
+      }
+    }
+  }
+}
 const solidLandingBox = makeColliderBox({ x: 0, z: 0 }, 0.8, 0.8, 2, 2.5);
 assert.equal(floorHeightBelow(0, 0, 8, [solidLandingBox]), 2.5,
   "falling must stop on a solid model collider instead of passing through it");
@@ -724,6 +810,8 @@ assert.ok(shelfFrontX() > SHELF.xBack && shelfFrontX() < 0);
     "written-book spine text rendering remains on the existing label path");
   assert.match(cameraRigSource, /hasWalkableSupport/,
     "an unsupported player must start falling even when standing still");
+  assert.match(cameraRigSource, /resolveAirborneSurfaceMove/,
+    "stair jumps must use the tested airborne tread-support correction");
   assert.match(cameraRigSource, /floorHeightBelow[\s\S]{0,180}sceneCollidersRef\.current/,
     "fall landing must stop on registered solid models as well as gallery floors");
   assert.doesNotMatch(nestedCitySource, /central-atrium-frame-(?:outer|middle|inner)|addPortalFrame/,
