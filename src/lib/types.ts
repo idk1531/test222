@@ -60,6 +60,7 @@ export interface VersionItem {
 
 export interface WorkspaceState {
   workspace: WorkspaceMeta;
+  /** v9：工作區的卡片集合構成知識系統；各卡以 papers 索引欄位紙實例。 */
   cards: any[];
   canvasObjects: any[];
   relations: any[];
@@ -82,9 +83,9 @@ export interface WorkspaceState {
 // ④ 洞見檢查改為功能判準（每句延伸附一道「拿掉這句就會答錯或做不出來」的題）
 // ⑤ APPLY 來源標籤 [源:___] 併入 [源:WHAT-讀法n] ＋ 兩段式（識別/構造）
 // ⑥ 新增附錄 B（讀法原則 12 條）、附錄 C（橋與平均數示範）、附錄 D（狀態與未解問題）
-// v8：虛擬書房（階段 1–3）——新增 studyCategories / studyBooks / studyLayout，
-// STORAGE_KEY 由 scinotes-workspace-v7.1 升到 scinotes-workspace-v8.0，舊檔匯入自動補齊。
-export const SCHEMA_VERSION = 8;
+// v8：虛擬書房（階段 1–3）——新增 studyCategories / studyBooks / studyLayout。
+// v9：卡片紙面模型——每張卡新增可重複的探究組與欄位紙索引；舊內容遷移但保留。
+export const SCHEMA_VERSION = 9;
 
 export interface ExportFilePayload {
   schemaVersion: number;

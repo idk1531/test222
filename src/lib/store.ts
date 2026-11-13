@@ -21,13 +21,13 @@ import {
   type StudyDeskPosition,
 } from "./study";
 import { SCHEMA_VERSION, WorkspaceState, ExportFilePayload } from "./types";
+import { ensureCardPaperModel, migrateCardToV9 } from "./cardPapers";
 import { applySharedContentOperationsToState, type SharedContentOperation } from "./sharedContent";
 import { getCollaborativeTextAtPath, setCollaborativeTextAtPath } from "./collaborationEditing";
 
-// v8.0：虛擬書房資料結構（分類/書本/視角）隨工作區一起保存。
-// 讀取時先找新 key，找不到再讀舊 key 遷移；舊 key 保留不刪（舊資料不能掉）。
-const STORAGE_KEY = "scinotes-workspace-v8.0";
-const LEGACY_STORAGE_KEYS = ["scinotes-workspace-v7.1"];
+// v9.0：卡片紙面模型。讀取 v8.0/v7.1 備份並遷移；舊 key 保留不刪。
+const STORAGE_KEY = "scinotes-workspace-v9.0";
+const LEGACY_STORAGE_KEYS = ["scinotes-workspace-v8.0", "scinotes-workspace-v7.1"];
 
 /** v7.2：各推理形狀的預設節點主色（與 SHAPE_DEFS.hex 一致；避免 lib → component 相依） */
 const SHAPE_ACCENT_HEX: Record<string, string> = {
@@ -46,7 +46,7 @@ function clone<T>(x: T): T {
 function buildSeedState(): WorkspaceState {
   return ensureStudyState({
     workspace: clone(SEED_WORKSPACE),
-    cards: clone(SEED_CARDS),
+    cards: clone(SEED_CARDS).map(migrateCardToV9),
     canvasObjects: clone(SEED_CANVAS_OBJECTS),
     relations: clone(SEED_RELATIONS),
     processLogs: clone(SEED_PROCESS_LOGS),
@@ -107,8 +107,11 @@ function migrateCardToV5(card: any): any {
 /** v5：整套 state 的結構遷移（本機載入與 JSON 匯入共用；export 供測試與外部工具使用） */
 export function applySchemaMigrations(s: WorkspaceState): WorkspaceState {
   const next = normalizeState(s);
-  // v5：WHEN 併入 HOW；v8：補齊書房分類/書本/視角（舊檔匯入自動補齊，舊資料不掉）
-  return ensureStudyState({ ...next, cards: (next.cards || []).map(migrateCardToV5) });
+  // v5：WHEN 併入 HOW；v8：補齊書房；v9：建立欄位紙索引並把舊敘事遷入首個探究（原欄位保留）。
+  return ensureStudyState({
+    ...next,
+    cards: (next.cards || []).map((card) => migrateCardToV9(migrateCardToV5(card))),
+  });
 }
 
 function loadInitialState(): WorkspaceState {
@@ -211,7 +214,10 @@ export function replaceWorkspaceStateFromRemote(next: WorkspaceState): void {
 /** Apply only card/book records from a validated P2P message; unrelated local data stays local. */
 export function applySharedContentOperations(operations: SharedContentOperation[]): void {
   if (!operations.length) return;
-  setState((current) => applySharedContentOperationsToState(current, operations), { allowReadOnly: true });
+  setState((current) => {
+    const next = applySharedContentOperationsToState(current, operations);
+    return { ...next, cards: (next.cards || []).map(migrateCardToV9) };
+  }, { allowReadOnly: true });
 }
 
 /** Apply a validated live text CRDT value locally without producing a record-level LWW edit. */
@@ -221,7 +227,9 @@ export function applyCollaborativeTextUpdate(cardId: string, path: string, value
     if (!card || getCollaborativeTextAtPath(card, path) === value) return current;
     return {
       ...current,
-      cards: current.cards.map((item) => item.id === cardId ? setCollaborativeTextAtPath(item, path, value) : item),
+      cards: current.cards.map((item) => item.id === cardId
+        ? ensureCardPaperModel(setCollaborativeTextAtPath(item, path, value))
+        : item),
     };
   }, { deferPersist: true, allowReadOnly: true });
 }
@@ -289,7 +297,7 @@ export const actions = {
       ...s,
       cards: [
         ...s.cards,
-        {
+        ensureCardPaperModel({
           granularity: "L2 定理/機制",
           reasoningShape: "A",
           shapeAccepted: false,
@@ -331,7 +339,7 @@ export const actions = {
           id,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        },
+        }),
       ],
       canvasObjects: [
         ...s.canvasObjects,
@@ -379,7 +387,9 @@ export const actions = {
       return {
         ...s,
         cards: s.cards.map((c) =>
-          c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
+          c.id === id
+            ? ensureCardPaperModel({ ...c, ...updates, updatedAt: new Date().toISOString() })
+            : c
         ),
         // 形狀改了、而節點仍停在舊形狀的「預設色」時，跟著換成新形狀預設色；
         // 已被使用者自訂過的顏色不動。

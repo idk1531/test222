@@ -9,21 +9,15 @@ import { ShapeClassifier } from "./ShapeClassifier";
 import { runFourPointCheck, collectHowChecks } from "@/lib/inspect";
 import { useWorkspaceState } from "@/lib/store";
 import {
-  V6Page1HeaderOverview,
-  V6Page2Background,
-  V6Page3ConstructionThinking,
-  V6Page4Why,
-  V6Page5What,
-  V6Page6Apply,
-  V6Page7ProcessLogs,
-  V6ContinuousPaper,
-  MilestoneRuler,
   CardThemeCustomizer,
   CardPaperTheme,
   DEFAULT_PAPER_THEME,
   getGridPaperStyle,
   FourPointCheckPanel,
 } from "./CardPaperSections";
+import { CardPaperV9Page, cardPaperTitle } from "./CardPaperV9";
+import { createEmptyInquiry, ensureCardPaperModel, formatPaperNumber } from "@/lib/cardPapers";
+import type { CardPaperRecord } from "@/lib/cardPapers";
 import { CardEditContext } from "./CardPaperEditor";
 import { useCollaboration } from "@/components/CollaborationProvider";
 import {
@@ -37,7 +31,7 @@ import {
   type RemoteEditingPresence,
 } from "@/lib/collaborationEditing";
 import {
-  X, Sparkles, Save, Trash2, Lock, Eye, Edit3, FileText, Files, Type,
+  X, Sparkles, Save, Trash2, Lock, Eye, Edit3, FileText, Files, Type, Plus,
   ChevronLeft, ChevronRight, Sigma, AlertCircle, CheckCircle, AlertTriangle, ShieldCheck, KeyRound,
   Palette, Printer, Sliders, RotateCcw,
 } from "lucide-react";
@@ -128,10 +122,10 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     subscribeRemoteEditing,
     publishEditingPresence,
   } = collaboration;
-  const [formData, setFormData] = useState<CardData>(() => applyCollaborativeTextSnapshot(
+  const [formData, setFormData] = useState<CardData>(() => ensureCardPaperModel(applyCollaborativeTextSnapshot(
     JSON.parse(JSON.stringify(card)) as CardData,
     getCollaborativeTextSnapshot(card.id)
-  ));
+  ) as any) as CardData);
   const formDataRef = useRef(formData);
   const activeTextTargetRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const activeTextPathRef = useRef<string | null>(null);
@@ -148,7 +142,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   const [activePage, setActivePage] = useState(0);
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "basic" | "what" | "why" | "how" | "origin" | "epistemology" | "diagnostics"
+    "basic" | "inquiries" | "what" | "why" | "how" | "origin" | "epistemology" | "diagnostics"
   >("basic");
 
   const isDirty = JSON.stringify(formData) !== JSON.stringify(card);
@@ -204,8 +198,9 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   })();
 
   const setCurrentFormData = useCallback((next: CardData) => {
-    formDataRef.current = next;
-    setFormData(next);
+    const normalized = ensureCardPaperModel(next as any) as CardData;
+    formDataRef.current = normalized;
+    setFormData(normalized);
   }, []);
 
   const publishTargetPresence = useCallback((target: HTMLInputElement | HTMLTextAreaElement, typing: boolean, active = true) => {
@@ -295,8 +290,13 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   };
 
   const resolveTextFieldPath = (value: string) => findCollaborativeTextPathByValue(formData, value);
-  const handleSave = () => { onSave(formDataRef.current); onClose(); };
-  const handleSaveAndClose = () => { onSave(formDataRef.current); onClose(); onExpansionTest(formDataRef.current); };
+  const handleSave = () => { onSave(ensureCardPaperModel(formDataRef.current as any) as CardData); onClose(); };
+  const handleSaveAndClose = () => {
+    const saved = ensureCardPaperModel(formDataRef.current as any) as CardData;
+    onSave(saved);
+    onClose();
+    onExpansionTest(saved);
+  };
 
   useEffect(() => {
     const previous = previousCardPropRef.current;
@@ -507,57 +507,65 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
     </div>
   );
 
-  /** 分頁模式：對應 PDF v6 的 7 頁方格紙版面 */
+  /** v9：分頁數量依欄位紙索引動態建立，不再固定為舊版七頁。 */
+  const paperRecords = formData.papers || [];
+  const inquiries = formData.inquiries || [];
+
+  const handleNavigatePaper = (paperId: string) => {
+    const targetIndex = paperRecords.findIndex((paper) => paper.id === paperId);
+    if (targetIndex < 0) return;
+    if (pageMode === "single") {
+      const target = document.getElementById(`paper-${paperId}`);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+    }
+    setPageMode("paged");
+    setActivePage(targetIndex);
+  };
+
+  const handleAddInquiry = () => {
+    const nextIndex = inquiries.length + 1;
+    const nextInquiry = createEmptyInquiry(nextIndex);
+    patch({ inquiries: [...inquiries, nextInquiry] });
+    // Paper order: head, five sheets per existing exploration, then the new group's situation.
+    setActivePage(1 + inquiries.length * 5);
+    setPageMode("paged");
+  };
+
+  const handleRemoveInquiry = (inquiryId: string) => {
+    if (inquiries.length <= 1 || !window.confirm("確定刪除此探究組？其五張欄位紙與內容會一併移除。")) return;
+    patch({ inquiries: inquiries.filter((inquiry) => inquiry.id !== inquiryId) });
+    setActivePage(0);
+  };
+
   const PAGES: Array<{
-    key: "header" | "background" | "construction" | "why" | "what" | "apply" | "logs";
+    key: string;
     title: string;
+    paper: CardPaperRecord;
     render: () => React.ReactNode;
-  }> = [
-    {
-      key: "header",
-      title: "卡頭 · 概覽 · 關係邊 · 診斷",
-      render: () => (
-        <V6Page1HeaderOverview
-          card={formData}
-          font={ff}
-          relations={wsRelations}
-          cardTitles={wsTitles}
-          theme={cardTheme}
-          onNavigatePage={(p) => setActivePage(p)}
-        />
-      ),
-    },
-    {
-      key: "background",
-      title: "背景 · 梯形收窄條",
-      render: () => <V6Page2Background card={formData} font={ff} theme={cardTheme} />,
-    },
-    {
-      key: "construction",
-      title: "構造思路 · 收斂漏斗",
-      render: () => <V6Page3ConstructionThinking card={formData} font={ff} theme={cardTheme} />,
-    },
-    {
-      key: "why",
-      title: "WHY · 不對稱塔木德",
-      render: () => <V6Page4Why card={formData} font={ff} theme={cardTheme} />,
-    },
-    {
-      key: "what",
-      title: "WHAT · 平行多視角",
-      render: () => <V6Page5What card={formData} font={ff} theme={cardTheme} />,
-    },
-    {
-      key: "apply",
-      title: "APPLY · CHECK/分支/CAN",
-      render: () => <V6Page6Apply card={formData} font={ff} theme={cardTheme} />,
-    },
-    {
-      key: "logs",
-      title: "過程日誌 · 方格填色",
-      render: () => <V6Page7ProcessLogs card={formData} font={ff} processLogs={wsLogs} theme={cardTheme} />,
-    },
-  ];
+  }> = paperRecords.map((paper, index) => ({
+    key: paper.id,
+    title: `${formatPaperNumber(paper.number)} · ${cardPaperTitle(paper, inquiries)}`,
+    paper,
+    render: () => (
+      <CardPaperV9Page
+        card={formData}
+        paper={paper}
+        pageNumber={`${index + 1}/${paperRecords.length}`}
+        papers={paperRecords}
+        theme={cardTheme}
+        font={ff}
+        relations={wsRelations}
+        cardTitles={wsTitles}
+        processLogs={wsLogs}
+        onNavigatePaper={handleNavigatePaper}
+        onAddInquiry={handleAddInquiry}
+        onRemoveInquiry={handleRemoveInquiry}
+      />
+    ),
+  }));
 
   // ============ 共用頂欄 ============
   const Toolbar = (
@@ -633,7 +641,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             <button
               onClick={() => { setPageMode("paged"); setActivePage(0); }}
               className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded text-xs font-medium transition-all ${pageMode === "paged" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-              title="分頁：7 頁方格紙指南"
+              title="分頁：依卡頭目錄逐張呈現欄位紙"
             >
               <Files className="w-3.5 h-3.5" /> <span className="hidden sm:inline">分頁 B5/A4</span>
             </button>
@@ -765,7 +773,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
   // ============ 紙上模式（WYSIWYG 編輯或預覽，單一元件樹） ============
   if (mode === "paper-edit" || mode === "paper-preview") {
     const gridStyle = getGridPaperStyle(cardTheme);
-    const activeSectionKey = PAGES[activePage]?.key || "header";
+    const activePageIndex = Math.min(Math.max(activePage, 0), Math.max(0, PAGES.length - 1));
+    const activePaper = PAGES[activePageIndex];
     const isEditable = mode === "paper-edit";
 
     return (
@@ -810,32 +819,35 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             {pageMode === "paged" && (
               <div className="px-2 sm:px-4 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2 overflow-x-auto no-scrollbar" style={{ fontFamily: UI }}>
                 <button
-                  onClick={() => setActivePage(Math.max(0, activePage - 1))}
-                  disabled={activePage === 0}
+                  onClick={() => setActivePage(Math.max(0, activePageIndex - 1))}
+                  disabled={activePageIndex === 0}
                   className="p-1 rounded hover:bg-slate-200 text-slate-500 disabled:opacity-30 flex-shrink-0"
+                  aria-label="上一張紙"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <div className="flex items-center gap-1.5 mx-auto">
-                  {PAGES.map((p, i) => (
+                  {PAGES.map((page, index) => (
                     <button
-                      key={i}
-                      onClick={() => setActivePage(i)}
+                      key={page.key}
+                      onClick={() => setActivePage(index)}
+                      title={page.title}
                       className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all whitespace-nowrap ${
-                        activePage === i
+                        activePageIndex === index
                           ? "bg-slate-900 text-white shadow-xs"
                           : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
                       }`}
                     >
-                      <span className="hidden sm:inline">P{i + 1} · {p.title.split(" · ")[0]}</span>
-                      <span className="sm:hidden">P{i + 1}</span>
+                      <span className="hidden sm:inline">P{index + 1} · {page.title.split(" · ").slice(1).join(" · ")}</span>
+                      <span className="sm:hidden">P{index + 1}</span>
                     </button>
                   ))}
                 </div>
                 <button
-                  onClick={() => setActivePage(Math.min(PAGES.length - 1, activePage + 1))}
-                  disabled={activePage === PAGES.length - 1}
+                  onClick={() => setActivePage(Math.min(PAGES.length - 1, activePageIndex + 1))}
+                  disabled={activePageIndex >= PAGES.length - 1}
                   className="p-1 rounded hover:bg-slate-200 text-slate-500 disabled:opacity-30 flex-shrink-0"
+                  aria-label="下一張紙"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -845,74 +857,42 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
             {/* 紙張渲染區 */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-6 bg-slate-200/60">
               {pageMode === "single" ? (
-                // —— 一頁式：連續長紙，附帶左側導軌里程尺 ——
-                <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
-                  <div className="sticky top-4 hidden sm:block">
-                    <MilestoneRuler
-                      activeKey="header"
-                      theme={cardTheme}
-                      onSelectSection={(sec) => {
-                        const el = document.getElementById(`section-${sec}`);
-                        if (el) el.scrollIntoView({ behavior: "smooth" });
-                      }}
-                    />
-                  </div>
+                // —— 一頁式：依 v9 紙目錄連續呈現所有欄位紙 ——
+                <div className="flex justify-center items-start max-w-[880px] mx-auto">
                   <div
-                    className="flex-1 w-full max-w-[794px] shadow-xl rounded-sm px-4 py-6 sm:px-12 sm:py-10 transition-all border"
-                    style={{
-                      ...gridStyle,
-                      fontFamily: ff,
-                      borderColor: cardTheme.borderColor,
-                    }}
+                    className={`flex-1 w-full max-w-[794px] shadow-xl rounded-sm px-4 py-6 sm:px-12 sm:py-10 transition-all border ${cardTheme.paperBg.toLowerCase() === "#080808" ? "paper-theme-black-gold" : ""}`}
+                    style={{ ...gridStyle, fontFamily: ff, borderColor: cardTheme.borderColor }}
                   >
-                    <V6ContinuousPaper
-                      card={formData}
-                      font={ff}
-                      relations={wsRelations}
-                      cardTitles={wsTitles}
-                      processLogs={wsLogs}
-                      theme={cardTheme}
-                      onNavigateSection={(p) => {
-                        setPageMode("paged");
-                        setActivePage(p);
-                      }}
-                    />
+                    <div className="space-y-12">
+                      {PAGES.map((page, index) => (
+                        <section
+                          key={page.key}
+                          id={`paper-${page.paper.id}`}
+                          className="scroll-mt-6 pt-6 first:pt-0 border-t-2 first:border-t-0 border-dashed"
+                          style={{ borderColor: cardTheme.borderColor }}
+                        >
+                          <div className="mb-2 text-[9px] font-mono font-bold" style={{ color: cardTheme.mutedTextColor }}>
+                            {formatPaperNumber(index + 1)} · {page.title.split(" · ").slice(1).join(" · ")}
+                          </div>
+                          {page.render()}
+                        </section>
+                      ))}
+                    </div>
                     <div className="text-center text-[10px] pt-4 mt-8 border-t" style={{ borderColor: cardTheme.borderColor, color: cardTheme.mutedTextColor, fontFamily: UI }}>
-                      一頁式 · 全部內容連續方格排版
+                      一頁式 · 全部欄位紙連續呈現
                     </div>
                   </div>
                 </div>
               ) : (
-                // —— 分頁：B5/A4 紙張（7 頁完整指南），附帶左側貫穿里程尺 ——
-                <div className="flex justify-center items-start gap-1 sm:gap-3 max-w-[880px] mx-auto">
-                  <div className="sticky top-4 hidden sm:block">
-                    <MilestoneRuler
-                      activeKey={activeSectionKey}
-                      theme={cardTheme}
-                      onSelectSection={(sec) => {
-                        const idxMap: Record<string, number> = {
-                          background: 1,
-                          construction: 2,
-                          why: 3,
-                          what: 4,
-                          apply: 5,
-                        };
-                        if (idxMap[sec] !== undefined) setActivePage(idxMap[sec]);
-                      }}
-                    />
-                  </div>
-
+                // —— 分頁：每張欄位紙各自呈現，可由卡頭目錄跳轉 ——
+                <div className="flex justify-center items-start max-w-[880px] mx-auto">
                   <div
-                    id={`v6-page-${activePage}`}
-                    className="w-full max-w-[794px] min-h-[820px] sm:min-h-[960px] shadow-xl rounded-sm px-4 py-5 sm:px-12 sm:py-8 flex flex-col justify-between transition-all border"
-                    style={{
-                      ...gridStyle,
-                      fontFamily: ff,
-                      borderColor: cardTheme.borderColor,
-                    }}
+                    id={activePaper ? `paper-${activePaper.paper.id}` : undefined}
+                    className={`w-full max-w-[794px] min-h-[820px] sm:min-h-[960px] shadow-xl rounded-sm px-4 py-5 sm:px-12 sm:py-8 flex flex-col justify-between transition-all border ${cardTheme.paperBg.toLowerCase() === "#080808" ? "paper-theme-black-gold" : ""}`}
+                    style={{ ...gridStyle, fontFamily: ff, borderColor: cardTheme.borderColor }}
                   >
                     <div className="flex-1">
-                      {PAGES[activePage].render()}
+                      {activePaper?.render()}
                     </div>
                   </div>
                 </div>
@@ -926,9 +906,10 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
 
   // ============ 進階表單模式 ============
   const TABS = [
-    { key: "basic", label: "基本 · 背景 · 判型" },
+    { key: "basic", label: "基本 · v8 舊欄位備援" },
+    { key: "inquiries", label: "探究組（v9）" },
     { key: "what", label: "WHAT" },
-    { key: "why", label: "WHY" },
+    { key: "why", label: "WHY · v8 備援" },
     { key: "how", label: "HOW（CHECK/分支/CAN）" },
     { key: "origin", label: "ORIGIN" },
     { key: "epistemology", label: "認識論 ⊢" },
@@ -948,6 +929,10 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
       <div className="modal-frame bg-white sm:rounded-xl shadow-2xl w-full h-full sm:h-auto sm:max-w-4xl sm:max-h-[94vh] flex flex-col overflow-hidden safe-top safe-bottom">
         {Toolbar}
 
+        <div className="mx-3 mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-900">
+          v9 正式欄位請在「探究組（v9）」與紙上編輯模式維護；基本／WHY 頁籤中的舊欄位只為相容與保留資料。探究紙組重複及附錄 D.5 第二組其他事項仍待確認。
+        </div>
+
         <div className="flex border-b border-slate-200 bg-slate-50 text-xs px-3 overflow-x-auto no-scrollbar" style={{ fontFamily: UI }}>
           {TABS.map((t) => (
             <button
@@ -965,7 +950,38 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 text-xs text-slate-800" style={{ fontFamily: UI }}>
-          {/* ===== 基本 / 背景 / 判型 ===== */}
+          {activeTab === "inquiries" && (
+            <CardEditContext.Provider value={{
+              editable: true,
+              patch,
+              card: formData,
+              resolveTextFieldPath,
+              remoteTextPresence: remoteEditingPresence,
+            }}>
+              <div className="space-y-4">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-950">
+                  <div className="font-bold">探究組：同層、可重複的暫行編輯介面</div>
+                  <p className="mt-1">每組由情境、交替相連的思路／推演、選填整理、回收、輸出欄位紙組成。重複方式與附錄 D.5 第二組其他未決事項仍待確認，這裡不視為最終定案。</p>
+                  <button
+                    type="button"
+                    onClick={handleAddInquiry}
+                    className="mt-2 inline-flex items-center gap-1 rounded border border-amber-400 bg-white px-2 py-1 font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    <Plus className="h-3 w-3" /> 新增探究組（暫行）
+                  </button>
+                </div>
+                <div className="space-y-8">
+                  {PAGES.filter((page) => page.paper.field.startsWith("inquiry-")).map((page) => (
+                    <section key={page.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:p-4">
+                      {page.render()}
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </CardEditContext.Provider>
+          )}
+
+          {/* ===== 基本 / 背景 / 判型（v8 相容欄位備援） ===== */}
           {activeTab === "basic" && (
             <div className="space-y-4">
               {/* v5：四格省略聲明——省略本身是需要交代的判斷，不能悄悄跳過（WHEN 已併入 HOW，不再是獨立格） */}
