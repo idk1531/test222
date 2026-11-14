@@ -1,4 +1,4 @@
-// v8.0 書房驗證腳本（npx tsx scripts/check-study.ts）
+// 書房與工作區遷移驗證腳本（npx tsx scripts/check-study.ts）
 import assert from "node:assert/strict";
 // 檢查：①卡↔書 1:1 ②書本排序/分類不影響畫布座標 ③刪分類書回未分類 ④舊檔遷移補齊。
 // 不動審查引擎（inspect.ts）與種子資料（seedData.ts）；與 scripts/audit.ts 分開。
@@ -262,7 +262,13 @@ console.log("④ 遷移補齊（模擬 v7.1 匯入）");
   const legacy = {
     workspace: { id: "w-test", name: "測試" },
     cards: [
-      { id: "legacy-a", title: "舊卡A", reasoningShape: "A" },
+      {
+        id: "legacy-a", title: "舊卡A", reasoningShape: "A",
+        backgroundDescription: "舊版背景脈絡",
+        backgroundData: { situation: "舊版情境", preciseQuestion: "舊版問題" },
+        constructionThinking: "舊版構造思路",
+        whyData: { confidenceBefore: 2, closedBookDraft: "舊版閉卷草稿", fullReasoning: "舊版 WHY 推導", confidenceAfter: 4 },
+      },
       { id: "legacy-b", title: "舊卡B", reasoningShape: "B" },
     ],
     canvasObjects: [],
@@ -278,6 +284,18 @@ console.log("④ 遷移補齊（模擬 v7.1 匯入）");
   check("舊檔無 place 的語意保持缺省", migrated.studyBooks.every((b: any) => !Object.prototype.hasOwnProperty.call(b, "place")));
   check("遷移後補上保留分類", migrated.studyCategories.some((c: any) => c.id === UNCATEGORIZED_ID));
   check("舊卡內容不掉", migrated.cards.length === 2 && migrated.cards[0].title === "舊卡A");
+  const migratedPaperCard = migrated.cards[0];
+  check("v9 建立欄位紙模型與目錄", migratedPaperCard.paperModelVersion === 9 && migratedPaperCard.papers.length === 11);
+  check("舊背景／構造／WHY 複製到首個探究且保留原欄位",
+    migratedPaperCard.inquiries[0].situation.includes("舊版情境") &&
+    migratedPaperCard.inquiries[0].steps[0].content.includes("舊版構造思路") &&
+    migratedPaperCard.inquiries[0].steps[1].content.includes("舊版 WHY 推導") &&
+    migratedPaperCard.backgroundDescription === "舊版背景脈絡" &&
+    migratedPaperCard.whyData.fullReasoning === "舊版 WHY 推導");
+  check("探究推演步驟交替且後段有承接欄位",
+    migratedPaperCard.inquiries[0].steps[0].kind === "thinking" &&
+    migratedPaperCard.inquiries[0].steps[1].kind === "derivation" &&
+    typeof migratedPaperCard.inquiries[0].steps[1].connectionToPrevious === "string");
   check("shelfRows/視角欄位存在", typeof migrated.studyLayout.shelfRows === "number" && typeof migrated.studyLayout.camera.yaw === "number");
   check("舊相機自動補走動位置與視高", migrated.studyLayout.camera.x === DEFAULT_CAMERA.x && migrated.studyLayout.camera.z === DEFAULT_CAMERA.z && migrated.studyLayout.camera.height === DEFAULT_CAMERA.height);
   // 回歸：沒有 rawCam 時 yaw/pitch 也必須沿用 DEFAULT_CAMERA（曾誤用 0，導致永遠面向北牆）。
@@ -298,7 +316,7 @@ console.log("④ 遷移補齊（模擬 v7.1 匯入）");
 {
   const payload = getExportPayload();
   check("匯出含 studyCategories/studyBooks/studyLayout", !!payload.state.studyCategories && !!payload.state.studyBooks && !!payload.state.studyLayout);
-  check("schemaVersion = 8", payload.schemaVersion === 8);
+  check("schemaVersion = 9", payload.schemaVersion === 9);
 }
 
 console.log("-".repeat(50));

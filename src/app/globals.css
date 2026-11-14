@@ -1,6 +1,7 @@
 /* Google Fonts: Handwriting/Script Styles */
 @import url("https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Indie+Flower&family=Fredoka+One&family=Playwrite+GB+S:ital@0;1&family=Caveat+Brush&family=Comfortaa:wght@400;700&family=Satisfy&family=Pacifico&family=Sacramento&family=Dancing+Script:wght@400;700&family=Quicksand:wght@400;700&family=Varela+Round&family=Nunito:wght@400;700&display=swap");
 @import "tailwindcss";
+@import "./card-paper-themes.css";
 
 @font-face {
   font-family: "SciNotes Noto Sans TC";

@@ -145,6 +145,19 @@ export const THEME_PRESETS: Record<string, CardPaperTheme> = {
     showGrid: true,
     gridSize: 20,
   },
+  black_gold: {
+    name: "曜黑金箔方格",
+    paperBg: "#080808",
+    textColor: "#F2D98B",
+    mutedTextColor: "#C5A953",
+    headingColor: "#FFE6A1",
+    borderColor: "#8E722B",
+    boxBg: "rgba(24, 20, 10, 0.9)",
+    accentColor: "#D4AF37",
+    gridLineColor: "rgba(212, 175, 55, 0.19)",
+    showGrid: true,
+    gridSize: 20,
+  },
 };
 
 export const DEFAULT_PAPER_THEME: CardPaperTheme = THEME_PRESETS.classic_grid;
@@ -305,7 +318,7 @@ export function V6PageFooter({
         opacity: 0.85,
       }}
     >
-      理科筆記卡片模板 v6 · A4/B5方格紙 · {note}
+      理科筆記紙面 · v9 欄位紙模型 · A4/B5方格紙 · {note}
     </div>
   );
 }
@@ -2279,10 +2292,12 @@ export function V6Page5What({
   card,
   font,
   theme = DEFAULT_PAPER_THEME,
+  pageNumber = "5/7",
 }: {
   card: CardData;
   font: string;
   theme?: CardPaperTheme;
+  pageNumber?: string;
 }) {
   const ed = useCardEdit();
   const whatData = card.whatData || { summary: "", perspectives: [], distinctionFromHow: "" };
@@ -2299,8 +2314,8 @@ export function V6Page5What({
     <div className="flex flex-col h-full space-y-4">
       <V6PageHeaderBox
         title="WHAT"
-        subtitle="緊接 WHY 之後：讀法（問題×讀法表＋橋）· 多視角重講（至少三個＋借鏡視角）· 六個方向延伸（含「造」與功能判準）"
-        pageNumber="5/7"
+        subtitle="知識的內涵與取用：讀法（問題×讀法表＋橋）· 多視角重講（至少三個＋借鏡視角）· 六個方向延伸（含「造」與功能判準）"
+        pageNumber={pageNumber}
         theme={theme}
       />
 
@@ -3264,10 +3279,12 @@ export function V6Page6Apply({
   card,
   font,
   theme = DEFAULT_PAPER_THEME,
+  pageNumber = "6/7",
 }: {
   card: CardData;
   font: string;
   theme?: CardPaperTheme;
+  pageNumber?: string;
 }) {
   const ed = useCardEdit();
   const howData = card.howData || { checks: [], branches: [], can: [], status: "compiled" as const };
@@ -3280,7 +3297,7 @@ export function V6Page6Apply({
       <V6PageHeaderBox
         title="APPLY"
         subtitle="能不能用 / 怎麼用 / 用了能幹嘛——每條內容句尾都要掛來源標籤 [源:＿＿＿]（含 [源:WHAT-讀法n]）"
-        pageNumber="6/7"
+        pageNumber={pageNumber}
         theme={theme}
       />
 
@@ -3895,11 +3912,13 @@ export function V6Page7ProcessLogs({
   font,
   processLogs,
   theme = DEFAULT_PAPER_THEME,
+  pageNumber = "7/7",
 }: {
   card: CardData;
   font: string;
   processLogs?: Array<any>;
   theme?: CardPaperTheme;
+  pageNumber?: string;
 }) {
   const ed = useCardEdit();
   const logs = (processLogs || []).filter((l) => !l.cardId || l.cardId === card.id);
@@ -3909,7 +3928,7 @@ export function V6Page7ProcessLogs({
       <V6PageHeaderBox
         title="過程日誌"
         subtitle="只增不改，帶時間戳——方格紙最原生的用法：發生一次就塗滿一格"
-        pageNumber="7/7"
+        pageNumber={pageNumber}
         theme={theme}
       />
 

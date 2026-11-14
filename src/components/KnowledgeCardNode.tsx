@@ -6,6 +6,7 @@ import { Maximize2, Eye, Palette } from "lucide-react";
 import { resolveFont } from "@/lib/fonts";
 import { runFourPointCheckOnCard, STATUS_COMPILED, STATUS_UNCOMPILED } from "@/lib/inspect";
 import { SHAPE_DEFS } from "./ShapeClassifier";
+import type { CardPaperRecord, InquiryGroup } from "@/lib/cardPapers";
 
 /** v7：WHAT·讀法條目（取用知識的方式，以「有沒有某個問題換此讀法就變容易」界定） */
 export interface ReadingItem {
@@ -51,6 +52,10 @@ export interface CardData {
   title: string;
   domain: string;
   granularity: string;
+  /** v9：一個工作區的卡片集合構成知識系統；本卡由欄位紙實例組成。 */
+  paperModelVersion?: 9;
+  inquiries?: InquiryGroup[];
+  papers?: CardPaperRecord[];
   backgroundDescription?: string;
   cardFont?: string;
   pageMode?: "single" | "paged";

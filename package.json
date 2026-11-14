@@ -14,7 +14,8 @@
     "test:secure-room-crypto": "node --test tests/secure-room-crypto.test.mjs",
     "test:collaboration": "node --test tests/collaboration-protocol.test.mjs",
     "test:collaboration-editing": "node --test tests/collaboration-editing.test.mjs",
-    "test:shared-content": "node --test tests/shared-content.test.mjs"
+    "test:shared-content": "node --test tests/shared-content.test.mjs",
+    "test:card-papers": "node --test tests/card-papers.test.mjs"
   },
   "dependencies": {
     "@types/katex": "^0.16.8",
