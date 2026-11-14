@@ -12,6 +12,7 @@ import {
   CardThemeCustomizer,
   CardPaperTheme,
   DEFAULT_PAPER_THEME,
+  THEME_PRESETS,
   getGridPaperStyle,
   FourPointCheckPanel,
 } from "./CardPaperSections";
@@ -648,28 +649,41 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({
           </div>
         )}
 
-        {/* 主題與配色自訂按鈕 */}
+        {/* 一鍵套用黑金紙面；旁邊仍保留完整主題選單 */}
         {mode !== "form" && (
-          <div className="relative">
+          <>
             <button
-              onClick={() => setShowThemeMenu(!showThemeMenu)}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-xs transition-colors"
-              title="卡片預覽主題與配色自由自訂"
-              style={{ fontFamily: UI }}
+              type="button"
+              onClick={() => handleUpdateTheme(THEME_PRESETS.black_gold)}
+              className="flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-bold transition-opacity hover:opacity-80"
+              style={{ backgroundColor: "#080808", color: "#F2D98B", borderColor: "#8E722B", fontFamily: UI }}
+              title="立即套用黑底金字欄位紙主題"
+              aria-label="立即套用黑底金字欄位紙主題"
             >
-              <Palette className="w-3.5 h-3.5 text-amber-600" />
-              <span className="hidden sm:inline">主題配色</span>
+              <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: "#080808", borderColor: "#8E722B" }} />
+              <span>黑金紙面</span>
             </button>
-            {showThemeMenu && (
-              <div className="absolute top-full right-0 mt-1 z-50">
-                <CardThemeCustomizer
-                  currentTheme={cardTheme}
-                  onUpdateTheme={handleUpdateTheme}
-                  onClose={() => setShowThemeMenu(false)}
-                />
-              </div>
-            )}
-          </div>
+            <div className="relative">
+              <button
+                onClick={() => setShowThemeMenu(!showThemeMenu)}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-xs transition-colors"
+                title="卡片預覽主題與配色自由自訂"
+                style={{ fontFamily: UI }}
+              >
+                <Palette className="w-3.5 h-3.5 text-amber-600" />
+                <span className="hidden sm:inline">其他配色</span>
+              </button>
+              {showThemeMenu && (
+                <div className="absolute top-full right-0 mt-1 z-50">
+                  <CardThemeCustomizer
+                    currentTheme={cardTheme}
+                    onUpdateTheme={handleUpdateTheme}
+                    onClose={() => setShowThemeMenu(false)}
+                  />
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* 復原初始按鈕 */}

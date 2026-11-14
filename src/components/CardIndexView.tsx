@@ -55,10 +55,10 @@ export const CardIndexView: React.FC<CardIndexViewProps> = ({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-blue-600 flex-shrink-0" />
-            <h3 className="font-bold text-slate-900 text-sm truncate">理科知識卡片總庫 ({cards.length} 張)</h3>
+            <h3 className="font-bold text-slate-900 text-sm truncate">知識系統 · 卡片總庫 ({cards.length} 張)</h3>
           </div>
-          <span className="hidden sm:inline text-[11px] text-slate-500">
-            每張卡片嚴格保持 WHAT / WHY / HOW / ORIGIN 四格與認知診斷（v5：WHEN 併入 HOW）
+          <span className="block text-[11px] text-slate-600 mt-1">
+            本工作區的卡片集合就是知識系統；開啟任一張卡即可查看 v9 卡頭目錄與欄位紙。
           </span>
         </div>
         <button
@@ -118,6 +118,9 @@ export const CardIndexView: React.FC<CardIndexViewProps> = ({
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
                     {card.granularity}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                    v9 · {card.papers?.length || 11} 張紙
                   </span>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 font-mono">
                     {card.reasoningShape === "COMPOSITE"
@@ -202,10 +205,12 @@ export const CardIndexView: React.FC<CardIndexViewProps> = ({
                 </button>
                 <button
                   onClick={() => onOpenCardDetail(card)}
-                  className="p-1 text-slate-500 hover:text-slate-800"
-                  title="詳細配置"
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-blue-700 hover:bg-blue-50 font-semibold"
+                  title="開啟 v9 欄位紙編輯器與卡頭目錄"
+                  aria-label={`開啟 ${card.title} 的 v9 欄位紙編輯器`}
                 >
                   <Maximize2 className="w-4 h-4" />
+                  <span>欄位紙</span>
                 </button>
                 <button
                   onClick={() => onDeleteCard(card.id)}
