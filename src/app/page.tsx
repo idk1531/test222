@@ -32,7 +32,7 @@ import { FontSelector } from "@/components/FontSelector";
 import { ManualV7Modal } from "@/components/ManualV7Modal";
 import { AppThemeCustomizer } from "@/components/AppThemeCustomizer";
 import { StudyRoomView } from "@/components/StudyRoomView";
-import { useAppTheme } from "@/lib/appTheme";
+import { APP_THEME_PRESETS, useAppTheme } from "@/lib/appTheme";
 import {
   Sparkles,
   Search,
@@ -433,7 +433,7 @@ export default function WorkbenchPage() {
     { key: "study", label: "書房", icon: Library },
     { key: "canvas", label: "畫布", icon: Grid },
     { key: "network", label: "知識網", icon: Share2 },
-    { key: "cards", label: "卡片", icon: BookOpen },
+    { key: "cards", label: "知識系統", icon: BookOpen },
     { key: "logs", label: "日誌", icon: History },
     { key: "blindspots", label: "盲區", icon: AlertTriangle },
     { key: "motifs", label: "母題", icon: Layers },
@@ -536,12 +536,23 @@ export default function WorkbenchPage() {
           >
             <GraduationCap className="w-4 h-4" />
           </button>
-          {/* 配色自訂 */}
+          {/* 一鍵黑金主題 + 其他配色 */}
+          <button
+            onClick={() => setAppTheme(APP_THEME_PRESETS.blackGold)}
+            className="hidden lg:flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-bold transition-opacity hover:opacity-80"
+            style={{ backgroundColor: "#080808", color: "#F2D98B", borderColor: "#8E722B" }}
+            title="立即套用曜黑金字介面配色"
+            aria-label="立即套用曜黑金字介面配色"
+          >
+            <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: "#080808", borderColor: "#8E722B" }} />
+            <span>曜黑金</span>
+          </button>
           <button
             onClick={() => setShowAppThemeCustomizer(true)}
             className="hidden sm:flex touch-target items-center justify-center rounded-lg transition-colors hover:opacity-80"
             style={{ color: appTheme.headerMuted }}
-            title="頂部工具列配色設定"
+            title="頂部工具列配色設定（含曜黑金字）"
+            aria-label="開啟頂部工具列配色設定"
           >
             <Palette className="w-4 h-4" />
           </button>
@@ -705,11 +716,18 @@ export default function WorkbenchPage() {
                 <span>使用教學</span>
               </button>
               <button
+                onClick={() => { setAppTheme(APP_THEME_PRESETS.blackGold); setShowMobileMenu(false); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-bold text-amber-300 bg-stone-950 hover:bg-stone-900 mb-0.5"
+              >
+                <Palette className="w-4 h-4 text-amber-400" />
+                <span>立即啟用曜黑金字</span>
+              </button>
+              <button
                 onClick={() => { setShowAppThemeCustomizer(true); setShowMobileMenu(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 mb-0.5"
               >
                 <Palette className="w-4 h-4 text-purple-600" />
-                <span>工具列配色設定</span>
+                <span>其他工具列配色</span>
               </button>
               <button
                 onClick={() => { setShowBackgroundCustomizer(true); setShowMobileMenu(false); }}
